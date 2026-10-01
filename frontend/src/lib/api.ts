@@ -20,6 +20,23 @@ export function setToken(token: string | null): void {
   }
 }
 
+function formatDetail(data: any, fallback: string): string {
+  const d = data?.detail;
+  if (!d) return fallback || "request_failed";
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) {
+    // FastAPI/Pydantic validation errors: [{loc, msg, ...}]
+    return d
+      .map((e: any) => {
+        const field = Array.isArray(e?.loc) ? e.loc[e.loc.length - 1] : "";
+        return field ? `${field}: ${e?.msg ?? "invalid"}` : (e?.msg ?? "invalid");
+      })
+      .join("; ");
+  }
+  if (typeof d === "object") return d.msg ?? JSON.stringify(d);
+  return String(d);
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getToken();
@@ -40,9 +57,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const data = text ? JSON.parse(text) : null;
 
   if (!res.ok) {
-    const detail =
-      (data && (data.detail?.toString?.() ?? data.detail)) || res.statusText || "request_failed";
-    throw new ApiError(res.status, String(detail));
+    throw new ApiError(res.status, formatDetail(data, res.statusText));
   }
   return data as T;
 }
@@ -60,8 +75,7 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    const detail = (data && (data.detail?.toString?.() ?? data.detail)) || res.statusText;
-    throw new ApiError(res.status, String(detail));
+    throw new ApiError(res.status, formatDetail(data, res.statusText));
   }
   return data as T;
 }

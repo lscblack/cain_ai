@@ -183,11 +183,11 @@ export function Sources() {
         <span className="kai-metadata uppercase">Apply to all</span>
         <label className="kai-metadata flex items-center gap-1">
           depth
-          <input type="number" min={0} max={5} value={allDepth} onChange={(e) => setAllDepth(+e.target.value)} className="w-16 rounded border border-line bg-panel-2 px-2 py-1 text-sm" />
+          <input type="number" min={0} max={20} value={allDepth} onChange={(e) => setAllDepth(Math.max(0, Math.min(20, +e.target.value)))} className="w-16 rounded border border-line bg-panel-2 px-2 py-1 text-sm" />
         </label>
         <label className="kai-metadata flex items-center gap-1">
           max pages
-          <input type="number" min={1} max={5000} value={allPages} onChange={(e) => setAllPages(+e.target.value)} className="w-20 rounded border border-line bg-panel-2 px-2 py-1 text-sm" />
+          <input type="number" min={1} max={1000000} value={allPages} onChange={(e) => setAllPages(Math.max(1, Math.min(1000000, +e.target.value)))} className="w-24 rounded border border-line bg-panel-2 px-2 py-1 text-sm" />
         </label>
         <label className="kai-metadata flex items-center gap-1">
           schedule
@@ -204,8 +204,8 @@ export function Sources() {
       <form onSubmit={onCreate} className="mb-6 grid gap-2 rounded-lg border border-line bg-panel p-4 md:grid-cols-[1fr_1.5fr_auto_auto_auto]">
         <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Name" className="rounded-md border border-line bg-panel-2 px-3 py-2 text-sm" />
         <input value={url} onChange={(e) => setUrl(e.target.value)} required placeholder="https://example.com/" className="rounded-md border border-line bg-panel-2 px-3 py-2 text-sm" />
-        <input type="number" min={0} max={5} value={depth} onChange={(e) => setDepth(+e.target.value)} title="depth" className="w-20 rounded-md border border-line bg-panel-2 px-2 py-2 text-sm" />
-        <input type="number" min={1} max={5000} value={maxPages} onChange={(e) => setMaxPages(+e.target.value)} title="max pages" className="w-24 rounded-md border border-line bg-panel-2 px-2 py-2 text-sm" />
+        <input type="number" min={0} max={20} value={depth} onChange={(e) => setDepth(+e.target.value)} title="depth" className="w-20 rounded-md border border-line bg-panel-2 px-2 py-2 text-sm" />
+        <input type="number" min={1} max={1000000} value={maxPages} onChange={(e) => setMaxPages(+e.target.value)} title="max pages" className="w-24 rounded-md border border-line bg-panel-2 px-2 py-2 text-sm" />
         <button className="rounded-md border border-line bg-panel-2 px-4 py-2 text-sm hover:bg-base">Add source</button>
       </form>
       {error && <div className="mb-4 text-sm" style={{ color: "var(--kai-accent)" }}>{error}</div>}
@@ -274,8 +274,8 @@ export function Sources() {
               {editId === s.id && (
                 <div className="mt-3 grid gap-2 rounded-md border border-line bg-panel-2 p-3 md:grid-cols-[1.5fr_auto_auto_auto_auto_auto]">
                   <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="rounded border border-line bg-panel px-2 py-1 text-sm" />
-                  <input type="number" min={0} max={5} value={draft.max_depth} onChange={(e) => setDraft({ ...draft, max_depth: +e.target.value })} title="depth" className="w-16 rounded border border-line bg-panel px-2 py-1 text-sm" />
-                  <input type="number" min={1} max={5000} value={draft.max_pages} onChange={(e) => setDraft({ ...draft, max_pages: +e.target.value })} title="max pages" className="w-20 rounded border border-line bg-panel px-2 py-1 text-sm" />
+                  <input type="number" min={0} max={20} value={draft.max_depth} onChange={(e) => setDraft({ ...draft, max_depth: +e.target.value })} title="depth" className="w-16 rounded border border-line bg-panel px-2 py-1 text-sm" />
+                  <input type="number" min={1} max={1000000} value={draft.max_pages} onChange={(e) => setDraft({ ...draft, max_pages: +e.target.value })} title="max pages" className="w-20 rounded border border-line bg-panel px-2 py-1 text-sm" />
                   <select value={draft.schedule} onChange={(e) => setDraft({ ...draft, schedule: e.target.value })} className="rounded border border-line bg-panel px-2 py-1 text-sm">
                     {["manual", "hourly", "6h", "daily", "weekly"].map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>

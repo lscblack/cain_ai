@@ -14,8 +14,8 @@ class SourceCreate(BaseModel):
     base_url: str
     allowed_paths: list[str] = Field(default_factory=list)
     excluded_paths: list[str] = Field(default_factory=list)
-    max_depth: int = Field(default=1, ge=0, le=5)
-    max_pages: int = Field(default=50, ge=1, le=5000)
+    max_depth: int = Field(default=1, ge=0, le=20)
+    max_pages: int = Field(default=50, ge=1, le=1000000)
     schedule: str = Field(default="manual", pattern="^(manual|hourly|6h|daily|weekly)$")
 
     @field_validator("base_url")
@@ -38,8 +38,8 @@ class SourceUpdate(BaseModel):
     base_url: str | None = None
     allowed_paths: list[str] | None = None
     excluded_paths: list[str] | None = None
-    max_depth: int | None = Field(default=None, ge=0, le=5)
-    max_pages: int | None = Field(default=None, ge=1, le=5000)
+    max_depth: int | None = Field(default=None, ge=0, le=20)
+    max_pages: int | None = Field(default=None, ge=1, le=1000000)
     schedule: str | None = Field(default=None, pattern="^(manual|hourly|6h|daily|weekly)$")
     status: str | None = Field(default=None, pattern="^(idle|paused|error)$")
     category: str | None = None
@@ -83,16 +83,16 @@ class BulkSourceIn(BaseModel):
     items: list[SourceCreate] | None = None
     csv: str | None = None
     # defaults applied to CSV rows that omit a field
-    default_max_depth: int = Field(default=1, ge=0, le=5)
-    default_max_pages: int = Field(default=50, ge=1, le=5000)
+    default_max_depth: int = Field(default=1, ge=0, le=20)
+    default_max_pages: int = Field(default=50, ge=1, le=1000000)
     default_schedule: str = Field(default="manual", pattern="^(manual|hourly|6h|daily|weekly)$")
 
 
 class BulkUpdateIn(BaseModel):
     """Apply values to many sources at once. Fields left None are unchanged.
     Optional filters narrow which sources are affected."""
-    max_depth: int | None = Field(default=None, ge=0, le=5)
-    max_pages: int | None = Field(default=None, ge=1, le=5000)
+    max_depth: int | None = Field(default=None, ge=0, le=20)
+    max_pages: int | None = Field(default=None, ge=1, le=1000000)
     schedule: str | None = Field(default=None, pattern="^(manual|hourly|6h|daily|weekly)$")
     priority: str | None = Field(default=None, pattern="^(high|medium|low)$")
     # filters (None = all)
