@@ -94,3 +94,18 @@ async def test_seed_defaults(client, auth_headers):
     # re-seed is idempotent (dedup by domain)
     r2 = await client.post("/sources/seed-defaults", headers=auth_headers)
     assert r2.json()["created"] == 0
+
+
+async def test_bulk_update_all(client, auth_headers):
+    await client.post("/sources", json={"name": "A", "base_url": "https://8.8.8.8/"}, headers=auth_headers)
+    await client.post("/sources", json={"name": "B", "base_url": "https://1.1.1.1/"}, headers=auth_headers)
+    r = await client.post("/sources/bulk-update", json={"max_depth": 3, "max_pages": 200, "schedule": "daily"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["updated"] == 2
+    listing = (await client.get("/sources", headers=auth_headers)).json()
+    assert all(s["max_depth"] == 3 and s["max_pages"] == 200 and s["schedule"] == "daily" for s in listing)
+
+
+async def test_bulk_update_requires_field(client, auth_headers):
+    r = await client.post("/sources/bulk-update", json={}, headers=auth_headers)
+    assert r.status_code == 400

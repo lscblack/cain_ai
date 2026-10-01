@@ -39,6 +39,23 @@ export function Sources() {
   const [showBulk, setShowBulk] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, any>>({});
+  const [allDepth, setAllDepth] = useState(1);
+  const [allPages, setAllPages] = useState(50);
+  const [allSchedule, setAllSchedule] = useState("");
+  const [applyMsg, setApplyMsg] = useState<string | null>(null);
+
+  async function applyToAll() {
+    const payload: Record<string, any> = { max_depth: allDepth, max_pages: allPages };
+    if (allSchedule) payload.schedule = allSchedule;
+    if (!confirm(`Apply depth=${allDepth}, max pages=${allPages}${allSchedule ? `, schedule=${allSchedule}` : ""} to ALL sources?`)) return;
+    try {
+      const r = await api.post<{ updated: number }>("/sources/bulk-update", payload);
+      setApplyMsg(`Updated ${r.updated} source(s).`);
+      await load();
+    } catch {
+      setApplyMsg("Bulk update failed.");
+    }
+  }
 
   async function onBulk() {
     if (!bulkText.trim()) return;
@@ -148,6 +165,29 @@ export function Sources() {
         </button>
       </div>
       <div className="mb-3 kai-metadata">{sources.length} source(s)</div>
+
+      {/* Apply crawl settings to ALL sources at once */}
+      <div className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-3">
+        <span className="kai-metadata uppercase">Apply to all</span>
+        <label className="kai-metadata flex items-center gap-1">
+          depth
+          <input type="number" min={0} max={5} value={allDepth} onChange={(e) => setAllDepth(+e.target.value)} className="w-16 rounded border border-line bg-panel-2 px-2 py-1 text-sm" />
+        </label>
+        <label className="kai-metadata flex items-center gap-1">
+          max pages
+          <input type="number" min={1} max={5000} value={allPages} onChange={(e) => setAllPages(+e.target.value)} className="w-20 rounded border border-line bg-panel-2 px-2 py-1 text-sm" />
+        </label>
+        <label className="kai-metadata flex items-center gap-1">
+          schedule
+          <select value={allSchedule} onChange={(e) => setAllSchedule(e.target.value)} className="rounded border border-line bg-panel-2 px-2 py-1 text-sm">
+            {["", "manual", "hourly", "6h", "daily", "weekly"].map((o) => <option key={o} value={o}>{o || "unchanged"}</option>)}
+          </select>
+        </label>
+        <button onClick={applyToAll} className="rounded-md border border-line bg-panel-2 px-4 py-1.5 text-sm hover:bg-base">
+          Apply to all {sources.length}
+        </button>
+        {applyMsg && <span className="kai-metadata" style={{ color: "var(--kai-verified)" }}>{applyMsg}</span>}
+      </div>
 
       <form onSubmit={onCreate} className="mb-6 grid gap-2 rounded-lg border border-line bg-panel p-4 md:grid-cols-[1fr_1.5fr_auto_auto_auto]">
         <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Name" className="rounded-md border border-line bg-panel-2 px-3 py-2 text-sm" />

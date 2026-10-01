@@ -21,6 +21,7 @@ from app.intelligence.face.service import get_face_engine
 from app.schemas.source import (
     BulkSourceIn,
     BulkSourceResult,
+    BulkUpdateIn,
     SourceCreate,
     SourceOut,
     SourceStats,
@@ -169,6 +170,42 @@ async def update_source(
     await session.flush()
     await session.refresh(src)
     return SourceOut(**src.model_dump())
+
+
+@router.post("/bulk-update")
+async def bulk_update_sources(
+    body: BulkUpdateIn,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Apply max_depth / max_pages / schedule / priority to all sources at once
+    (optionally filtered by category or priority)."""
+    from sqlalchemy import update as sa_update
+
+    fields = {
+        k: v
+        for k, v in {
+            "max_depth": body.max_depth,
+            "max_pages": body.max_pages,
+            "schedule": body.schedule,
+            "priority": body.priority,
+        }.items()
+        if v is not None
+    }
+    if not fields:
+        raise HTTPException(status_code=400, detail="no_fields_to_update")
+
+    stmt = sa_update(Source).values(**fields)
+    if body.filter_category:
+        stmt = stmt.where(Source.category == body.filter_category)
+    if body.filter_priority:
+        stmt = stmt.where(Source.priority == body.filter_priority)
+    result = await session.execute(stmt)
+    await session.flush()
+    await AuditRepository(session).record(
+        "source.bulk_update", actor_id=operator.id, detail={"fields": list(fields), "rows": result.rowcount}
+    )
+    return {"updated": result.rowcount or 0, "fields": fields}
 
 
 @router.post("/seed-defaults")

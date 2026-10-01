@@ -88,6 +88,18 @@ class BulkSourceIn(BaseModel):
     default_schedule: str = Field(default="manual", pattern="^(manual|hourly|6h|daily|weekly)$")
 
 
+class BulkUpdateIn(BaseModel):
+    """Apply values to many sources at once. Fields left None are unchanged.
+    Optional filters narrow which sources are affected."""
+    max_depth: int | None = Field(default=None, ge=0, le=5)
+    max_pages: int | None = Field(default=None, ge=1, le=5000)
+    schedule: str | None = Field(default=None, pattern="^(manual|hourly|6h|daily|weekly)$")
+    priority: str | None = Field(default=None, pattern="^(high|medium|low)$")
+    # filters (None = all)
+    filter_category: str | None = None
+    filter_priority: str | None = Field(default=None, pattern="^(high|medium|low)$")
+
+
 class BulkSourceResult(BaseModel):
     created: list[SourceOut]
     errors: list[dict]
