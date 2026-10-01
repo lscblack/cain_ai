@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    analyst, auth, emails, faces, health, investigations, maps, phones, powerup,
-    search, sources, timeline, usernames,
+    analyst, auth, emails, export, faces, health, investigations, maps, phones,
+    powerup, search, sources, timeline, usernames,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -30,6 +30,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        return response
+
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(investigations.router)
@@ -43,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(analyst.router)
     app.include_router(maps.router)
     app.include_router(timeline.router)
+    app.include_router(export.router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:

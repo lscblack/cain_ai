@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Plus, Sparkles } from "lucide-react";
+import { ArrowLeft, Plus, Sparkles, Download } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { investigationsApi } from "@/lib/investigations";
@@ -96,6 +96,21 @@ export function Investigation() {
     }
   }
 
+  async function exportCase(fmt: "json" | "csv") {
+    const base = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+    const token = localStorage.getItem("kai.token");
+    const resp = await fetch(`${base}/investigations/${id}/export?format=${fmt}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${detail?.code ?? "case"}.${fmt === "json" ? "json" : "csv"}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   if (!detail) {
     return <div className="kai-metadata">{error ?? "Loading…"}</div>;
   }
@@ -111,12 +126,20 @@ export function Investigation() {
           <div className="kai-metadata">{detail.code}</div>
           <h1 className="text-lg font-semibold">{detail.name}</h1>
         </div>
-        <span
-          className="kai-metadata uppercase"
-          style={{ color: detail.status === "open" ? "var(--kai-verified)" : "var(--kai-muted)" }}
-        >
-          {detail.status}
-        </span>
+        <div className="flex items-center gap-3">
+          <button onClick={() => exportCase("json")} className="kai-metadata flex items-center gap-1 rounded border border-line px-2 py-1 hover:text-ink">
+            <Download size={12} /> JSON
+          </button>
+          <button onClick={() => exportCase("csv")} className="kai-metadata flex items-center gap-1 rounded border border-line px-2 py-1 hover:text-ink">
+            <Download size={12} /> CSV
+          </button>
+          <span
+            className="kai-metadata uppercase"
+            style={{ color: detail.status === "open" ? "var(--kai-verified)" : "var(--kai-muted)" }}
+          >
+            {detail.status}
+          </span>
+        </div>
       </div>
 
       {error && <div className="mb-4 text-sm" style={{ color: "var(--kai-accent)" }}>{error}</div>}

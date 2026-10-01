@@ -6,9 +6,12 @@ no open registration and no password reset flow in Phase 1 (solo, local).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_operator
+from app.core.ratelimit import check_rate_limit
+from app.core.redis import get_redis
 from app.core.security import create_access_token, hash_password, verify_password
 from app.database.models.user import User
 from app.database.repositories.audit_repo import AuditRepository
@@ -65,7 +68,10 @@ async def login(
     body: LoginIn,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
 ) -> TokenOut:
+    ip = _client_ip(request) or "unknown"
+    await check_rate_limit(redis, f"rl:login:{ip}", limit=10, window_seconds=300)
     users = UserRepository(session)
     audit = AuditRepository(session)
     user = await users.get_by_email(str(body.email).lower())
