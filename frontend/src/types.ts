@@ -97,3 +97,27 @@ export interface SearchResponse {
   entity_matches: EntityNode[];
   evidence_matches: EvidenceItem[];
 }
+
+export interface PhoneAnalysis {
+  input: string;
+  parsed: boolean;
+  valid: boolean;
+  possible: boolean;
+  e164: string | null;
+  international: string | null;
+  national: string | null;
+  country_code: number | null;
+  region: string | null;
+  location: string | null;
+  carrier: string | null;
+  number_type: string;
+  variants: string[];
+  error: string | null;
+}
+
+export interface PhoneIntelligence {
+  analysis: PhoneAnalysis;
+  local_entity_matches: EntityNode[];
+  local_evidence_matches: EvidenceItem[];
+  note: string;
+}
