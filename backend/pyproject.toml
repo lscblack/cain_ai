@@ -1,0 +1,15 @@
+[project]
+name = "kai-backend"
+version = "0.1.0"
+description = "KAI — local-first OSINT intelligence platform (backend)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
