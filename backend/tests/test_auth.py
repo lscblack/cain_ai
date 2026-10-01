@@ -68,3 +68,23 @@ async def test_audit_rows_written(client, db_session):
     assert "operator.register" in actions
     assert "operator.login" in actions
     assert "operator.login_failed" in actions
+
+
+async def test_local_identifier_accepted(client):
+    r = await client.post(
+        "/auth/register", json={"email": "operator@local", "password": "supersecret1"}
+    )
+    assert r.status_code == 201
+    login = await client.post(
+        "/auth/login", json={"email": "operator@local", "password": "supersecret1"}
+    )
+    token = login.json()["access_token"]
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.json()["email"] == "operator@local"
+
+
+async def test_invalid_identifier_rejected(client):
+    r = await client.post(
+        "/auth/register", json={"email": "has space", "password": "supersecret1"}
+    )
+    assert r.status_code == 422

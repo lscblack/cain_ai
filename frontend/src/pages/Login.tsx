@@ -59,9 +59,10 @@ export function Login() {
 
         <form onSubmit={onSubmit} className="space-y-3">
           <input
-            type="email"
+            type="text"
+            autoComplete="username"
             required
-            placeholder="operator@local"
+            placeholder="operator@local or a username"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full rounded-md border border-line bg-panel-2 px-3 py-2 text-sm outline-none focus:border-muted"

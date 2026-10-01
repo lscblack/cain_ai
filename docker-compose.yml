@@ -1,0 +1,38 @@
+# KAI infrastructure.
+#
+# Phase 1 runs only Redis here; PostgreSQL is your HOST instance
+# (127.0.0.1:5432, database `kai`). The backend and frontend run on the host
+# (conda env `fastapi_setup` / pnpm), not in containers yet.
+#
+# When Phase 8 (face embeddings) needs pgvector, either install
+# `postgresql-17-pgvector` on the host PG, or uncomment the `postgres` service
+# below and point DATABASE_URL at it.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: kai-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - kai_redis:/data
+    restart: unless-stopped
+
+  # --- Optional: pgvector-enabled Postgres (uncomment for Phase 8) ---------
+  # postgres:
+  #   image: pgvector/pgvector:pg17
+  #   container_name: kai-postgres
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: YourStrongPassword
+  #     POSTGRES_DB: kai
+  #   ports:
+  #     - "127.0.0.1:5433:5432"   # 5433 to avoid clashing with host PG
+  #   volumes:
+  #     - kai_pg:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  kai_redis:
+  # kai_pg:
