@@ -31,8 +31,8 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: Globe, label: "Domains" },
   { icon: Database, label: "Sources", to: "/sources" },
   { icon: Share2, label: "Graph", to: "/graph" },
-  { icon: Map, label: "Map" },
-  { icon: Clock, label: "Timeline" },
+  { icon: Map, label: "Map", to: "/map" },
+  { icon: Clock, label: "Timeline", to: "/timeline" },
   { icon: Zap, label: "Power Up", to: "/powerup" },
 ];
 

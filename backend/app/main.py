@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    analyst, auth, emails, faces, health, investigations, phones, powerup, search,
-    sources, usernames,
+    analyst, auth, emails, faces, health, investigations, maps, phones, powerup,
+    search, sources, timeline, usernames,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -41,6 +41,8 @@ def create_app() -> FastAPI:
     app.include_router(sources.router)
     app.include_router(powerup.router)
     app.include_router(analyst.router)
+    app.include_router(maps.router)
+    app.include_router(timeline.router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:

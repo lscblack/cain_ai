@@ -14,6 +14,8 @@ import { Graph } from "@/pages/Graph";
 import { Face } from "@/pages/Face";
 import { Sources } from "@/pages/Sources";
 import { PowerUp } from "@/pages/PowerUp";
+import { MapView } from "@/pages/MapView";
+import { Timeline } from "@/pages/Timeline";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -40,6 +42,8 @@ export default function App() {
           <Route path="/face" element={<Face />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/graph" element={<Graph />} />
+          <Route path="/map" element={<MapView />} />
+          <Route path="/timeline" element={<Timeline />} />
           <Route path="/powerup" element={<PowerUp />} />
           <Route path="/investigations" element={<Investigations />} />
           <Route path="/investigations/:id" element={<Investigation />} />
