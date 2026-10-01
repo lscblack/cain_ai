@@ -56,6 +56,15 @@ async def system_stats(
     except Exception:
         redis_ok = False
 
+    async def _count_entity(type_: str) -> int:
+        return int(
+            (
+                await session.execute(
+                    select(func.count()).select_from(Entity).where(Entity.type == type_)
+                )
+            ).scalar_one()
+        )
+
     engine = get_face_engine()
     return {
         "resources": resources,
@@ -68,5 +77,9 @@ async def system_stats(
             "sources": await _count(Source),
             "pages": await _count(Page),
             "images": await _count(Image),
+            "phones": await _count_entity("phone"),
+            "emails": await _count_entity("email"),
+            "usernames": await _count_entity("username"),
+            "domains": await _count_entity("domain"),
         },
     }
