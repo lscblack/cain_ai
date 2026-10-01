@@ -409,3 +409,53 @@ async def index_list(
         for r in rows
     ]
     return {"total": total, "limit": limit, "offset": offset, "faces": faces}
+
+
+@router.post("/dedupe")
+async def dedupe_faces(
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Remove near-identical faces within the same source (keeps highest quality).
+    New crawls dedupe automatically; this cleans an index built before that."""
+    from urllib.parse import urlsplit
+    from sqlalchemy import delete as _delete, desc, select as _select
+    from app.database.models.face import Face as _Face
+    from app.intelligence.face.similarity import DEDUP_THRESHOLD
+    from app.intelligence.face.vector_index import max_similarity
+
+    rows = (await session.execute(_select(_Face).order_by(desc(_Face.quality)))).scalars().all()
+
+    def _host(url: str | None) -> str:
+        if not url:
+            return "none"
+        try:
+            return urlsplit(url).hostname or url
+        except Exception:
+            return url
+
+    kept: dict[str, list[list[float]]] = {}
+    remove_ids: list = []
+    removed_crops: list[str] = []
+    for r in rows:
+        if not r.embedding:
+            continue
+        h = _host(r.source_url)
+        bucket = kept.setdefault(h, [])
+        if max_similarity(list(r.embedding), bucket) >= DEDUP_THRESHOLD:
+            remove_ids.append(r.id)
+            removed_crops.append(str(r.id))
+        else:
+            bucket.append(list(r.embedding))
+
+    if remove_ids:
+        await session.execute(_delete(_Face).where(_Face.id.in_(remove_ids)))
+        await session.flush()
+        for fid in removed_crops:
+            try:
+                p = crop_path(fid)
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+    return {"removed": len(remove_ids), "remaining": len(rows) - len(remove_ids)}

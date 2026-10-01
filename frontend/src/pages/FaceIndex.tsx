@@ -42,7 +42,17 @@ export function FaceIndex() {
         <Images size={18} className="text-muted" />
         <h1 className="text-lg font-semibold">Available Faces</h1>
         <span className="kai-metadata">· {total} indexed</span>
-        <button onClick={() => load(offset)} className="ml-auto kai-metadata flex items-center gap-1 hover:text-ink">
+        <button
+          onClick={async () => {
+            if (!confirm("Remove near-identical duplicate faces (same person, same source)?")) return;
+            const r = await api.post<{ removed: number; remaining: number }>("/intelligence/face/dedupe").catch(() => null);
+            if (r) { alert(`Removed ${r.removed} duplicate(s). ${r.remaining} remain.`); load(0); }
+          }}
+          className="ml-auto rounded-md border border-line px-3 py-1.5 text-xs hover:bg-panel-2"
+        >
+          Dedupe
+        </button>
+        <button onClick={() => load(offset)} className="kai-metadata flex items-center gap-1 hover:text-ink">
           <RefreshCw size={13} /> refresh
         </button>
       </div>

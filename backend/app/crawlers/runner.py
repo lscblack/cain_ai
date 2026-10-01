@@ -28,6 +28,8 @@ from app.database.models.face import Face
 from app.database.models.source import Image, Page, Source
 from app.intelligence.face.dedup import average_hash, sha256_bytes
 from app.intelligence.face.engine import FaceEngine
+from app.intelligence.face.similarity import DEDUP_THRESHOLD
+from app.intelligence.face.vector_index import max_similarity
 
 
 @dataclass
@@ -51,6 +53,7 @@ class CrawlStats:
     images_indexed: int = 0
     images_duplicate: int = 0
     faces_indexed: int = 0
+    faces_duplicate: int = 0
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -86,6 +89,17 @@ async def crawl_source(
     stats = CrawlStats()
     safe = safe_check or _safe
     base_host = urlsplit(source.base_url).hostname
+
+    # Face-dedup: load embeddings already indexed from this source so we skip
+    # near-identical faces (same person/photo re-served at different URLs).
+    seen_embeddings: list[list[float]] = []
+    if base_host:
+        rows = (
+            await session.execute(
+                select(Face.embedding).where(Face.source_url.ilike(f"%{base_host}%"))
+            )
+        ).scalars().all()
+        seen_embeddings = [list(e) for e in rows if e]
     queue: deque[tuple[str, int]] = deque([(source.base_url, 0)])
     visited: set[str] = set()
 
@@ -160,6 +174,7 @@ async def crawl_source(
                     session, source, page, ctx["url"], fetch=fetch, engine=engine, stats=stats,
                     safe=safe, context={"alt": ctx.get("alt"), "caption": ctx.get("caption"),
                                         "page_title": page.title, "names": page_names},
+                    seen_embeddings=seen_embeddings,
                 )
                 if is_dup:
                     continue
@@ -204,6 +219,7 @@ async def _process_image(
     stats: CrawlStats,
     safe: SafeCheck = _safe,
     context: dict | None = None,
+    seen_embeddings: list | None = None,
 ) -> tuple[int, bool]:
     if not await safe(img_url):
         return 0, False
@@ -245,6 +261,12 @@ async def _process_image(
 
         ctx = context or {}
         for f in faces:
+            # Skip near-identical faces already indexed from this source.
+            if seen_embeddings is not None:
+                if max_similarity(f.embedding, seen_embeddings) >= DEDUP_THRESHOLD:
+                    stats.faces_duplicate += 1
+                    continue
+                seen_embeddings.append(f.embedding)
             rec = Face(
                 source_url=page.url,
                 image_hash=image_hash,

@@ -14,6 +14,10 @@ POTENTIAL_MATCH = 0.50
 STRONG = 0.40
 POSSIBLE = 0.28
 
+# At/above this cosine, two faces are treated as the SAME face (near-identical
+# crop) for deduplication — high enough not to merge genuinely different photos.
+DEDUP_THRESHOLD = 0.92
+
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):

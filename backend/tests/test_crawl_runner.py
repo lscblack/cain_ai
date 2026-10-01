@@ -9,22 +9,31 @@ from app.database.models.source import Image, Page, Source
 from app.intelligence.face.engine import DetectedFace, FaceEngine
 
 
+import hashlib
+
+
+def _orthoish(image_bytes: bytes) -> list[float]:
+    """A distinct vector per unique image bytes (so different images != same face)."""
+    h = hashlib.sha256(image_bytes).digest()
+    return [b / 255.0 for b in h[:16]]
+
+
 class FakeEngine(FaceEngine):
     model_name = "fake"
     model_version = "1"
-    embedding_dim = 4
+    embedding_dim = 16
 
-    def __init__(self, faces_per_image=1):
+    def __init__(self, faces_per_image=1, constant: bool = False):
         self.faces_per_image = faces_per_image
+        self.constant = constant
 
     def available(self) -> bool:
         return True
 
     def detect_and_embed(self, image_bytes: bytes):
-        # deterministic embedding derived from the bytes length
-        base = float(len(image_bytes) % 7) + 1.0
+        emb = [1.0] + [0.0] * 15 if self.constant else _orthoish(image_bytes)
         return [
-            DetectedFace(bbox=[0, 0, 10, 10], det_score=0.9, embedding=[base, 0.1, 0.2, 0.3], quality=0.8)
+            DetectedFace(bbox=[0, 0, 10, 10], det_score=0.9, embedding=list(emb), quality=0.8)
             for _ in range(self.faces_per_image)
         ]
 
@@ -124,3 +133,18 @@ async def test_crawl_respects_excluded_paths(db_session):
     await db_session.commit()
     urls = [p.url for p in (await db_session.execute(select(Page))).scalars().all()]
     assert all("/news/story" not in u for u in urls)
+
+
+async def test_crawl_dedupes_same_face_across_images(db_session):
+    """Different image bytes but identical face embedding -> only one face kept."""
+    src = _source()
+    db_session.add(src)
+    await db_session.commit()
+    # constant=True => every detected face has the same embedding
+    stats = await crawl_source(
+        db_session, src, fetch=make_fetch(), engine=FakeEngine(constant=True), safe_check=_always_safe
+    )
+    await db_session.commit()
+    faces = (await db_session.execute(select(func.count()).select_from(Face))).scalar_one()
+    assert faces == 1                      # all near-identical faces collapsed to one
+    assert stats.faces_duplicate >= 1

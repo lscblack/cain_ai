@@ -9,6 +9,22 @@ from __future__ import annotations
 import numpy as np
 
 
+def max_similarity(query: list[float], corpus: list[list[float]]) -> float:
+    """Highest cosine of `query` against any embedding in `corpus` (0.0 if empty)."""
+    if not query or not corpus:
+        return 0.0
+    dim = len(query)
+    rows = [e for e in corpus if e and len(e) == dim]
+    if not rows:
+        return 0.0
+    q = np.asarray(query, dtype=np.float32)
+    m = np.asarray(rows, dtype=np.float32)
+    qn = np.linalg.norm(q) or 1e-12
+    mn = np.linalg.norm(m, axis=1)
+    mn[mn == 0.0] = 1e-12
+    return float(np.max((m @ q) / (mn * qn)))
+
+
 def rank_by_cosine(
     query: list[float],
     corpus: list[tuple[str, list[float]]],

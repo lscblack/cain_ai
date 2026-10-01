@@ -146,3 +146,9 @@ async def test_index_list_empty(client, auth_headers):
     assert r.status_code == 200
     assert r.json()["total"] == 0
     assert r.json()["faces"] == []
+
+
+async def test_dedupe_empty(client, auth_headers):
+    r = await client.post("/intelligence/face/dedupe", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["removed"] == 0
