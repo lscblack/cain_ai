@@ -102,3 +102,27 @@ async def test_search_1_to_n(client, auth_headers):
         )
     top = r2.json()["matches"]
     assert all(m["similarity"] < 0.5 for m in top)
+
+
+@requires_engine
+async def test_search_stream_sse(client, auth_headers):
+    case = (await client.post("/investigations", json={"name": "S"}, headers=auth_headers)).json()
+    with open(FACE1, "rb") as f:
+        await client.post(
+            "/intelligence/face/detect",
+            files={"file": ("f.jpg", f, "image/jpeg")},
+            data={"investigation_id": case["id"]},
+            headers=auth_headers,
+        )
+    with open(FACE1, "rb") as f:
+        resp = await client.post(
+            "/intelligence/face/search/stream",
+            files={"file": ("q.jpg", f, "image/jpeg")},
+            headers=auth_headers,
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "event: stage" in body
+    assert "image_received" in body
+    assert "faces_detected" in body
+    assert "event: result" in body

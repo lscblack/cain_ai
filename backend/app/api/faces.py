@@ -6,9 +6,12 @@ Uses the InsightFace engine when available; otherwise returns 503
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_operator
@@ -186,3 +189,72 @@ async def search(
             "to observe, never a confirmed identity."
         ),
     }
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.post("/search/stream")
+async def search_stream(
+    file: UploadFile = File(...),
+    investigation_id: uuid.UUID | None = Form(default=None),
+    top_k: int = Form(default=20),
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+    engine: FaceEngine = Depends(engine_dep),
+) -> StreamingResponse:
+    """Stream face-search progress as Server-Sent Events."""
+    if not engine.available():
+        raise HTTPException(status_code=503, detail="face_engine_unavailable")
+    data = await _read_image(file)
+
+    async def gen() -> AsyncGenerator[str, None]:
+        yield _sse("stage", {"name": "image_received", "bytes": len(data)})
+        try:
+            faces = engine.detect_and_embed(data)
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"detail": str(exc)})
+            return
+        yield _sse("stage", {"name": "faces_detected", "count": len(faces)})
+        if not faces:
+            yield _sse("result", {"query_face": None, "matches": [], "detail": "no_face_detected"})
+            return
+        query = faces[0].embedding
+        yield _sse("stage", {"name": "embedding_ready", "dim": len(query)})
+
+        corpus = await FaceRepository(session).list_with_embeddings(
+            investigation_id=investigation_id
+        )
+        yield _sse("stage", {"name": "comparing", "indexed": len(corpus)})
+
+        scored = []
+        for i, rec in enumerate(corpus):
+            score = cosine_similarity(query, rec.embedding)
+            if is_match(score):
+                band = band_for_similarity(score)
+                scored.append(
+                    {
+                        "face_id": str(rec.id),
+                        "investigation_id": str(rec.investigation_id) if rec.investigation_id else None,
+                        "source_url": rec.source_url,
+                        "image_hash": rec.image_hash,
+                        "similarity": round(score, 4),
+                        "similarity_pct": round(score * 100, 1),
+                        "band": band.value if band else "no_match",
+                    }
+                )
+            if corpus and i % 50 == 0:
+                yield _sse("progress", {"scanned": i + 1, "total": len(corpus)})
+        yield _sse("stage", {"name": "ranking", "candidates": len(scored)})
+        scored.sort(key=lambda m: m["similarity"], reverse=True)
+        yield _sse(
+            "result",
+            {
+                "query_face": faces[0].to_dict(),
+                "indexed_faces": len(corpus),
+                "matches": scored[: max(1, min(top_k, 100))],
+            },
+        )
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

@@ -61,24 +61,68 @@ export function Face() {
   const [compareResult, setCompareResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stages, setStages] = useState<string[]>([]);
   const queryInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.get<FaceStatus>("/intelligence/face/status").then(setStatus).catch(() => setStatus(null));
   }, []);
 
+  const STAGE_LABEL: Record<string, string> = {
+    image_received: "Image received",
+    faces_detected: "Face detected",
+    embedding_ready: "Embedding generated",
+    comparing: "Comparing against local index",
+    ranking: "Re-ranking results",
+  };
+
   async function runSearch() {
     if (!queryFile) return;
     setLoading(true);
     setError(null);
     setMatches(null);
+    setStages([]);
     try {
       const fd = new FormData();
       fd.append("file", queryFile);
-      const res = await api.postForm<{ matches: SearchMatch[] }>("/intelligence/face/search", fd);
-      setMatches(res.matches);
-    } catch (e: any) {
-      setError(e?.detail === "face_engine_unavailable" ? "FACE ENGINE UNAVAILABLE" : "Search failed.");
+      const base = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+      const token = localStorage.getItem("kai.token");
+      const resp = await fetch(`${base}/intelligence/face/search/stream`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+      if (!resp.ok || !resp.body) {
+        setError(resp.status === 503 ? "FACE ENGINE UNAVAILABLE" : "Search failed.");
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const ev = chunk.match(/event: (.*)/)?.[1];
+          const dataLine = chunk.match(/data: (.*)/)?.[1];
+          if (!dataLine) continue;
+          const payload = JSON.parse(dataLine);
+          if (ev === "stage") {
+            const label = STAGE_LABEL[payload.name] ?? payload.name;
+            const detail = payload.count != null ? ` (${payload.count})` : payload.indexed != null ? ` (${payload.indexed} indexed)` : "";
+            setStages((s) => [...s, label + detail]);
+          } else if (ev === "result") {
+            setMatches(payload.matches ?? []);
+          } else if (ev === "error") {
+            setError(payload.detail ?? "Search failed.");
+          }
+        }
+      }
+    } catch {
+      setError("Search failed.");
     } finally {
       setLoading(false);
     }
@@ -189,6 +233,16 @@ export function Face() {
 
         {/* Results */}
         <div>
+          {mode === "search" && stages.length > 0 && (
+            <div className="mb-4 space-y-1">
+              {stages.map((s, i) => (
+                <div key={i} className="kai-metadata flex items-center gap-2">
+                  <span style={{ color: "var(--kai-verified)" }}>✓</span> {s}
+                </div>
+              ))}
+              {loading && <div className="kai-metadata" style={{ color: "var(--kai-warn)" }}>● working…</div>}
+            </div>
+          )}
           {mode === "search" && matches && (
             <>
               <div className="kai-metadata mb-3 uppercase">
