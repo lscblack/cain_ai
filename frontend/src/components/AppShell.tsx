@@ -33,7 +33,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: Share2, label: "Graph", to: "/graph" },
   { icon: Map, label: "Map" },
   { icon: Clock, label: "Timeline" },
-  { icon: Zap, label: "Power Up" },
+  { icon: Zap, label: "Power Up", to: "/powerup" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

@@ -13,6 +13,7 @@ import { Username } from "@/pages/Username";
 import { Graph } from "@/pages/Graph";
 import { Face } from "@/pages/Face";
 import { Sources } from "@/pages/Sources";
+import { PowerUp } from "@/pages/PowerUp";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/face" element={<Face />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/graph" element={<Graph />} />
+          <Route path="/powerup" element={<PowerUp />} />
           <Route path="/investigations" element={<Investigations />} />
           <Route path="/investigations/:id" element={<Investigation />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -38,6 +38,21 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://127.0.0.1:5173"]
     )
 
+    # ── External provider keys (empty => provider reports UNAVAILABLE) ──
+    serpapi_api_key: str = Field(default="")
+    bing_visual_key: str = Field(default="")
+    tineye_api_key: str = Field(default="")
+
+    # AI analyst (OpenRouter / OpenAI-compatible)
+    openrouter_api_key: str = Field(default="")
+    openai_api_key: str = Field(default="")
+    openai_base_url: str = Field(default="https://api.openai.com/v1")
+    ai_model: str = Field(default="openai/gpt-4o-mini")
+
+    # Maps / geo
+    tomtom_api_key: str = Field(default="")
+    cesium_ion_token: str = Field(default="")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors(cls, v: object) -> object:
