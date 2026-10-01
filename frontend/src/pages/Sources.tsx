@@ -52,8 +52,8 @@ export function Sources() {
       const r = await api.post<{ updated: number }>("/sources/bulk-update", payload);
       setApplyMsg(`Updated ${r.updated} source(s).`);
       await load();
-    } catch {
-      setApplyMsg("Bulk update failed.");
+    } catch (e: any) {
+      setApplyMsg(`Bulk update failed${e?.detail ? `: ${e.detail}` : " (backend unreachable?)"}.`);
     }
   }
 

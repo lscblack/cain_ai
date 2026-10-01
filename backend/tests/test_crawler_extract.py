@@ -54,3 +54,27 @@ def test_hamming_and_near_dup():
     assert hamming_distance("ffff", "fffe") == 1
     assert is_near_duplicate("ffff", "fffe", threshold=5) is True
     assert is_near_duplicate("0000", "ffff", threshold=5) is False
+
+
+LAZY_HTML = """
+<html><head>
+<meta property="og:image" content="https://cdn.x.com/og/hero.jpg">
+</head><body>
+  <img data-src="/uploads/2026/person1.jpg">
+  <img data-lazy-src="https://cdn.x.com/media/person2.png">
+  <picture><source srcset="/media/p3-480.webp 480w, /media/p3-1024.webp 1024w"><img src="/media/p3.jpg"></picture>
+  <img src="/assets/logo.png">
+  <img src="data:image/gif;base64,R0lGODlh">
+</body></html>
+"""
+
+
+def test_extract_lazyload_and_meta():
+    imgs = extract_image_urls(LAZY_HTML, "https://x.com/post")
+    assert "https://x.com/uploads/2026/person1.jpg" in imgs
+    assert "https://cdn.x.com/media/person2.png" in imgs
+    assert any("p3-480.webp" in u for u in imgs)
+    assert "https://cdn.x.com/og/hero.jpg" in imgs
+    # logo skipped, data: URI skipped
+    assert all("logo" not in u for u in imgs)
+    assert all(not u.startswith("data:") for u in imgs)
