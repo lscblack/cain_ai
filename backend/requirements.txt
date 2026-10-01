@@ -17,3 +17,8 @@ email-validator==2.3.0
 python-multipart>=0.0.9
 
 phonenumbers==9.0.40
+onnxruntime==1.30.0
+insightface==2.0
+onnx==1.23.1
+opencv-python-headless
+numpy

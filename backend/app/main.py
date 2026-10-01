@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, emails, health, investigations, phones, search, usernames
+from app.api import auth, emails, faces, health, investigations, phones, search, usernames
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -34,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(phones.router)
     app.include_router(emails.router)
     app.include_router(usernames.router)
+    app.include_router(faces.router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:

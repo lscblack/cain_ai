@@ -23,7 +23,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: LayoutDashboard, label: "Dashboard", to: "/" },
   { icon: Search, label: "Search", to: "/search" },
   { icon: FolderSearch, label: "Investigations", to: "/investigations" },
-  { icon: Users, label: "Faces" },
+  { icon: Users, label: "Faces", to: "/face" },
   { icon: Phone, label: "Phones", to: "/phone" },
   { icon: AtSign, label: "Emails", to: "/email" },
   { icon: UserSearch, label: "Usernames", to: "/username" },
