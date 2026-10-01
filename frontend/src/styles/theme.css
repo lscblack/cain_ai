@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --kai-bg: #0a0b0d;
+  --kai-panel: #111622;
+  --kai-panel-2: #0e131d;
+  --kai-border: #1e2634;
+  --kai-accent: #e5484d; /* red — used sparingly */
+  --kai-verified: #30a46c; /* muted green */
+  --kai-warn: #f5a623; /* amber */
+  --kai-text: #e6e9ef;
+  --kai-muted: #8b93a7;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--kai-bg);
+  color: var(--kai-text);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, technical scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--kai-border) transparent;
+}
+
+.kai-metadata {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--kai-muted);
+  letter-spacing: 0.02em;
+}
