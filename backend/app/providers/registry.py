@@ -33,9 +33,11 @@ registry = ProviderRegistry()
 
 
 def _bootstrap() -> None:
+    from app.providers.email_provider import EmailProvider
     from app.providers.phone_provider import PhoneProvider
 
     registry.register(PhoneProvider())
+    registry.register(EmailProvider())
 
 
 _bootstrap()

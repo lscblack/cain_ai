@@ -8,6 +8,7 @@ import { Investigations } from "@/pages/Investigations";
 import { Investigation } from "@/pages/Investigation";
 import { Search } from "@/pages/Search";
 import { Phone } from "@/pages/Phone";
+import { Email } from "@/pages/Email";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/search" element={<Search />} />
           <Route path="/phone" element={<Phone />} />
+          <Route path="/email" element={<Email />} />
           <Route path="/investigations" element={<Investigations />} />
           <Route path="/investigations/:id" element={<Investigation />} />
           <Route path="*" element={<Navigate to="/" replace />} />

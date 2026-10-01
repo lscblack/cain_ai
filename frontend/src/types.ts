@@ -121,3 +121,25 @@ export interface PhoneIntelligence {
   local_evidence_matches: EvidenceItem[];
   note: string;
 }
+
+export interface EmailAnalysis {
+  input: string;
+  valid_format: boolean;
+  local: string | null;
+  domain: string | null;
+  gravatar_url: string | null;
+  derived_usernames: string[];
+  mx_records: string[] | null;
+  has_mx: boolean | null;
+  spf: string | null;
+  dmarc: string | null;
+  dns_checked: boolean;
+  notes: string[];
+}
+
+export interface EmailIntelligence {
+  analysis: EmailAnalysis;
+  local_entity_matches: EntityNode[];
+  local_evidence_matches: EvidenceItem[];
+  note: string;
+}
