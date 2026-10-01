@@ -50,6 +50,18 @@ def create_app() -> FastAPI:
         try:
             await seed_admin()
             await seed_default_sources(only_if_empty=True)
+            # Reset sources left 'crawling' by a prior process that was killed
+            # mid-crawl (e.g. a restart), so they aren't stuck forever.
+            from sqlalchemy import update as _update
+
+            from app.database.models.source import Source as _Source
+            from app.database.session import async_session_maker as _asm
+
+            async with _asm() as _s:
+                await _s.execute(
+                    _update(_Source).where(_Source.status == "crawling").values(status="idle")
+                )
+                await _s.commit()
         except Exception:  # never block startup on seeding
             get_logger("kai.startup").exception("startup seeding failed")
         # background crawl scheduler (manual sources are never auto-crawled)
