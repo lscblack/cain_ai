@@ -64,3 +64,32 @@ async def test_username_finds_local_entity(client, auth_headers, fake_fetch):
         headers=auth_headers,
     )
     assert len(r.json()["local_entity_matches"]) == 1
+
+
+import pathlib as _pathlib
+import pytest as _pytest
+from app.api.usernames import get_avatar_fetcher
+from app.intelligence.face.service import get_face_engine as _gfe
+
+_FIX = _pathlib.Path(__file__).parent / "fixtures"
+_requires_engine = _pytest.mark.skipif(not _gfe().available(), reason="face engine unavailable")
+
+
+@_requires_engine
+async def test_index_avatars(client, auth_headers):
+    face_bytes = (_FIX / "face1.jpg").read_bytes()
+
+    async def fake_avatar(identifier, provider=None):
+        return face_bytes if provider == "github" else None
+
+    client.app.dependency_overrides[get_avatar_fetcher] = lambda: fake_avatar
+    r = await client.post(
+        "/intelligence/username/index-avatars",
+        json={"username": "osintuser", "platforms": ["github", "gitlab"]},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["faces_indexed"] >= 1
+    gh = next(x for x in body["results"] if x["platform"] == "github")
+    assert gh["avatar"] is True and gh["faces"] >= 1

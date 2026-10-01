@@ -22,6 +22,8 @@ class Source(UUIDMixin, TimestampMixin, table=True):
     max_pages: int = Field(default=50)
     schedule: str = Field(default="manual")  # manual|hourly|6h|daily|weekly
     status: str = Field(default="idle")  # idle|crawling|error|paused
+    category: str | None = Field(default=None, index=True)
+    priority: str | None = Field(default=None, index=True)  # high|medium|low
     last_crawled_at: str | None = Field(default=None)
     last_error: str | None = Field(default=None)
 

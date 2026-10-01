@@ -44,13 +44,14 @@ def create_app() -> FastAPI:
     async def _startup() -> None:
         import asyncio
 
-        from app.core.seed import seed_admin
+        from app.core.seed import seed_admin, seed_default_sources
         from app.crawlers.scheduler import scheduler_loop
 
         try:
             await seed_admin()
+            await seed_default_sources(only_if_empty=True)
         except Exception:  # never block startup on seeding
-            get_logger("kai.startup").exception("admin seeding failed")
+            get_logger("kai.startup").exception("startup seeding failed")
         # background crawl scheduler (manual sources are never auto-crawled)
         app.state.scheduler_task = asyncio.create_task(scheduler_loop())
 

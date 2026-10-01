@@ -24,6 +24,7 @@ from app.schemas.source import (
     SourceCreate,
     SourceOut,
     SourceStats,
+    SourceUpdate,
 )
 
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -149,6 +150,35 @@ async def source_stats(
         source_id=sid, pages=pages, images=images, faces=faces,
         status=src.status, last_crawled_at=src.last_crawled_at,
     )
+
+
+@router.patch("/{sid}", response_model=SourceOut)
+async def update_source(
+    sid: uuid.UUID,
+    body: SourceUpdate,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> SourceOut:
+    src = await _get_or_404(sid, session)
+    data = body.model_dump(exclude_none=True)
+    if "base_url" in data:
+        src.domain = urlsplit(data["base_url"]).hostname or src.domain
+    for key, val in data.items():
+        setattr(src, key, val)
+    session.add(src)
+    await session.flush()
+    await session.refresh(src)
+    return SourceOut(**src.model_dump())
+
+
+@router.post("/seed-defaults")
+async def seed_defaults(
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from app.core.seed import seed_default_sources
+
+    return await seed_default_sources(session, only_if_empty=False)
 
 
 @router.delete("/{sid}", status_code=status.HTTP_204_NO_CONTENT)

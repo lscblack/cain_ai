@@ -74,3 +74,23 @@ async def test_bulk_csv_add(client, auth_headers):
     assert len(body["errors"]) == 1           # Gamma (SSRF loopback) rejected
     names = {s["name"] for s in body["created"]}
     assert names == {"Alpha", "Beta"}
+
+
+async def test_edit_source(client, auth_headers):
+    sid = (await client.post("/sources", json={"name": "Old", "base_url": "https://8.8.8.8/"}, headers=auth_headers)).json()["id"]
+    r = await client.patch(f"/sources/{sid}", json={"name": "New", "max_depth": 3, "schedule": "daily", "priority": "high"}, headers=auth_headers)
+    assert r.status_code == 200
+    b = r.json()
+    assert b["name"] == "New" and b["max_depth"] == 3 and b["schedule"] == "daily" and b["priority"] == "high"
+
+
+async def test_seed_defaults(client, auth_headers):
+    r = await client.post("/sources/seed-defaults", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["created"] > 100  # the curated list
+    listing = (await client.get("/sources", headers=auth_headers)).json()
+    assert any(s["domain"] == "github.com" for s in listing)
+    assert any(s["domain"] == "ktpress.rw" for s in listing)
+    # re-seed is idempotent (dedup by domain)
+    r2 = await client.post("/sources/seed-defaults", headers=auth_headers)
+    assert r2.json()["created"] == 0

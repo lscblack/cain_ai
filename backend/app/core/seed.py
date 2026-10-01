@@ -11,6 +11,50 @@ from app.database.session import async_session_maker
 logger = get_logger("kai.seed")
 
 
+async def seed_default_sources(session=None, *, only_if_empty: bool = True) -> dict:
+    """Insert the curated default crawl sources, deduped by domain.
+
+    If `session` is given, uses it (caller owns the transaction); otherwise opens
+    its own session and commits.
+    """
+    from sqlalchemy import select
+
+    from app.data.default_sources import DEFAULT_SOURCES
+    from app.database.models.source import Source
+
+    async def _run(sess) -> dict:
+        existing_total = (await sess.execute(select(Source.id))).first()
+        if only_if_empty and existing_total is not None:
+            return {"created": 0, "skipped": 0, "note": "sources already present"}
+        existing_domains = set((await sess.execute(select(Source.domain))).scalars().all())
+        created = skipped = 0
+        for name, domain, category, priority in DEFAULT_SOURCES:
+            d = domain.strip().lower()
+            if d in existing_domains:
+                skipped += 1
+                continue
+            sess.add(
+                Source(
+                    name=name, base_url=f"https://{d}", domain=d,
+                    allowed_paths=[], excluded_paths=[], max_depth=1, max_pages=50,
+                    schedule="manual", category=category, priority=priority,
+                )
+            )
+            existing_domains.add(d)
+            created += 1
+        await sess.flush()
+        return {"created": created, "skipped": skipped}
+
+    if session is not None:
+        result = await _run(session)
+    else:
+        async with async_session_maker() as own:
+            result = await _run(own)
+            await own.commit()
+    logger.info("Seeded default sources: %s", result)
+    return result
+
+
 async def seed_admin() -> None:
     """Create the operator from ADMIN_EMAIL/ADMIN_PASSWORD if no users exist."""
     s = get_settings()

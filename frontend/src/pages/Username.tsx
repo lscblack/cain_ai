@@ -15,6 +15,30 @@ export function Username() {
   const [username, setUsername] = useState("");
   const [result, setResult] = useState<UsernameIntelligence | null>(null);
   const [loading, setLoading] = useState(false);
+  const [avatarMsg, setAvatarMsg] = useState<string | null>(null);
+  const [indexing, setIndexing] = useState(false);
+
+  async function indexAvatars() {
+    if (!username.trim()) return;
+    setIndexing(true);
+    setAvatarMsg(null);
+    try {
+      const r = await api.post<{ faces_indexed: number; results: any[] }>(
+        "/intelligence/username/index-avatars",
+        { username: username.trim() },
+      );
+      const withAvatar = r.results.filter((x) => x.avatar).length;
+      setAvatarMsg(`Indexed ${r.faces_indexed} face(s) from ${withAvatar} avatar(s). Now searchable in Faces → 1:N Search.`);
+    } catch (e: any) {
+      setAvatarMsg(
+        e?.detail === "face_engine_unavailable"
+          ? "Face engine unavailable."
+          : "Avatar indexing failed (unavatar free tier is 25/day; add a key in Power Up).",
+      );
+    } finally {
+      setIndexing(false);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -50,7 +74,11 @@ export function Username() {
         <button className="rounded-md border border-line bg-panel px-4 py-2 text-sm hover:bg-panel-2">
           Check
         </button>
+        <button type="button" onClick={indexAvatars} disabled={indexing} className="rounded-md border border-line bg-panel px-4 py-2 text-sm hover:bg-panel-2 disabled:opacity-50">
+          {indexing ? "Indexing…" : "Index avatars"}
+        </button>
       </form>
+      {avatarMsg && <div className="mb-4 kai-metadata" style={{ color: "var(--kai-verified)" }}>{avatarMsg}</div>}
 
       {loading && <div className="kai-metadata">Checking public profiles…</div>}
 

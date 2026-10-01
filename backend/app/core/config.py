@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     serpapi_api_key: str = Field(default="")
     bing_visual_key: str = Field(default="")
     tineye_api_key: str = Field(default="")
+    unavatar_api_key: str = Field(default="")  # optional; raises unavatar free 25/day limit
 
     # AI analyst (OpenRouter / OpenAI-compatible)
     openrouter_api_key: str = Field(default="")

@@ -33,6 +33,33 @@ class SourceCreate(BaseModel):
         return v
 
 
+class SourceUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    base_url: str | None = None
+    allowed_paths: list[str] | None = None
+    excluded_paths: list[str] | None = None
+    max_depth: int | None = Field(default=None, ge=0, le=5)
+    max_pages: int | None = Field(default=None, ge=1, le=5000)
+    schedule: str | None = Field(default=None, pattern="^(manual|hourly|6h|daily|weekly)$")
+    status: str | None = Field(default=None, pattern="^(idle|paused|error)$")
+    category: str | None = None
+    priority: str | None = Field(default=None, pattern="^(high|medium|low)$")
+
+    @field_validator("base_url")
+    @classmethod
+    def _check_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if v and "://" not in v:
+            v = f"https://{v}"
+        try:
+            validate_public_url(v)
+        except UnsafeUrlError as exc:
+            raise ValueError(f"unsafe base_url: {exc}")
+        return v
+
+
 class SourceOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -44,6 +71,8 @@ class SourceOut(BaseModel):
     max_pages: int
     schedule: str
     status: str
+    category: str | None = None
+    priority: str | None = None
     last_crawled_at: str | None
     last_error: str | None
     created_at: datetime
