@@ -13,10 +13,27 @@ single modular intelligence workspace.
 ## Status
 
 Built phase by phase. See `docs/superpowers/specs/` (designs) and
-`docs/superpowers/plans/` (implementation plans).
+`docs/superpowers/plans/` (implementation plans). 150+ backend tests.
 
-- **Phase 1 — Foundation:** infra, single-operator auth, core abstractions,
-  SSRF validator, dashboard. ← current
+- **Phase 1 — Foundation:** infra, single-operator JWT auth, core abstractions, SSRF validator, dashboard. ✅
+- **Phase 2 — Investigations/cases:** entities, evidence, relationships, graph; CASE-YYYY-NNNN. ✅
+- **Phase 3 — Universal search:** type detection + local-corpus search. ✅
+- **Phase 4 — Phone intelligence:** libphonenumber analysis + variants. ✅
+- **Phase 5 — Email intelligence:** DNS/MX/SPF/DMARC, Gravatar, derived usernames. ✅
+- **Phase 6 — Username intelligence:** public-platform presence checks. ✅
+- **Phase 7 — Evidence graph:** co-occurrence correlation + interactive graph. ✅
+- **Phase 8 — Face detection + embeddings:** InsightFace/ArcFace (CPU), compare + 1:N search. ✅
+- **Phases 9–10 — Local index + crawler:** incremental SSRF-guarded crawler, dedup, face indexing. ✅
+- **Phase 11 — Reverse-image discovery:** key-gated provider framework (SerpAPI). ✅
+- **Phase 12 — Live face search:** SSE streaming progress. ✅
+- **Phase 13 — Maps:** Leaflet geographic view of located entities. ✅
+- **Phase 14 — Power Up:** provider status panel. ✅
+- **Phase 15 — AI analyst:** OpenRouter/OpenAI-compatible, evidence-grounded. ✅
+- **Phase 16 — Timeline:** chronological observation view. ✅
+- **Phase 18 — Hardening:** security headers, login rate-limit, evidence export (JSON/CSV). ✅
+
+External providers (reverse-image, AI, map tiles) report **UNAVAILABLE** until
+their API keys are set in `.env` — KAI never fabricates results.
 
 ## Architecture
 
