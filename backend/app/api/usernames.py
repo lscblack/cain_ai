@@ -110,7 +110,7 @@ async def index_avatars(
 
     from app.database.models.face import Face
     from app.intelligence.face.crops import save_crop
-    from app.intelligence.face.service import get_face_engine
+    from app.intelligence.face.service import detect_and_embed_async, get_face_engine
     from app.intelligence.username.platforms import PLATFORMS_BY_KEY
     from app.providers.unavatar import PROVIDER_MAP
 
@@ -136,8 +136,10 @@ async def index_avatars(
             results.append({"platform": key, "avatar": True, "faces": 0, "duplicate": True})
             continue
         try:
-            faces = engine.detect_and_embed(data)
-        except Exception:
+            faces = await detect_and_embed_async(engine, data)
+        except Exception as exc:  # noqa: BLE001
+            from app.core.logging import get_logger
+            get_logger("kai.avatars").warning("avatar detect failed for %s: %r", key, exc)
             faces = []
         n = 0
         for f in faces:

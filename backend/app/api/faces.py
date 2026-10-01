@@ -21,7 +21,7 @@ from app.database.repositories.face_repo import FaceRepository
 from app.database.session import get_session
 from app.intelligence.face.engine import FaceEngine
 from app.intelligence.face.crops import crop_path, has_crop, save_crop
-from app.intelligence.face.service import get_face_engine
+from app.intelligence.face.service import detect_and_embed_async, get_face_engine
 from app.intelligence.face.similarity import (
     POSSIBLE,
     band_for_similarity,
@@ -86,7 +86,7 @@ async def detect(
     _require_engine(engine)
     data = await _read_image(file)
     image_hash = hashlib.sha256(data).hexdigest()
-    faces = engine.detect_and_embed(data)
+    faces = await detect_and_embed_async(engine, data)
 
     stored_ids: list[str] = []
     repo = FaceRepository(session)
@@ -132,8 +132,8 @@ async def compare(
     engine: FaceEngine = Depends(engine_dep),
 ) -> dict:
     _require_engine(engine)
-    a = engine.detect_and_embed(await _read_image(file_a))
-    b = engine.detect_and_embed(await _read_image(file_b))
+    a = await detect_and_embed_async(engine, await _read_image(file_a))
+    b = await detect_and_embed_async(engine, await _read_image(file_b))
     if not a or not b:
         return {
             "comparable": False,
@@ -162,7 +162,7 @@ async def search(
     engine: FaceEngine = Depends(engine_dep),
 ) -> dict:
     _require_engine(engine)
-    faces = engine.detect_and_embed(await _read_image(file))
+    faces = await detect_and_embed_async(engine, await _read_image(file))
     if not faces:
         return {"query_face": None, "matches": [], "detail": "no_face_detected_in_query"}
 
@@ -227,7 +227,7 @@ async def search_stream(
     async def gen() -> AsyncGenerator[str, None]:
         yield _sse("stage", {"name": "image_received", "bytes": len(data)})
         try:
-            faces = engine.detect_and_embed(data)
+            faces = await detect_and_embed_async(engine, data)
         except Exception as exc:  # noqa: BLE001
             yield _sse("error", {"detail": str(exc)})
             return

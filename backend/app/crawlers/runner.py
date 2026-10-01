@@ -30,6 +30,7 @@ from app.intelligence.face.dedup import average_hash, sha256_bytes
 from app.intelligence.face.engine import FaceEngine
 from app.intelligence.face.similarity import DEDUP_THRESHOLD
 from app.intelligence.face.vector_index import max_similarity
+from app.intelligence.face.service import detect_and_embed_async
 
 
 @dataclass
@@ -254,7 +255,7 @@ async def _process_image(
     faces_added = 0
     if engine is not None and engine.available():
         try:
-            faces = engine.detect_and_embed(resp.body)
+            faces = await detect_and_embed_async(engine, resp.body)
         except Exception:
             faces = []
         from app.intelligence.face.crops import save_crop

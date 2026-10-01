@@ -14,6 +14,7 @@ from typing import Awaitable, Callable
 from app.core.net import UnsafeUrlError, validate_public_url
 from app.intelligence.face.dedup import sha256_bytes
 from app.intelligence.face.engine import FaceEngine
+from app.intelligence.face.service import detect_and_embed_async
 from app.intelligence.face.similarity import POSSIBLE, band_for_similarity, cosine_similarity
 
 # image_fetch(url) -> bytes | None
@@ -61,7 +62,7 @@ async def discover_faces(
     """candidates: list of {provider, image_url, source_url, title}."""
     safe = safe_check or _safe
     try:
-        q_faces = engine.detect_and_embed(query_bytes)
+        q_faces = await detect_and_embed_async(engine, query_bytes)
     except Exception:
         q_faces = []
     if not q_faces:
@@ -93,7 +94,7 @@ async def discover_faces(
         result.candidates_downloaded += 1
 
         try:
-            faces = engine.detect_and_embed(data)
+            faces = await detect_and_embed_async(engine, data)
         except Exception:
             faces = []
         if not faces:

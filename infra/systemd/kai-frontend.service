@@ -1,0 +1,17 @@
+[Unit]
+Description=KAI frontend (Vite preview on 5174)
+After=kai-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/42da9889-4773-493d-914e-04647afdab69/projects/ventures/cain_ai/frontend
+# build once on (re)start, then serve the production build on :5174
+ExecStartPre=/home/lscblack/.nvm/versions/node/v24.20.0/bin/pnpm build
+ExecStart=/home/lscblack/.nvm/versions/node/v24.20.0/bin/pnpm preview --port 5174 --host 127.0.0.1
+Restart=always
+RestartSec=5
+Environment=PATH=/home/lscblack/.nvm/versions/node/v24.20.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/lscblack
+
+[Install]
+WantedBy=default.target
