@@ -143,3 +143,21 @@ export interface EmailIntelligence {
   local_evidence_matches: EvidenceItem[];
   note: string;
 }
+
+export interface UsernameHit {
+  platform: string;
+  name: string;
+  username: string;
+  url: string;
+  status: "found" | "not_found" | "unknown" | "error";
+  http_status: number | null;
+  checked_at: string;
+}
+
+export interface UsernameIntelligence {
+  username: string;
+  results: UsernameHit[];
+  found_count: number;
+  local_entity_matches: EntityNode[];
+  note: string;
+}

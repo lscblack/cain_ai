@@ -69,6 +69,7 @@ async def client(fake_redis) -> AsyncGenerator[AsyncClient, None]:
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
+        c.app = app  # type: ignore[attr-defined]  # expose for dependency overrides in tests
         yield c
 
     app.dependency_overrides.clear()
