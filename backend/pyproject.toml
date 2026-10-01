@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -p no:ethereum"
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.ruff]
