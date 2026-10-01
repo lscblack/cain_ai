@@ -4,6 +4,7 @@ import { ScanFace, Upload } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
+import { SourceFrame, type SourceContext } from "@/components/SourceFrame";
 
 type Mode = "search" | "compare" | "discover";
 
@@ -24,6 +25,10 @@ interface SearchMatch {
   similarity_pct: number;
   band: string;
   crop_url?: string | null;
+  page_title?: string | null;
+  caption?: string | null;
+  names?: string[];
+  image_url?: string | null;
 }
 
 const BAND_LABEL: Record<string, string> = {
@@ -65,6 +70,7 @@ export function Face() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stages, setStages] = useState<string[]>([]);
+  const [frameCtx, setFrameCtx] = useState<SourceContext | null>(null);
   const [scanCrops, setScanCrops] = useState<string[]>([]);
   const [scanTick, setScanTick] = useState(0);
   const [progressPct, setProgressPct] = useState(0);
@@ -187,6 +193,7 @@ export function Face() {
 
   return (
     <div>
+      {frameCtx && <SourceFrame ctx={frameCtx} onClose={() => setFrameCtx(null)} />}
       <div className="mb-4 flex items-center gap-3">
         <ScanFace size={18} className="text-muted" />
         <h1 className="text-lg font-semibold">Face Intelligence</h1>
@@ -334,7 +341,7 @@ export function Face() {
                         className="overflow-hidden rounded-lg border border-line bg-panel"
                       >
                         <div className="flex">
-                          {m.crop_url && <AuthImg path={m.crop_url} className="h-24 w-24 shrink-0 object-cover" />}
+                          {m.crop_url && <AuthImg path={m.crop_url} className="h-28 w-28 shrink-0 object-cover" />}
                           <div className="min-w-0 flex-1 p-3">
                             <div className="flex items-center justify-between">
                               <span className="font-mono text-lg">{m.similarity_pct}%</span>
@@ -342,12 +349,28 @@ export function Face() {
                                 {BAND_LABEL[m.band] ?? m.band}
                               </span>
                             </div>
-                            <div className="kai-metadata mt-2 truncate">
-                              {m.source_url ? (
-                                <a href={m.source_url} target="_blank" rel="noreferrer" className="hover:text-ink">{m.source_url}</a>
-                              ) : "no source url"}
-                            </div>
-                            <div className="kai-metadata mt-1">img {m.image_hash.slice(0, 10)}…</div>
+                            {m.page_title && <div className="mt-1 truncate text-sm">{m.page_title}</div>}
+                            {m.caption && <div className="kai-metadata mt-0.5 line-clamp-2">{m.caption}</div>}
+                            {m.names && m.names.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {m.names.slice(0, 4).map((n) => (
+                                  <span key={n} className="rounded border border-line px-1.5 py-0.5 text-xs" style={{ color: "var(--kai-warn)" }}>{n}</span>
+                                ))}
+                              </div>
+                            )}
+                            {m.source_url && (
+                              <div className="mt-2 flex gap-2">
+                                <button
+                                  onClick={() => setFrameCtx({ url: m.source_url!, title: m.page_title, caption: m.caption, names: m.names, imageUrl: m.image_url })}
+                                  className="rounded border border-line px-2 py-1 text-xs hover:bg-panel-2"
+                                >
+                                  Open in frame
+                                </button>
+                                <a href={m.source_url} target="_blank" rel="noreferrer" className="rounded border border-line px-2 py-1 text-xs hover:bg-panel-2">
+                                  Read more ↗
+                                </a>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>

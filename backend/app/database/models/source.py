@@ -41,6 +41,8 @@ class Page(UUIDMixin, TimestampMixin, table=True):
     crawl_status: str = Field(default="pending")  # pending|ok|skipped|failed
     images_found: int = Field(default=0)
     faces_found: int = Field(default=0)
+    title: str | None = Field(default=None)
+    description: str | None = Field(default=None)
 
 
 class Image(UUIDMixin, TimestampMixin, table=True):

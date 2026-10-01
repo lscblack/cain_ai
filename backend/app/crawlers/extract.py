@@ -70,6 +70,84 @@ def extract_links(html: str, base_url: str, *, same_host_only: bool = True) -> l
     return out
 
 
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+_META_DESC_RE = re.compile(
+    r"<meta\b[^>]*?(?:name|property)\s*=\s*[\"'](?:description|og:description)[\"'][^>]*?\bcontent\s*=\s*[\"']([^\"']+)[\"']",
+    re.I,
+)
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
+_ALT_RE = re.compile(r"\balt\s*=\s*[\"']([^\"']+)[\"']", re.I)
+_FIGCAPTION_RE = re.compile(r"<figcaption[^>]*>(.*?)</figcaption>", re.I | re.S)
+_TAG_STRIP_RE = re.compile(r"<[^>]+>")
+# A person-name-ish token: 2–3 capitalized words (allows apostrophes/hyphens)
+_NAME_RE = re.compile(r"\b([A-Z][a-z'’\-]+(?:\s+[A-Z][a-z'’\-]+){1,2})\b")
+_NAME_STOP = {
+    "The New", "New Times", "Read More", "All Rights", "Rights Reserved", "Privacy Policy",
+    "Terms Of", "Sign In", "Log In", "Home News", "United States", "New York", "Getty Images",
+    "Prime Minister", "President Paul", "Click Here", "Our Team", "Contact Us",
+}
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", _TAG_STRIP_RE.sub(" ", text or "")).strip()
+
+
+def extract_page_meta(html: str) -> dict:
+    html = html or ""
+    title = _clean(_TITLE_RE.search(html).group(1)) if _TITLE_RE.search(html) else None
+    desc_m = _META_DESC_RE.search(html)
+    description = _clean(desc_m.group(1)) if desc_m else None
+    return {"title": title, "description": description}
+
+
+def extract_person_names(html: str, *, limit: int = 15) -> list[str]:
+    """Best-effort candidate person names from captions, alt text, and title.
+    Noisy by nature — surfaced as 'possible names', never as confirmed identity."""
+    html = html or ""
+    sources: list[str] = []
+    sources += [_clean(c) for c in _FIGCAPTION_RE.findall(html)]
+    sources += _ALT_RE.findall(html)
+    m = _TITLE_RE.search(html)
+    if m:
+        sources.append(_clean(m.group(1)))
+    found: list[str] = []
+    for s in sources:
+        for cand in _NAME_RE.findall(s or ""):
+            c = cand.strip()
+            if c and c not in _NAME_STOP and c not in found and len(c) <= 40:
+                found.append(c)
+    return found[:limit]
+
+
+def extract_images_with_context(html: str, base_url: str) -> list[dict]:
+    """Return [{url, alt, caption}] — pairs each image with its alt text and the
+    nearest following <figcaption>, so faces keep a human-readable label."""
+    html = html or ""
+    urls = extract_image_urls(html, base_url)
+    url_set = {u for u in urls}
+
+    # map absolute url -> alt (from the <img> tag that referenced it)
+    alt_by_url: dict[str, str] = {}
+    for tag in _IMG_TAG_RE.findall(html):
+        alt_m = _ALT_RE.search(tag)
+        if not alt_m:
+            continue
+        alt = _clean(alt_m.group(1))
+        for src in _SRC_RE.findall(tag) + [p.strip().split(" ")[0] for ss in _SRCSET_RE.findall(tag) for p in ss.split(",")]:
+            absu = urljoin(base_url, src.strip())
+            if absu in url_set and absu not in alt_by_url:
+                alt_by_url[absu] = alt
+
+    captions = [_clean(c) for c in _FIGCAPTION_RE.findall(html)]
+    # crude: if there is exactly one image and one caption, pair them
+    default_caption = captions[0] if len(captions) == 1 and len(urls) == 1 else None
+
+    out = []
+    for u in urls:
+        out.append({"url": u, "alt": alt_by_url.get(u), "caption": default_caption})
+    return out
+
+
 def path_allowed(url: str, allowed: list[str], excluded: list[str]) -> bool:
     path = urlsplit(url).path or "/"
     if any(path.startswith(e) for e in excluded if e):

@@ -189,6 +189,10 @@ async def search(
                 "similarity_pct": round(score * 100, 1),
                 "band": band.value if band else "no_match",
                 "crop_url": f"/intelligence/face/crop/{face_id}" if has_crop(face_id) else None,
+                "page_title": (rec.extra or {}).get("page_title"),
+                "caption": (rec.extra or {}).get("caption"),
+                "names": (rec.extra or {}).get("names") or [],
+                "image_url": (rec.extra or {}).get("image_url"),
             }
         )
     return {
@@ -254,6 +258,10 @@ async def search_stream(
                         "similarity_pct": round(score * 100, 1),
                         "band": band.value if band else "no_match",
                         "crop_url": f"/intelligence/face/crop/{rec.id}" if has_crop(str(rec.id)) else None,
+                        "page_title": (rec.extra or {}).get("page_title"),
+                        "caption": (rec.extra or {}).get("caption"),
+                        "names": (rec.extra or {}).get("names") or [],
+                        "image_url": (rec.extra or {}).get("image_url"),
                     }
                 )
             if corpus and i % 50 == 0:
@@ -393,6 +401,10 @@ async def index_list(
             "model": r.model,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "platform": (r.extra or {}).get("platform"),
+            "page_title": (r.extra or {}).get("page_title"),
+            "caption": (r.extra or {}).get("caption"),
+            "names": (r.extra or {}).get("names") or [],
+            "image_url": (r.extra or {}).get("image_url"),
         }
         for r in rows
     ]

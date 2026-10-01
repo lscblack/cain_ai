@@ -17,7 +17,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.net import UnsafeUrlError, validate_public_url
-from app.crawlers.extract import extract_image_urls, extract_links, path_allowed
+from app.crawlers.extract import (
+    extract_images_with_context,
+    extract_links,
+    extract_page_meta,
+    extract_person_names,
+    path_allowed,
+)
 from app.database.models.face import Face
 from app.database.models.source import Image, Page, Source
 from app.intelligence.face.dedup import average_hash, sha256_bytes
@@ -139,15 +145,21 @@ async def crawl_source(
             if changed:
                 page.last_changed_at = _now()
             page.crawl_status = "ok"
+            meta = extract_page_meta(html)
+            page_names = extract_person_names(html)
+            page.title = meta.get("title")
+            page.description = meta.get("description")
             session.add(page)
             await session.flush()
 
-            img_urls = extract_image_urls(html, url)[:_MAX_IMAGES_PER_PAGE]
+            contexts = extract_images_with_context(html, url)[:_MAX_IMAGES_PER_PAGE]
             page_images = 0
             page_faces = 0
-            for img_url in img_urls:
+            for ctx in contexts:
                 faces_added, is_dup = await _process_image(
-                    session, source, page, img_url, fetch=fetch, engine=engine, stats=stats, safe=safe
+                    session, source, page, ctx["url"], fetch=fetch, engine=engine, stats=stats,
+                    safe=safe, context={"alt": ctx.get("alt"), "caption": ctx.get("caption"),
+                                        "page_title": page.title, "names": page_names},
                 )
                 if is_dup:
                     continue
@@ -167,6 +179,13 @@ async def crawl_source(
                 ):
                     queue.append((link, depth + 1))
 
+        # Commit per page so locks are released incrementally and a stalled
+        # site never holds a long transaction (which blocks DDL/other work).
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+
     source.last_crawled_at = _now()
     source.status = "idle"
     session.add(source)
@@ -184,6 +203,7 @@ async def _process_image(
     engine: FaceEngine | None,
     stats: CrawlStats,
     safe: SafeCheck = _safe,
+    context: dict | None = None,
 ) -> tuple[int, bool]:
     if not await safe(img_url):
         return 0, False
@@ -223,6 +243,7 @@ async def _process_image(
             faces = []
         from app.intelligence.face.crops import save_crop
 
+        ctx = context or {}
         for f in faces:
             rec = Face(
                 source_url=page.url,
@@ -234,7 +255,14 @@ async def _process_image(
                 model_version=engine.model_version,
                 embedding_dim=len(f.embedding),
                 embedding=f.embedding,
-                extra=f.extra,
+                extra={
+                    **f.extra,
+                    "image_url": img_url,
+                    "page_title": ctx.get("page_title"),
+                    "caption": ctx.get("caption"),
+                    "alt": ctx.get("alt"),
+                    "names": ctx.get("names") or [],
+                },
             )
             session.add(rec)
             await session.flush()

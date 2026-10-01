@@ -3,6 +3,7 @@ import { Images, RefreshCw } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
+import { SourceFrame, type SourceContext } from "@/components/SourceFrame";
 
 interface IndexedFace {
   face_id: string;
@@ -12,6 +13,10 @@ interface IndexedFace {
   quality: number;
   platform: string | null;
   created_at: string | null;
+  page_title: string | null;
+  caption: string | null;
+  names: string[];
+  image_url: string | null;
 }
 
 const PAGE = 60;
@@ -20,6 +25,7 @@ export function FaceIndex() {
   const [faces, setFaces] = useState<IndexedFace[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [frameCtx, setFrameCtx] = useState<SourceContext | null>(null);
 
   function load(o = offset) {
     api.get<{ total: number; faces: IndexedFace[] }>(`/intelligence/face/index-list?limit=${PAGE}&offset=${o}`)
@@ -31,6 +37,7 @@ export function FaceIndex() {
 
   return (
     <div>
+      {frameCtx && <SourceFrame ctx={frameCtx} onClose={() => setFrameCtx(null)} />}
       <div className="mb-5 flex items-center gap-2">
         <Images size={18} className="text-muted" />
         <h1 className="text-lg font-semibold">Available Faces</h1>
@@ -58,14 +65,27 @@ export function FaceIndex() {
               )}
             </div>
             <div className="p-2">
-              {f.source_url ? (
-                <a href={f.source_url.startsWith("http") ? f.source_url : undefined} target="_blank" rel="noreferrer" className="kai-metadata block truncate hover:text-ink">
-                  {f.platform ? `${f.platform}` : f.source_url}
-                </a>
+              {f.caption ? (
+                <div className="kai-metadata line-clamp-2" title={f.caption}>{f.caption}</div>
+              ) : f.page_title ? (
+                <div className="kai-metadata truncate" title={f.page_title}>{f.page_title}</div>
               ) : (
-                <span className="kai-metadata">—</span>
+                <div className="kai-metadata truncate">{f.platform ?? f.source_url ?? "—"}</div>
               )}
-              <div className="kai-metadata">q {Math.round((f.quality ?? 0) * 100)}%</div>
+              {f.names && f.names.length > 0 && (
+                <div className="kai-metadata truncate" style={{ color: "var(--kai-warn)" }}>{f.names.slice(0, 2).join(", ")}</div>
+              )}
+              <div className="mt-1 flex items-center justify-between">
+                <span className="kai-metadata">q {Math.round((f.quality ?? 0) * 100)}%</span>
+                {f.source_url && f.source_url.startsWith("http") && (
+                  <button
+                    onClick={() => setFrameCtx({ url: f.source_url!, title: f.page_title, caption: f.caption, names: f.names, imageUrl: f.image_url })}
+                    className="kai-metadata hover:text-ink"
+                  >
+                    open ↗
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}

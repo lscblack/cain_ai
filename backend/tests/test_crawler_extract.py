@@ -78,3 +78,33 @@ def test_extract_lazyload_and_meta():
     # logo skipped, data: URI skipped
     assert all("logo" not in u for u in imgs)
     assert all(not u.startswith("data:") for u in imgs)
+
+
+from app.crawlers.extract import extract_page_meta, extract_person_names, extract_images_with_context
+
+CTX_HTML = """
+<html><head><title>Minister Jean Bosco opens expo</title>
+<meta name="description" content="Coverage of the national expo in Kigali."></head>
+<body>
+  <figure><img src="/uploads/jean.jpg" alt="Jean Bosco at the expo"><figcaption>Jean Bosco speaks</figcaption></figure>
+</body></html>
+"""
+
+
+def test_extract_page_meta():
+    m = extract_page_meta(CTX_HTML)
+    assert "expo" in (m["title"] or "").lower()
+    assert "kigali" in (m["description"] or "").lower()
+
+
+def test_extract_person_names():
+    names = extract_person_names(CTX_HTML)
+    assert "Jean Bosco" in names
+
+
+def test_extract_images_with_context():
+    imgs = extract_images_with_context(CTX_HTML, "https://news.rw/story")
+    assert len(imgs) == 1
+    assert imgs[0]["url"] == "https://news.rw/uploads/jean.jpg"
+    assert imgs[0]["alt"] == "Jean Bosco at the expo"
+    assert imgs[0]["caption"] == "Jean Bosco speaks"
