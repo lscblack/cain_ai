@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, health
+from app.api import auth, health, investigations
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -29,6 +29,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(investigations.router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:
