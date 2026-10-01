@@ -253,6 +253,7 @@ async def search_stream(
                         "similarity": round(score, 4),
                         "similarity_pct": round(score * 100, 1),
                         "band": band.value if band else "no_match",
+                        "crop_url": f"/intelligence/face/crop/{rec.id}" if has_crop(str(rec.id)) else None,
                     }
                 )
             if corpus and i % 50 == 0:
