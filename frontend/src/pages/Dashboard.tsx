@@ -1,8 +1,6 @@
 import { motion } from "framer-motion";
 import { Users, Phone, AtSign, Database, Search } from "lucide-react";
 
-import { AppShell } from "@/components/AppShell";
-
 const STATS = [
   { icon: Users, label: "Faces", value: "0" },
   { icon: Phone, label: "Phones", value: "0" },
@@ -12,7 +10,7 @@ const STATS = [
 
 export function Dashboard() {
   return (
-    <AppShell>
+    <>
       {/* Universal search bar (wired in Phase 3) */}
       <div className="mb-6 flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3">
         <Search size={16} className="text-muted" />
@@ -57,6 +55,6 @@ export function Dashboard() {
           <div className="text-sm text-muted">Indexing starts in Phase 9–10.</div>
         </div>
       </div>
-    </AppShell>
+    </>
   );
 }

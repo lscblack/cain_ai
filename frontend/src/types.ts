@@ -24,3 +24,68 @@ export class ApiError extends Error {
     this.detail = detail;
   }
 }
+
+export type EntityType =
+  | "face" | "phone" | "email" | "username" | "domain" | "url" | "image"
+  | "organization" | "location" | "document" | "vehicle" | "aircraft" | "vessel";
+
+export interface Investigation {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  status: "open" | "archived";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestigationDetail extends Investigation {
+  entity_count: number;
+  evidence_count: number;
+  relationship_count: number;
+}
+
+export interface EntityNode {
+  id: string;
+  investigation_id: string;
+  type: EntityType;
+  value: string;
+  label: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface EvidenceItem {
+  id: string;
+  investigation_id: string;
+  entity_id: string | null;
+  type: EntityType;
+  source_url: string;
+  collected_at: string;
+  first_seen: string | null;
+  last_seen: string | null;
+  hash: string | null;
+  confidence: number | null;
+  band: string | null;
+  raw_metadata: Record<string, unknown>;
+  processed_metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface RelationshipEdge {
+  id: string;
+  investigation_id: string;
+  source_entity_id: string;
+  target_entity_id: string;
+  rel_type: string;
+  source_url: string;
+  observed_at: string;
+  confidence: number | null;
+  evidence_excerpt: string | null;
+  created_at: string;
+}
+
+export interface CaseGraph {
+  nodes: EntityNode[];
+  edges: RelationshipEdge[];
+}

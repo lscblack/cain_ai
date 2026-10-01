@@ -1,6 +1,11 @@
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+
+import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { Login } from "@/pages/Login";
 import { Dashboard } from "@/pages/Dashboard";
+import { Investigations } from "@/pages/Investigations";
+import { Investigation } from "@/pages/Investigation";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -13,5 +18,18 @@ export default function App() {
     );
   }
 
-  return operator ? <Dashboard /> : <Login />;
+  if (!operator) return <Login />;
+
+  return (
+    <BrowserRouter>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/investigations" element={<Investigations />} />
+          <Route path="/investigations/:id" element={<Investigation />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AppShell>
+    </BrowserRouter>
+  );
 }
