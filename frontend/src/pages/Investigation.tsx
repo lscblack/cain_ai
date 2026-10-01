@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, Plus, Sparkles } from "lucide-react";
 
+import { api } from "@/lib/api";
 import { investigationsApi } from "@/lib/investigations";
 import type { EntityNode, EntityType, EvidenceItem, InvestigationDetail } from "@/types";
 
@@ -26,6 +27,30 @@ export function Investigation() {
   // new evidence
   const [evType, setEvType] = useState<EntityType>("url");
   const [evUrl, setEvUrl] = useState("");
+  // AI analyst
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analystError, setAnalystError] = useState<string | null>(null);
+
+  async function runAnalyst() {
+    setAnalyzing(true);
+    setAnalystError(null);
+    setAnalysis(null);
+    try {
+      const res = await api.post<{ summary: string; model: string }>(
+        `/investigations/${id}/analyze`,
+      );
+      setAnalysis(res.summary);
+    } catch (e: any) {
+      setAnalystError(
+        e?.detail === "ai_unavailable"
+          ? "AI analyst is not configured (set OPENROUTER_API_KEY or OPENAI_API_KEY)."
+          : "Analysis failed.",
+      );
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   async function load() {
     try {
@@ -188,6 +213,32 @@ export function Investigation() {
           </div>
         </div>
       )}
+
+      {/* AI analyst */}
+      <div className="mt-8 rounded-lg border border-line bg-panel p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} className="text-muted" />
+            <span className="kai-metadata uppercase">AI Analyst</span>
+          </div>
+          <button
+            onClick={runAnalyst}
+            disabled={analyzing}
+            className="rounded-md border border-line px-3 py-1.5 text-xs hover:bg-panel-2 disabled:opacity-50"
+          >
+            {analyzing ? "Analyzing…" : "Summarize evidence"}
+          </button>
+        </div>
+        {analystError && <div className="text-sm" style={{ color: "var(--kai-accent)" }}>{analystError}</div>}
+        {analysis && (
+          <div className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{analysis}</div>
+        )}
+        {!analysis && !analystError && (
+          <div className="text-sm text-muted">
+            Generate a grounded summary of this investigation's evidence. Every claim is traceable to a source.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

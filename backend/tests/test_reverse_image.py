@@ -1,12 +1,15 @@
-import pytest
+import types
 
+import app.providers.reverse_image as rimod
 from app.providers.reverse_image import SerpApiReverseImage
 
 
-async def test_unavailable_without_key(monkeypatch):
-    from app.core import config
+def _settings_with(key: str):
+    return types.SimpleNamespace(serpapi_api_key=key)
 
-    monkeypatch.setattr(config.get_settings(), "serpapi_api_key", "", raising=False)
+
+async def test_unavailable_without_key(monkeypatch):
+    monkeypatch.setattr(rimod, "get_settings", lambda: _settings_with(""))
     p = SerpApiReverseImage()
     health = await p.health_check()
     assert health.healthy is False
@@ -15,9 +18,7 @@ async def test_unavailable_without_key(monkeypatch):
 
 
 async def test_search_with_mocked_http(monkeypatch):
-    from app.core import config
-
-    monkeypatch.setattr(config.get_settings(), "serpapi_api_key", "test-key", raising=False)
+    monkeypatch.setattr(rimod, "get_settings", lambda: _settings_with("test-key"))
 
     async def fake_get(url, params):
         assert params["api_key"] == "test-key"
