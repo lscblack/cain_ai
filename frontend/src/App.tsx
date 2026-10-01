@@ -12,6 +12,7 @@ import { Email } from "@/pages/Email";
 import { Username } from "@/pages/Username";
 import { Graph } from "@/pages/Graph";
 import { Face } from "@/pages/Face";
+import { FaceIndex } from "@/pages/FaceIndex";
 import { Sources } from "@/pages/Sources";
 import { PowerUp } from "@/pages/PowerUp";
 import { MapView } from "@/pages/MapView";
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/email" element={<Email />} />
           <Route path="/username" element={<Username />} />
           <Route path="/face" element={<Face />} />
+          <Route path="/faces" element={<FaceIndex />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/graph" element={<Graph />} />
           <Route path="/map" element={<MapView />} />

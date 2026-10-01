@@ -139,3 +139,10 @@ async def test_discover_unavailable_without_providers(client, auth_headers):
     assert r.status_code == 200
     assert r.json()["available"] is False
     assert r.json()["detail"] == "no_reverse_image_providers_configured"
+
+
+async def test_index_list_empty(client, auth_headers):
+    r = await client.get("/intelligence/face/index-list", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["total"] == 0
+    assert r.json()["faces"] == []

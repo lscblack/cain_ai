@@ -111,6 +111,15 @@ export function Sources() {
     setTimeout(load, 1500);
   }
 
+  async function crawlAll() {
+    if (!confirm(`Start crawling all ${sources.length} source(s)? This runs in the background (2 at a time).`)) return;
+    const r = await api.post<{ scheduled: number }>("/sources/crawl-all").catch(() => null);
+    if (r) {
+      setApplyMsg(`Crawl started for ${r.scheduled} source(s). Watch the status/stats update below.`);
+      setTimeout(load, 2000);
+    }
+  }
+
   async function seedDefaults() {
     if (!confirm("Seed the curated default source list (150+ domains)?")) return;
     const r = await api.post<{ created: number; skipped: number }>("/sources/seed-defaults").catch(() => null);
@@ -157,7 +166,10 @@ export function Sources() {
       <div className="mb-5 flex items-center gap-2">
         <Database size={18} className="text-muted" />
         <h1 className="text-lg font-semibold">Local Index — Sources</h1>
-        <button onClick={seedDefaults} className="ml-auto rounded-md border border-line px-3 py-1.5 text-xs hover:bg-panel-2">
+        <button onClick={crawlAll} className="ml-auto rounded-md border px-3 py-1.5 text-xs hover:bg-panel-2" style={{ borderColor: "var(--kai-verified)", color: "var(--kai-verified)" }}>
+          ▶ Crawl all
+        </button>
+        <button onClick={seedDefaults} className="rounded-md border border-line px-3 py-1.5 text-xs hover:bg-panel-2">
           Seed default sources
         </button>
         <button onClick={load} className="kai-metadata flex items-center gap-1 hover:text-ink">

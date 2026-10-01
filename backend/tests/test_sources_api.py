@@ -109,3 +109,17 @@ async def test_bulk_update_all(client, auth_headers):
 async def test_bulk_update_requires_field(client, auth_headers):
     r = await client.post("/sources/bulk-update", json={}, headers=auth_headers)
     assert r.status_code == 400
+
+
+async def test_crawl_all_schedules(client, auth_headers):
+    await client.post("/sources", json={"name": "A", "base_url": "https://8.8.8.8/"}, headers=auth_headers)
+    await client.post("/sources", json={"name": "B", "base_url": "https://1.1.1.1/"}, headers=auth_headers)
+    r = await client.post("/sources/crawl-all", headers=auth_headers)
+    assert r.status_code == 202
+    assert r.json()["scheduled"] == 2
+
+
+async def test_crawl_all_empty(client, auth_headers):
+    r = await client.post("/sources/crawl-all", headers=auth_headers)
+    assert r.status_code == 202
+    assert r.json()["scheduled"] == 0

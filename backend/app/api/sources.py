@@ -260,6 +260,43 @@ async def _run_crawl(source_id: uuid.UUID) -> None:
             logger.exception("crawl failed for %s", src.domain)
 
 
+async def _run_crawl_all(source_ids: list[uuid.UUID], concurrency: int = 2) -> None:
+    """Crawl many sources with bounded concurrency (one DB session per crawl)."""
+    import asyncio
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _one(sid: uuid.UUID) -> None:
+        async with sem:
+            await _run_crawl(sid)
+
+    await asyncio.gather(*[_one(sid) for sid in source_ids], return_exceptions=True)
+
+
+@router.post("/crawl-all", status_code=status.HTTP_202_ACCEPTED)
+async def crawl_all(
+    background: BackgroundTasks,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+    category: str | None = None,
+    priority: str | None = None,
+) -> dict:
+    """Start crawling all sources (optionally filtered), with bounded concurrency."""
+    stmt = select(Source.id).where(Source.status != "crawling")
+    if category:
+        stmt = stmt.where(Source.category == category)
+    if priority:
+        stmt = stmt.where(Source.priority == priority)
+    ids = list((await session.execute(stmt)).scalars().all())
+    if not ids:
+        return {"status": "nothing_to_crawl", "scheduled": 0}
+    await AuditRepository(session).record(
+        "source.crawl_all", actor_id=operator.id, detail={"count": len(ids)}
+    )
+    background.add_task(_run_crawl_all, ids)
+    return {"status": "crawl_started", "scheduled": len(ids)}
+
+
 @router.post("/{sid}/crawl", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_crawl(
     sid: uuid.UUID,

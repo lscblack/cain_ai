@@ -363,3 +363,36 @@ async def index_sample(
         if has_crop(str(r.id))
     ]
     return {"samples": samples, "count": len(samples)}
+
+
+@router.get("/index-list")
+async def index_list(
+    limit: int = 60,
+    offset: int = 0,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Browse all indexed faces (available faces) with crop thumbnails + provenance."""
+    from sqlalchemy import desc, func, select as _select
+    from app.database.models.face import Face as _Face
+
+    total = int((await session.execute(_select(func.count()).select_from(_Face))).scalar_one())
+    rows = (
+        await session.execute(
+            _select(_Face).order_by(desc(_Face.created_at)).limit(max(1, min(limit, 200))).offset(max(0, offset))
+        )
+    ).scalars().all()
+    faces = [
+        {
+            "face_id": str(r.id),
+            "crop_url": f"/intelligence/face/crop/{r.id}" if has_crop(str(r.id)) else None,
+            "source_url": r.source_url,
+            "investigation_id": str(r.investigation_id) if r.investigation_id else None,
+            "quality": r.quality,
+            "model": r.model,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "platform": (r.extra or {}).get("platform"),
+        }
+        for r in rows
+    ]
+    return {"total": total, "limit": limit, "offset": offset, "faces": faces}
