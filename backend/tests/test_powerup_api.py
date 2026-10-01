@@ -48,3 +48,21 @@ async def test_provider_toggle(client, auth_headers):
     assert phone["enabled"] is False
     # unknown provider -> 404
     assert (await client.post("/powerup/providers/nope/toggle", json={"enabled": True}, headers=auth_headers)).status_code == 404
+
+
+async def test_settings_keys_list_and_set(client, auth_headers, tmp_path, monkeypatch):
+    # redirect .env writes to a temp file
+    import app.core.envfile as envfile
+    monkeypatch.setattr(envfile, "ENV_PATH", tmp_path / ".env")
+
+    lst = (await client.get("/settings/keys", headers=auth_headers)).json()["keys"]
+    assert any(k["field"] == "tomtom_api_key" for k in lst)
+    for k in lst:  # never leak raw secrets
+        assert "value" not in k
+
+    r = await client.post("/settings/keys", json={"values": {"ai_model": "openai/gpt-4o"}}, headers=auth_headers)
+    assert r.status_code == 200
+    assert (tmp_path / ".env").read_text().count("AI_MODEL=openai/gpt-4o") == 1
+
+    bad = await client.post("/settings/keys", json={"values": {"not_a_key": "x"}}, headers=auth_headers)
+    assert bad.status_code == 400

@@ -1,7 +1,83 @@
 import { useEffect, useState } from "react";
-import { Zap } from "lucide-react";
+import { Zap, KeyRound, Save } from "lucide-react";
 
 import { api } from "@/lib/api";
+
+interface ManagedKey {
+  field: string;
+  env: string;
+  label: string;
+  secret: boolean;
+  configured: boolean;
+  masked: string | null;
+}
+
+function KeysEditor({ onSaved }: { onSaved: () => void }) {
+  const [keys, setKeys] = useState<ManagedKey[]>([]);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  function load() {
+    api.get<{ keys: ManagedKey[] }>("/settings/keys").then((r) => setKeys(r.keys)).catch(() => setKeys([]));
+  }
+  useEffect(load, []);
+
+  async function save() {
+    const values = Object.fromEntries(Object.entries(edits).filter(([, v]) => v.trim() !== ""));
+    if (Object.keys(values).length === 0) return;
+    setSaving(true);
+    setMsg(null);
+    try {
+      await api.post("/settings/keys", { values });
+      setEdits({});
+      setMsg("Saved to .env and reloaded.");
+      load();
+      onSaved();
+    } catch {
+      setMsg("Save failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mb-8 rounded-lg border border-line bg-panel p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <KeyRound size={16} className="text-muted" />
+        <span className="kai-metadata uppercase">Provider keys</span>
+        <span className="kai-metadata text-muted">— saved to backend .env, never shown back</span>
+        <button
+          onClick={save}
+          disabled={saving || Object.keys(edits).length === 0}
+          className="ml-auto flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-xs hover:bg-panel-2 disabled:opacity-40"
+        >
+          <Save size={13} /> {saving ? "Saving…" : "Save keys"}
+        </button>
+      </div>
+      {msg && <div className="mb-2 kai-metadata" style={{ color: "var(--kai-verified)" }}>{msg}</div>}
+      <div className="grid gap-3 md:grid-cols-2">
+        {keys.map((k) => (
+          <label key={k.field} className="block">
+            <div className="kai-metadata mb-1 flex items-center justify-between">
+              <span>{k.label}</span>
+              <span style={{ color: k.configured ? "var(--kai-verified)" : "var(--kai-muted)" }}>
+                {k.configured ? "set" : "empty"}
+              </span>
+            </div>
+            <input
+              type={k.secret ? "password" : "text"}
+              value={edits[k.field] ?? ""}
+              onChange={(e) => setEdits((s) => ({ ...s, [k.field]: e.target.value }))}
+              placeholder={k.configured ? (k.masked ?? "••••") : `set ${k.env}`}
+              className="w-full rounded-md border border-line bg-panel-2 px-3 py-2 font-mono text-xs outline-none focus:border-muted"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface Provider {
   name: string;
@@ -39,9 +115,11 @@ export function PowerUp() {
       </div>
       <p className="mb-5 max-w-2xl text-sm text-muted">
         Intelligence providers KAI can use. Local providers run offline. External
-        providers require an API key in the backend <span className="font-mono">.env</span> and
-        report <span className="font-mono">UNAVAILABLE</span> until configured. Secrets never reach this UI.
+        providers need an API key — add it below and it's written to the backend
+        <span className="font-mono"> .env</span> and hot-reloaded. Secrets are never shown back to this UI.
       </p>
+
+      <KeysEditor onSaved={load} />
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {providers.map((p) => {

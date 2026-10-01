@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ScanFace, Upload } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { AuthImg } from "@/components/AuthImg";
 
 type Mode = "search" | "compare" | "discover";
 
@@ -22,6 +23,7 @@ interface SearchMatch {
   similarity: number;
   similarity_pct: number;
   band: string;
+  crop_url?: string | null;
 }
 
 const BAND_LABEL: Record<string, string> = {
@@ -63,7 +65,17 @@ export function Face() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stages, setStages] = useState<string[]>([]);
+  const [scanCrops, setScanCrops] = useState<string[]>([]);
+  const [scanTick, setScanTick] = useState(0);
+  const [progressPct, setProgressPct] = useState(0);
   const queryInput = useRef<HTMLInputElement>(null);
+
+  // shifting-image scanner animation while a search runs
+  useEffect(() => {
+    if (!(loading && mode === "search" && scanCrops.length)) return;
+    const id = setInterval(() => setScanTick((t) => t + 1), 140);
+    return () => clearInterval(id);
+  }, [loading, mode, scanCrops.length]);
 
   useEffect(() => {
     api.get<FaceStatus>("/intelligence/face/status").then(setStatus).catch(() => setStatus(null));
@@ -83,6 +95,14 @@ export function Face() {
     setError(null);
     setMatches(null);
     setStages([]);
+    setProgressPct(0);
+    // pull indexed crop thumbnails to animate the "scanning" strip
+    try {
+      const s = await api.get<{ samples: { crop_url: string }[] }>("/intelligence/face/index-sample?limit=60");
+      setScanCrops(s.samples.map((x) => x.crop_url));
+    } catch {
+      setScanCrops([]);
+    }
     try {
       const fd = new FormData();
       fd.append("file", queryFile);
@@ -115,7 +135,10 @@ export function Face() {
             const label = STAGE_LABEL[payload.name] ?? payload.name;
             const detail = payload.count != null ? ` (${payload.count})` : payload.indexed != null ? ` (${payload.indexed} indexed)` : "";
             setStages((s) => [...s, label + detail]);
+          } else if (ev === "progress") {
+            if (payload.total) setProgressPct(Math.round((payload.scanned / payload.total) * 100));
           } else if (ev === "result") {
+            setProgressPct(100);
             setMatches(payload.matches ?? []);
           } else if (ev === "error") {
             setError(payload.detail ?? "Search failed.");
@@ -250,49 +273,88 @@ export function Face() {
 
         {/* Results */}
         <div>
-          {mode === "search" && stages.length > 0 && (
-            <div className="mb-4 space-y-1">
-              {stages.map((s, i) => (
-                <div key={i} className="kai-metadata flex items-center gap-2">
-                  <span style={{ color: "var(--kai-verified)" }}>✓</span> {s}
-                </div>
-              ))}
-              {loading && <div className="kai-metadata" style={{ color: "var(--kai-warn)" }}>● working…</div>}
-            </div>
-          )}
-          {mode === "search" && matches && (
-            <>
-              <div className="kai-metadata mb-3 uppercase">
-                {matches.length === 0 ? "No match found in current index" : `${matches.length} potential matches`}
+          {/* Live scanning animation: shifting indexed faces while comparing */}
+          {mode === "search" && loading && (
+            <div className="mb-5 rounded-lg border border-line bg-panel-2 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="kai-metadata uppercase" style={{ color: "var(--kai-warn)" }}>
+                  ● Scanning local index…
+                </span>
+                <span className="font-mono text-sm">{progressPct}%</span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {matches.map((m, i) => (
-                  <motion.div
-                    key={m.face_id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.04 }}
-                    className="rounded-lg border border-line bg-panel p-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-lg">{m.similarity_pct}%</span>
-                      <span className="kai-metadata" style={{ color: BAND_COLOR[m.band] }}>
-                        {BAND_LABEL[m.band] ?? m.band}
-                      </span>
-                    </div>
-                    <div className="kai-metadata mt-2 truncate">
-                      {m.source_url ? (
-                        <a href={m.source_url} target="_blank" rel="noreferrer" className="hover:text-ink">
-                          {m.source_url}
-                        </a>
-                      ) : (
-                        "no source url"
-                      )}
-                    </div>
-                    <div className="kai-metadata mt-1">img {m.image_hash.slice(0, 12)}…</div>
-                  </motion.div>
+              {scanCrops.length > 0 ? (
+                <div className="flex gap-2 overflow-hidden">
+                  {Array.from({ length: 8 }).map((_, i) => {
+                    const idx = (scanTick + i) % scanCrops.length;
+                    return (
+                      <motion.div
+                        key={i}
+                        animate={{ opacity: [0.3, 1, 0.3] }}
+                        transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.05 }}
+                        className="h-16 w-16 shrink-0 overflow-hidden rounded border border-line"
+                      >
+                        <AuthImg path={scanCrops[idx]} className="h-full w-full object-cover" />
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="kai-metadata">No indexed face crops yet — index some via crawl or detect.</div>
+              )}
+              <div className="mt-3 h-1 w-full overflow-hidden rounded bg-panel">
+                <div className="h-full" style={{ width: `${progressPct}%`, background: "var(--kai-accent)", transition: "width .2s" }} />
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5">
+                {stages.map((s, i) => (
+                  <span key={i} className="kai-metadata"><span style={{ color: "var(--kai-verified)" }}>✓</span> {s}</span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {mode === "search" && matches && !loading && (
+            <>
+              {matches.length === 0 ? (
+                <div className="rounded-lg border p-6 text-center" style={{ borderColor: "var(--kai-border)" }}>
+                  <div className="text-lg font-semibold" style={{ color: "var(--kai-muted)" }}>NO MATCH FOUND</div>
+                  <div className="kai-metadata mt-1">in the current local index</div>
+                </div>
+              ) : (
+                <>
+                  <div className="kai-metadata mb-3 uppercase" style={{ color: "var(--kai-verified)" }}>
+                    {matches.length} potential match{matches.length > 1 ? "es" : ""} found
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {matches.map((m, i) => (
+                      <motion.div
+                        key={m.face_id}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: i * 0.05 }}
+                        className="overflow-hidden rounded-lg border border-line bg-panel"
+                      >
+                        <div className="flex">
+                          {m.crop_url && <AuthImg path={m.crop_url} className="h-24 w-24 shrink-0 object-cover" />}
+                          <div className="min-w-0 flex-1 p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-lg">{m.similarity_pct}%</span>
+                              <span className="kai-metadata" style={{ color: BAND_COLOR[m.band] }}>
+                                {BAND_LABEL[m.band] ?? m.band}
+                              </span>
+                            </div>
+                            <div className="kai-metadata mt-2 truncate">
+                              {m.source_url ? (
+                                <a href={m.source_url} target="_blank" rel="noreferrer" className="hover:text-ink">{m.source_url}</a>
+                              ) : "no source url"}
+                            </div>
+                            <div className="kai-metadata mt-1">img {m.image_hash.slice(0, 10)}…</div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
 

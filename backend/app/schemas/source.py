@@ -21,6 +21,10 @@ class SourceCreate(BaseModel):
     @field_validator("base_url")
     @classmethod
     def _check_url(cls, v: str) -> str:
+        v = (v or "").strip()
+        # Accept a bare domain (example.com) by defaulting to https://.
+        if v and "://" not in v:
+            v = f"https://{v}"
         # Block SSRF targets at creation time (resolves DNS).
         try:
             validate_public_url(v)
@@ -43,6 +47,21 @@ class SourceOut(BaseModel):
     last_crawled_at: str | None
     last_error: str | None
     created_at: datetime
+
+
+class BulkSourceIn(BaseModel):
+    # Either a list of SourceCreate OR a CSV/line-based text blob.
+    items: list[SourceCreate] | None = None
+    csv: str | None = None
+    # defaults applied to CSV rows that omit a field
+    default_max_depth: int = Field(default=1, ge=0, le=5)
+    default_max_pages: int = Field(default=50, ge=1, le=5000)
+    default_schedule: str = Field(default="manual", pattern="^(manual|hourly|6h|daily|weekly)$")
+
+
+class BulkSourceResult(BaseModel):
+    created: list[SourceOut]
+    errors: list[dict]
 
 
 class SourceStats(BaseModel):

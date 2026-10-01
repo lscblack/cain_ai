@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     analyst, auth, emails, export, faces, geo, health, investigations, maps, phones,
-    powerup, search, sources, system, timeline, usernames,
+    powerup, search, settings as settings_api, sources, system, timeline, usernames,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(export.router)
     app.include_router(system.router)
     app.include_router(geo.router)
+    app.include_router(settings_api.router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:

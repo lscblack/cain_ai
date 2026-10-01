@@ -20,6 +20,7 @@ from app.database.models.user import User
 from app.database.repositories.face_repo import FaceRepository
 from app.database.session import get_session
 from app.intelligence.face.engine import FaceEngine
+from app.intelligence.face.crops import crop_path, has_crop, save_crop
 from app.intelligence.face.service import get_face_engine
 from app.intelligence.face.similarity import (
     POSSIBLE,
@@ -110,6 +111,8 @@ async def detect(
                     extra=f.extra,
                 )
             )
+            await session.flush()
+            save_crop(data, f.bbox, str(rec.id))  # thumbnail for the UI scanner/results
             stored_ids.append(str(rec.id))
         await session.flush()
 
@@ -185,6 +188,7 @@ async def search(
                 "similarity": round(score, 4),
                 "similarity_pct": round(score * 100, 1),
                 "band": band.value if band else "no_match",
+                "crop_url": f"/intelligence/face/crop/{face_id}" if has_crop(face_id) else None,
             }
         )
     return {
@@ -324,3 +328,38 @@ async def discover(
 
     result = await discover_faces(data, candidates, engine=engine, image_fetch=_download_image)
     return {"available": True, **result.to_dict()}
+
+
+@router.get("/crop/{face_id}")
+async def face_crop(
+    face_id: str,
+    operator: User = Depends(get_current_operator),
+):
+    """Serve a stored face-crop thumbnail."""
+    from fastapi.responses import FileResponse
+
+    path = crop_path(face_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="crop_not_found")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get("/index-sample")
+async def index_sample(
+    limit: int = 48,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Recent indexed faces that have a crop — fuels the UI scanning animation."""
+    from sqlalchemy import desc, select as _select
+    from app.database.models.face import Face as _Face
+
+    rows = (
+        await session.execute(_select(_Face).order_by(desc(_Face.created_at)).limit(max(1, min(limit, 200))))
+    ).scalars().all()
+    samples = [
+        {"face_id": str(r.id), "crop_url": f"/intelligence/face/crop/{r.id}", "source_url": r.source_url}
+        for r in rows
+        if has_crop(str(r.id))
+    ]
+    return {"samples": samples, "count": len(samples)}

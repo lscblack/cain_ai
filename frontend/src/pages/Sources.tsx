@@ -32,6 +32,22 @@ export function Sources() {
   const [depth, setDepth] = useState(1);
   const [maxPages, setMaxPages] = useState(50);
   const [error, setError] = useState<string | null>(null);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [showBulk, setShowBulk] = useState(false);
+
+  async function onBulk() {
+    if (!bulkText.trim()) return;
+    setBulkMsg(null);
+    try {
+      const res = await api.post<{ created: any[]; errors: any[] }>("/sources/bulk", { csv: bulkText });
+      setBulkMsg(`Added ${res.created.length} source(s), ${res.errors.length} error(s).`);
+      setBulkText("");
+      await load();
+    } catch {
+      setBulkMsg("Bulk add failed.");
+    }
+  }
 
   async function load() {
     const list = await api.get<Source[]>("/sources").catch(() => []);
@@ -106,6 +122,33 @@ export function Sources() {
         <button className="rounded-md border border-line bg-panel-2 px-4 py-2 text-sm hover:bg-base">Add source</button>
       </form>
       {error && <div className="mb-4 text-sm" style={{ color: "var(--kai-accent)" }}>{error}</div>}
+
+      <div className="mb-6">
+        <button onClick={() => setShowBulk((v) => !v)} className="kai-metadata hover:text-ink">
+          {showBulk ? "▾" : "▸"} Bulk add / paste (CSV)
+        </button>
+        {showBulk && (
+          <div className="mt-2 rounded-lg border border-line bg-panel p-4">
+            <div className="kai-metadata mb-2">
+              One per line: <span className="font-mono">name,base_url,max_depth,max_pages,schedule</span>
+              {" "}— bare domains ok, header row optional.
+            </div>
+            <textarea
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              rows={6}
+              placeholder={"Rwanda News,https://example.rw/,1,50,daily\nKT Press,ktpress.rw\nThe New Times,newtimes.co.rw,2,100"}
+              className="w-full rounded-md border border-line bg-panel-2 px-3 py-2 font-mono text-xs outline-none focus:border-muted"
+            />
+            <div className="mt-2 flex items-center gap-3">
+              <button onClick={onBulk} className="rounded-md border border-line bg-panel-2 px-4 py-2 text-sm hover:bg-base">
+                Add all
+              </button>
+              {bulkMsg && <span className="kai-metadata" style={{ color: "var(--kai-verified)" }}>{bulkMsg}</span>}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="space-y-3">
         {sources.length === 0 && <div className="text-sm text-muted">No sources. Add a permitted public domain to start building the local index.</div>}

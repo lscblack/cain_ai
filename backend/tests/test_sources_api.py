@@ -57,3 +57,20 @@ async def test_delete_source(client, auth_headers):
     ).json()["id"]
     assert (await client.delete(f"/sources/{sid}", headers=auth_headers)).status_code == 204
     assert (await client.get(f"/sources/{sid}/stats", headers=auth_headers)).status_code == 404
+
+
+async def test_bare_domain_accepted(client, auth_headers):
+    r = await client.post("/sources", json={"name": "Bare", "base_url": "example.com"}, headers=auth_headers)
+    assert r.status_code == 201
+    assert r.json()["base_url"].startswith("https://")
+
+
+async def test_bulk_csv_add(client, auth_headers):
+    csv = "name,base_url,max_depth,max_pages\nAlpha,8.8.8.8,1,10\nBeta,https://1.1.1.1/,2,20\nGamma,http://127.0.0.1/"
+    r = await client.post("/sources/bulk", json={"csv": csv}, headers=auth_headers)
+    assert r.status_code == 201
+    body = r.json()
+    assert len(body["created"]) == 2          # Alpha + Beta
+    assert len(body["errors"]) == 1           # Gamma (SSRF loopback) rejected
+    names = {s["name"] for s in body["created"]}
+    assert names == {"Alpha", "Beta"}

@@ -221,21 +221,24 @@ async def _process_image(
             faces = engine.detect_and_embed(resp.body)
         except Exception:
             faces = []
+        from app.intelligence.face.crops import save_crop
+
         for f in faces:
-            session.add(
-                Face(
-                    source_url=page.url,
-                    image_hash=image_hash,
-                    bbox=f.bbox,
-                    det_score=f.det_score,
-                    quality=f.quality,
-                    model=engine.model_name,
-                    model_version=engine.model_version,
-                    embedding_dim=len(f.embedding),
-                    embedding=f.embedding,
-                    extra=f.extra,
-                )
+            rec = Face(
+                source_url=page.url,
+                image_hash=image_hash,
+                bbox=f.bbox,
+                det_score=f.det_score,
+                quality=f.quality,
+                model=engine.model_name,
+                model_version=engine.model_version,
+                embedding_dim=len(f.embedding),
+                embedding=f.embedding,
+                extra=f.extra,
             )
+            session.add(rec)
+            await session.flush()
+            save_crop(resp.body, f.bbox, str(rec.id))
             faces_added += 1
         img_row.faces_found = faces_added
         stats.faces_indexed += faces_added

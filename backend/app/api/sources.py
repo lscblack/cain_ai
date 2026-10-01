@@ -18,7 +18,13 @@ from app.database.models.user import User
 from app.database.repositories.audit_repo import AuditRepository
 from app.database.session import async_session_maker, get_session
 from app.intelligence.face.service import get_face_engine
-from app.schemas.source import SourceCreate, SourceOut, SourceStats
+from app.schemas.source import (
+    BulkSourceIn,
+    BulkSourceResult,
+    SourceCreate,
+    SourceOut,
+    SourceStats,
+)
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 logger = get_logger("kai.sources")
@@ -52,6 +58,65 @@ async def create_source(
     await session.flush()
     await AuditRepository(session).record("source.create", actor_id=operator.id, detail={"domain": domain})
     return SourceOut(**src.model_dump())
+
+
+@router.post("/bulk", response_model=BulkSourceResult, status_code=status.HTTP_201_CREATED)
+async def bulk_create_sources(
+    body: BulkSourceIn,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> BulkSourceResult:
+    """Add many sources at once from a list or pasted CSV / lines.
+
+    CSV columns (header optional): name, base_url[, max_depth, max_pages, schedule].
+    A bare domain is accepted (https:// is assumed)."""
+    import csv as _csv
+    import io
+
+    raw_items: list[dict] = []
+    if body.items:
+        raw_items = [i.model_dump() for i in body.items]
+    elif body.csv:
+        reader = _csv.reader(io.StringIO(body.csv.strip()))
+        for row in reader:
+            cells = [c.strip() for c in row if c is not None]
+            if not cells or not any(cells):
+                continue
+            if cells[0].lower() == "name":  # header
+                continue
+            name = cells[0]
+            base_url = cells[1] if len(cells) > 1 and cells[1] else name
+            raw_items.append(
+                {
+                    "name": name,
+                    "base_url": base_url,
+                    "max_depth": int(cells[2]) if len(cells) > 2 and cells[2] else body.default_max_depth,
+                    "max_pages": int(cells[3]) if len(cells) > 3 and cells[3] else body.default_max_pages,
+                    "schedule": cells[4] if len(cells) > 4 and cells[4] else body.default_schedule,
+                }
+            )
+
+    created: list[SourceOut] = []
+    errors: list[dict] = []
+    for idx, item in enumerate(raw_items):
+        try:
+            payload = SourceCreate(**item)  # validates + normalizes URL
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"row": idx + 1, "input": item, "error": str(exc)[:200]})
+            continue
+        domain = urlsplit(payload.base_url).hostname or ""
+        src = Source(
+            name=payload.name, base_url=payload.base_url, domain=domain,
+            allowed_paths=payload.allowed_paths, excluded_paths=payload.excluded_paths,
+            max_depth=payload.max_depth, max_pages=payload.max_pages, schedule=payload.schedule,
+        )
+        session.add(src)
+        await session.flush()
+        created.append(SourceOut(**src.model_dump()))
+    await AuditRepository(session).record(
+        "source.bulk_create", actor_id=operator.id, detail={"created": len(created), "errors": len(errors)}
+    )
+    return BulkSourceResult(created=created, errors=errors)
 
 
 @router.get("", response_model=list[SourceOut])
@@ -92,7 +157,12 @@ async def delete_source(
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    from sqlalchemy import delete as sa_delete
+
     src = await _get_or_404(sid, session)
+    # cascade: pages + images reference this source
+    await session.execute(sa_delete(Image).where(Image.source_id == sid))
+    await session.execute(sa_delete(Page).where(Page.source_id == sid))
     await session.delete(src)
     await session.flush()
 
