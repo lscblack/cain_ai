@@ -5,6 +5,7 @@ from app.database.models.evidence import Evidence
 from app.database.models.face import Face
 from app.database.models.investigation import Investigation
 from app.database.models.relationship import Relationship
+from app.database.models.source import Image, Page, Source
 from app.database.models.user import User
 
 __all__ = [
@@ -15,4 +16,7 @@ __all__ = [
     "Evidence",
     "Relationship",
     "Face",
+    "Source",
+    "Page",
+    "Image",
 ]

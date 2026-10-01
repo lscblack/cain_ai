@@ -13,6 +13,7 @@ import {
   Map,
   Clock,
   Zap,
+  Database,
   LogOut,
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: AtSign, label: "Emails", to: "/email" },
   { icon: UserSearch, label: "Usernames", to: "/username" },
   { icon: Globe, label: "Domains" },
+  { icon: Database, label: "Sources", to: "/sources" },
   { icon: Share2, label: "Graph", to: "/graph" },
   { icon: Map, label: "Map" },
   { icon: Clock, label: "Timeline" },
