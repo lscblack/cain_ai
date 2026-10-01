@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/mnt/42da9889-4773-493d-914e-04647afdab69/projects/ventures/cain_ai/backend
-ExecStart=/home/lscblack/miniconda3/envs/fastapi_setup/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --app-dir .
+ExecStart=/home/lscblack/miniconda3/bin/conda run -n fastapi_setup --no-capture-output uvicorn app.main:app --host 127.0.0.1 --port 8001 --app-dir .
 Restart=always
 RestartSec=3
 # InsightFace model cache lives in HOME/.insightface
