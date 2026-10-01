@@ -6,6 +6,7 @@ import { Login } from "@/pages/Login";
 import { Dashboard } from "@/pages/Dashboard";
 import { Investigations } from "@/pages/Investigations";
 import { Investigation } from "@/pages/Investigation";
+import { Search } from "@/pages/Search";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -25,6 +26,7 @@ export default function App() {
       <AppShell>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/search" element={<Search />} />
           <Route path="/investigations" element={<Investigations />} />
           <Route path="/investigations/:id" element={<Investigation />} />
           <Route path="*" element={<Navigate to="/" replace />} />

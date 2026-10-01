@@ -1,3 +1,5 @@
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Users, Phone, AtSign, Database, Search } from "lucide-react";
 
@@ -9,17 +11,26 @@ const STATS = [
 ];
 
 export function Dashboard() {
+  const navigate = useNavigate();
+  const [q, setQ] = useState("");
+
+  function onSearch(e: FormEvent) {
+    e.preventDefault();
+    if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`);
+  }
+
   return (
     <>
-      {/* Universal search bar (wired in Phase 3) */}
-      <div className="mb-6 flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3">
+      {/* Universal search bar */}
+      <form onSubmit={onSearch} className="mb-6 flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3">
         <Search size={16} className="text-muted" />
         <input
-          disabled
-          placeholder="Search phone / email / username / domain  (available in Phase 3)"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search phone / email / username / domain / url"
           className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
         />
-      </div>
+      </form>
 
       {/* Stat tiles */}
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">

@@ -20,8 +20,8 @@ import { useAuth } from "@/lib/auth";
 
 const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: LayoutDashboard, label: "Dashboard", to: "/" },
+  { icon: Search, label: "Search", to: "/search" },
   { icon: FolderSearch, label: "Investigations", to: "/investigations" },
-  { icon: Search, label: "Search" },
   { icon: Users, label: "Faces" },
   { icon: Phone, label: "Phones" },
   { icon: AtSign, label: "Emails" },

@@ -89,3 +89,11 @@ export interface CaseGraph {
   nodes: EntityNode[];
   edges: RelationshipEdge[];
 }
+
+export interface SearchResponse {
+  query: string;
+  detected_type: "url" | "email" | "phone" | "domain" | "username" | "unknown";
+  normalized: string;
+  entity_matches: EntityNode[];
+  evidence_matches: EvidenceItem[];
+}
