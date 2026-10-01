@@ -1,6 +1,7 @@
 import { api } from "@/lib/api";
 import type {
   CaseGraph,
+  Suggestion,
   EntityNode,
   EntityType,
   EvidenceItem,
@@ -38,4 +39,6 @@ export const investigationsApi = {
   ) => api.post<RelationshipEdge>(`/investigations/${id}/relationships`, body),
 
   graph: (id: string) => api.get<CaseGraph>(`/investigations/${id}/graph`),
+  correlations: (id: string) =>
+    api.get<{ suggestions: Suggestion[] }>(`/investigations/${id}/correlations`),
 };

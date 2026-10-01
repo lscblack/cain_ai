@@ -28,7 +28,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: AtSign, label: "Emails", to: "/email" },
   { icon: UserSearch, label: "Usernames", to: "/username" },
   { icon: Globe, label: "Domains" },
-  { icon: Share2, label: "Graph" },
+  { icon: Share2, label: "Graph", to: "/graph" },
   { icon: Map, label: "Map" },
   { icon: Clock, label: "Timeline" },
   { icon: Zap, label: "Power Up" },

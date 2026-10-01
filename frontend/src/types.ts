@@ -161,3 +161,11 @@ export interface UsernameIntelligence {
   local_entity_matches: EntityNode[];
   note: string;
 }
+
+export interface Suggestion {
+  source_entity_id: string;
+  target_entity_id: string;
+  rel_type: string;
+  source_url: string;
+  reason: string;
+}

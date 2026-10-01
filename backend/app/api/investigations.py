@@ -22,6 +22,7 @@ from app.database.repositories.graph_repos import (
 )
 from app.database.repositories.investigation_repo import InvestigationRepository
 from app.database.session import get_session
+from app.intelligence.correlation.correlate import EvidenceRef, suggest_relationships
 from app.schemas.investigation import (
     EntityCreate,
     EntityOut,
@@ -260,6 +261,21 @@ async def add_relationship(
     )
     await session.flush()
     return RelationshipOut(**rel.model_dump())
+
+
+@router.get("/{inv_id}/correlations")
+async def get_correlations(
+    inv_id: uuid.UUID,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await _get_investigation_or_404(inv_id, session)
+    evd = await EvidenceRepository(session).list_for_investigation(inv_id)
+    rels = await RelationshipRepository(session).list_for_investigation(inv_id)
+    existing = {frozenset({r.source_entity_id, r.target_entity_id}) for r in rels}
+    refs = [EvidenceRef(entity_id=e.entity_id, source_url=e.source_url) for e in evd]
+    suggestions = suggest_relationships(refs, existing_pairs=existing)
+    return {"suggestions": [s.to_dict() for s in suggestions]}
 
 
 @router.get("/{inv_id}/graph", response_model=GraphOut)

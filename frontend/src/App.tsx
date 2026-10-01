@@ -10,6 +10,7 @@ import { Search } from "@/pages/Search";
 import { Phone } from "@/pages/Phone";
 import { Email } from "@/pages/Email";
 import { Username } from "@/pages/Username";
+import { Graph } from "@/pages/Graph";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/phone" element={<Phone />} />
           <Route path="/email" element={<Email />} />
           <Route path="/username" element={<Username />} />
+          <Route path="/graph" element={<Graph />} />
           <Route path="/investigations" element={<Investigations />} />
           <Route path="/investigations/:id" element={<Investigation />} />
           <Route path="*" element={<Navigate to="/" replace />} />
