@@ -28,8 +28,9 @@ class FakeAI(AIProvider):
 
 
 async def test_analyze_unavailable_without_ai(client, auth_headers):
+    # force the no-AI path regardless of environment keys
+    client.app.dependency_overrides[get_analyst_provider] = lambda: None
     case = (await client.post("/investigations", json={"name": "C"}, headers=auth_headers)).json()
-    # no AI configured by default -> 503
     r = await client.post(f"/investigations/{case['id']}/analyze", headers=auth_headers)
     assert r.status_code == 503
     assert r.json()["detail"] == "ai_unavailable"

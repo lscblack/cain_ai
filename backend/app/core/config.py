@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     tomtom_api_key: str = Field(default="")
     cesium_ion_token: str = Field(default="")
 
+    # Live geo-intelligence providers
+    firms_map_key: str = Field(default="")
+    aisstream_api_key: str = Field(default="")
+    opensky_client_id: str = Field(default="")
+    opensky_client_secret: str = Field(default="")
+    windy_webcams_api_key: str = Field(default="")
+    windy_webcams_countries: str = Field(default="")
+    celestrak_fetch_timeout_ms: int = Field(default=180000)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors(cls, v: object) -> object:
