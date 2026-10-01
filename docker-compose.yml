@@ -25,7 +25,7 @@ services:
   #   container_name: kai-postgres
   #   environment:
   #     POSTGRES_USER: postgres
-  #     POSTGRES_PASSWORD: YourStrongPassword
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
   #     POSTGRES_DB: kai
   #   ports:
   #     - "127.0.0.1:5433:5432"   # 5433 to avoid clashing with host PG

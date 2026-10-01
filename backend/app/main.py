@@ -6,10 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     analyst, auth, emails, export, faces, health, investigations, maps, phones,
-    powerup, search, sources, timeline, usernames,
+    powerup, search, sources, system, timeline, usernames,
 )
 from app.core.config import get_settings
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, get_logger
 
 
 def create_app() -> FastAPI:
@@ -40,6 +40,20 @@ def create_app() -> FastAPI:
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         return response
 
+    @app.on_event("startup")
+    async def _startup() -> None:
+        import asyncio
+
+        from app.core.seed import seed_admin
+        from app.crawlers.scheduler import scheduler_loop
+
+        try:
+            await seed_admin()
+        except Exception:  # never block startup on seeding
+            get_logger("kai.startup").exception("admin seeding failed")
+        # background crawl scheduler (manual sources are never auto-crawled)
+        app.state.scheduler_task = asyncio.create_task(scheduler_loop())
+
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(investigations.router)
@@ -54,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(maps.router)
     app.include_router(timeline.router)
     app.include_router(export.router)
+    app.include_router(system.router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:

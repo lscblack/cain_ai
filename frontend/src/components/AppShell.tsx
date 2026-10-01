@@ -13,6 +13,7 @@ import {
   Map,
   Clock,
   Zap,
+  Activity,
   Database,
   LogOut,
 } from "lucide-react";
@@ -34,6 +35,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: Map, label: "Map", to: "/map" },
   { icon: Clock, label: "Timeline", to: "/timeline" },
   { icon: Zap, label: "Power Up", to: "/powerup" },
+  { icon: Activity, label: "System", to: "/system" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

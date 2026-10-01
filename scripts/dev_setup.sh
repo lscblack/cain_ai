@@ -6,10 +6,10 @@ echo "[kai] bringing up Redis via docker compose..."
 docker compose up -d redis
 
 echo "[kai] ensuring 'kai' database exists..."
-PGPASSWORD="${DB_PASSWORD:-YourStrongPassword}" psql -h "${DB_HOST:-127.0.0.1}" \
+PGPASSWORD="${DB_PASSWORD:?set DB_PASSWORD or source .env}" psql -h "${DB_HOST:-127.0.0.1}" \
   -p "${DB_PORT:-5432}" -U "${DB_USER:-postgres}" -tc \
   "SELECT 1 FROM pg_database WHERE datname='kai'" | grep -q 1 \
-  || PGPASSWORD="${DB_PASSWORD:-YourStrongPassword}" createdb -h "${DB_HOST:-127.0.0.1}" \
+  || PGPASSWORD="${DB_PASSWORD:?set DB_PASSWORD or source .env}" createdb -h "${DB_HOST:-127.0.0.1}" \
        -p "${DB_PORT:-5432}" -U "${DB_USER:-postgres}" kai
 
 echo "[kai] applying migrations..."

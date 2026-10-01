@@ -263,6 +263,17 @@ async def add_relationship(
     return RelationshipOut(**rel.model_dump())
 
 
+@router.get("/{inv_id}/relationships", response_model=list[RelationshipOut])
+async def list_relationships(
+    inv_id: uuid.UUID,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> list[RelationshipOut]:
+    await _get_investigation_or_404(inv_id, session)
+    rels = await RelationshipRepository(session).list_for_investigation(inv_id)
+    return [RelationshipOut(**r.model_dump()) for r in rels]
+
+
 @router.get("/{inv_id}/correlations")
 async def get_correlations(
     inv_id: uuid.UUID,

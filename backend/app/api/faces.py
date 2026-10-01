@@ -21,7 +21,13 @@ from app.database.repositories.face_repo import FaceRepository
 from app.database.session import get_session
 from app.intelligence.face.engine import FaceEngine
 from app.intelligence.face.service import get_face_engine
-from app.intelligence.face.similarity import band_for_similarity, cosine_similarity, is_match
+from app.intelligence.face.similarity import (
+    POSSIBLE,
+    band_for_similarity,
+    cosine_similarity,
+    is_match,
+)
+from app.intelligence.face.vector_index import rank_by_cosine
 
 router = APIRouter(prefix="/intelligence/face", tags=["face"])
 
@@ -159,16 +165,18 @@ async def search(
 
     query = faces[0].embedding
     corpus = await FaceRepository(session).list_with_embeddings(investigation_id=investigation_id)
+    by_id = {str(rec.id): rec for rec in corpus}
 
+    ranked = rank_by_cosine(
+        query, [(str(rec.id), rec.embedding) for rec in corpus], floor=POSSIBLE
+    )
     scored = []
-    for rec in corpus:
-        score = cosine_similarity(query, rec.embedding)
-        if not is_match(score):
-            continue
+    for face_id, score in ranked:
+        rec = by_id[face_id]
         band = band_for_similarity(score)
         scored.append(
             {
-                "face_id": str(rec.id),
+                "face_id": face_id,
                 "investigation_id": str(rec.investigation_id) if rec.investigation_id else None,
                 "source_url": rec.source_url,
                 "image_hash": rec.image_hash,
@@ -179,7 +187,6 @@ async def search(
                 "band": band.value if band else "no_match",
             }
         )
-    scored.sort(key=lambda m: m["similarity"], reverse=True)
     return {
         "query_face": faces[0].to_dict(),
         "indexed_faces": len(corpus),
@@ -258,3 +265,62 @@ async def search_stream(
         )
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+async def _download_image(url: str) -> bytes | None:
+    """SSRF-guarded image download for discovery (size/type capped)."""
+    import httpx
+    from app.core.net import UnsafeUrlError, validate_public_url
+
+    try:
+        validate_public_url(url)
+    except UnsafeUrlError:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "KAI-OSINT/0.1"})
+            if resp.status_code != 200:
+                return None
+            ctype = resp.headers.get("content-type", "").split(";")[0].strip()
+            if ctype not in _ALLOWED:
+                return None
+            data = resp.content
+            if not data or len(data) > _MAX_BYTES:
+                return None
+            return data
+    except Exception:
+        return None
+
+
+@router.post("/discover")
+async def discover(
+    file: UploadFile = File(...),
+    query_image_url: str | None = Form(default=None),
+    operator: User = Depends(get_current_operator),
+    engine: FaceEngine = Depends(engine_dep),
+) -> dict:
+    """Global discovery (Mode A): query configured reverse-image providers, then
+    download + verify + dedupe + rank candidates locally. Returns UNAVAILABLE
+    when no reverse-image provider is configured."""
+    _require_engine(engine)
+    from app.intelligence.face.discover import discover_faces
+    from app.providers.registry import registry
+
+    providers = [p for p in registry.by_type("reverse_image") if getattr(p, "enabled", False)]
+    if not providers:
+        return {
+            "available": False,
+            "detail": "no_reverse_image_providers_configured",
+            "hint": "Set SERPAPI_API_KEY (or add another adapter) and enable it in Power Up.",
+        }
+
+    data = await _read_image(file)
+    candidates: list[dict] = []
+    for p in providers:
+        try:
+            candidates.extend(await p.search({"image_url": query_image_url}))
+        except Exception:
+            continue
+
+    result = await discover_faces(data, candidates, engine=engine, image_fetch=_download_image)
+    return {"available": True, **result.to_dict()}

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     app_secret_key: str = Field(default="change-me")
     access_token_expire_minutes: int = Field(default=720)
 
+    # Bootstrap admin — seeded on first startup if the DB has no users.
+    admin_email: str = Field(default="")
+    admin_password: str = Field(default="")
+
     database_url: str = Field(
         default="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/kai"
     )

@@ -14,10 +14,20 @@ from sqlmodel import SQLModel
 # Ensure a secret exists before app modules read settings.
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key")
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql+psycopg://postgres:YourStrongPassword@127.0.0.1:5432/kai_test",
-)
+def _derive_test_db_url() -> str:
+    """Prefer TEST_DATABASE_URL; else derive from the app's DATABASE_URL (.env),
+    swapping the database name to kai_test. No secret is hardcoded here."""
+    explicit = os.environ.get("TEST_DATABASE_URL")
+    if explicit:
+        return explicit
+    from app.core.config import get_settings
+
+    url = get_settings().database_url
+    base, _, _ = url.rpartition("/")
+    return f"{base}/kai_test"
+
+
+TEST_DATABASE_URL = _derive_test_db_url()
 
 import app.database.models  # noqa: E402,F401  (register tables on metadata)
 

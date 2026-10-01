@@ -7,6 +7,7 @@ interface Provider {
   name: string;
   type: string;
   enabled: boolean;
+  operator_disabled: boolean;
   configured: boolean;
   healthy: boolean;
   detail: string | null;
@@ -15,11 +16,20 @@ interface Provider {
 export function PowerUp() {
   const [providers, setProviders] = useState<Provider[]>([]);
 
-  useEffect(() => {
+  function load() {
     api.get<{ providers: Provider[] }>("/powerup/providers")
       .then((r) => setProviders(r.providers))
       .catch(() => setProviders([]));
+  }
+
+  useEffect(() => {
+    load();
   }, []);
+
+  async function toggle(name: string, enabled: boolean) {
+    await api.post(`/powerup/providers/${name}/toggle`, { enabled }).catch(() => null);
+    load();
+  }
 
   return (
     <div>
@@ -47,7 +57,13 @@ export function PowerUp() {
               <div className="kai-metadata mt-2 uppercase">{p.type.replace(/_/g, " ")}</div>
               <div className="mt-3 flex items-center justify-between kai-metadata">
                 <span>{p.configured ? "configured" : "no key"}</span>
-                <span>{p.enabled ? "enabled" : "disabled"}</span>
+                <button
+                  onClick={() => toggle(p.name, p.operator_disabled)}
+                  className="rounded border border-line px-2 py-0.5 hover:bg-panel-2"
+                  style={{ color: p.operator_disabled ? "var(--kai-muted)" : "var(--kai-verified)" }}
+                >
+                  {p.operator_disabled ? "disabled → enable" : "enabled → disable"}
+                </button>
               </div>
               {p.detail && <div className="kai-metadata mt-2 text-muted">{p.detail}</div>}
             </div>

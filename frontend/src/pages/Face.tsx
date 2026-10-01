@@ -4,7 +4,7 @@ import { ScanFace, Upload } from "lucide-react";
 
 import { api } from "@/lib/api";
 
-type Mode = "search" | "compare";
+type Mode = "search" | "compare" | "discover";
 
 interface FaceStatus {
   available: boolean;
@@ -59,6 +59,7 @@ export function Face() {
 
   const [matches, setMatches] = useState<SearchMatch[] | null>(null);
   const [compareResult, setCompareResult] = useState<any>(null);
+  const [discoverResult, setDiscoverResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stages, setStages] = useState<string[]>([]);
@@ -128,6 +129,22 @@ export function Face() {
     }
   }
 
+  async function runDiscover() {
+    if (!queryFile) return;
+    setLoading(true);
+    setError(null);
+    setDiscoverResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", queryFile);
+      setDiscoverResult(await api.postForm("/intelligence/face/discover", fd));
+    } catch (e: any) {
+      setError(e?.detail === "face_engine_unavailable" ? "FACE ENGINE UNAVAILABLE" : "Discovery failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function runCompare() {
     if (!queryFile || !compareFile) return;
     setLoading(true);
@@ -167,14 +184,14 @@ export function Face() {
       )}
 
       <div className="mb-5 flex gap-2 border-b border-line">
-        {(["search", "compare"] as Mode[]).map((m) => (
+        {(["search", "compare", "discover"] as Mode[]).map((m) => (
           <button
             key={m}
             onClick={() => setMode(m)}
             className={`px-3 py-2 text-sm capitalize ${mode === m ? "border-b-2 text-ink" : "text-muted"}`}
             style={mode === m ? { borderColor: "var(--kai-accent)" } : undefined}
           >
-            {m === "search" ? "1:N Search" : "1:1 Compare"}
+            {m === "search" ? "1:N Local Search" : m === "compare" ? "1:1 Compare" : "Global Discovery"}
           </button>
         ))}
       </div>
@@ -222,11 +239,11 @@ export function Face() {
           )}
 
           <button
-            onClick={mode === "search" ? runSearch : runCompare}
+            onClick={mode === "search" ? runSearch : mode === "compare" ? runCompare : runDiscover}
             disabled={loading || !queryFile || (mode === "compare" && !compareFile)}
             className="w-full rounded-md border border-line bg-panel py-2 text-sm hover:bg-panel-2 disabled:opacity-50"
           >
-            {loading ? "Analyzing…" : mode === "search" ? "Search local index" : "Compare"}
+            {loading ? "Analyzing…" : mode === "search" ? "Search local index" : mode === "compare" ? "Compare" : "Discover globally"}
           </button>
           {error && <div className="text-xs" style={{ color: "var(--kai-accent)" }}>{error}</div>}
         </div>
@@ -297,7 +314,45 @@ export function Face() {
             </div>
           )}
 
-          {!matches && !compareResult && !loading && (
+          {mode === "discover" && discoverResult && !loading && (
+            <div>
+              {discoverResult.available === false ? (
+                <div className="rounded-lg border border-line bg-panel p-4 text-sm">
+                  <div className="kai-metadata uppercase" style={{ color: "var(--kai-warn)" }}>
+                    provider unavailable
+                  </div>
+                  <div className="mt-2 text-muted">{discoverResult.hint}</div>
+                </div>
+              ) : (
+                <>
+                  <div className="kai-metadata mb-3 uppercase">
+                    {discoverResult.matches?.length
+                      ? `${discoverResult.matches.length} verified matches`
+                      : "No verified matches among candidates"}
+                    {" · "}{discoverResult.candidates_downloaded} downloaded · {discoverResult.duplicates_skipped} dupes
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {(discoverResult.matches ?? []).map((m: any, i: number) => (
+                      <div key={i} className="rounded-lg border border-line bg-panel p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-lg">{m.similarity_pct}%</span>
+                          <span className="kai-metadata" style={{ color: BAND_COLOR[m.band] }}>
+                            {BAND_LABEL[m.band] ?? m.band}
+                          </span>
+                        </div>
+                        <a href={m.source_url} target="_blank" rel="noreferrer" className="kai-metadata mt-2 block truncate hover:text-ink">
+                          {m.source_url}
+                        </a>
+                        <div className="kai-metadata mt-1">{m.provider}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {!matches && !compareResult && !discoverResult && !loading && (
             <div className="text-sm text-muted">
               {mode === "search"
                 ? "Upload a face to search KAI's local face index."

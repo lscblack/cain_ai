@@ -126,3 +126,16 @@ async def test_search_stream_sse(client, auth_headers):
     assert "image_received" in body
     assert "faces_detected" in body
     assert "event: result" in body
+
+
+@requires_engine
+async def test_discover_unavailable_without_providers(client, auth_headers):
+    with open(FACE1, "rb") as f:
+        r = await client.post(
+            "/intelligence/face/discover",
+            files={"file": ("q.jpg", f, "image/jpeg")},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    assert r.json()["available"] is False
+    assert r.json()["detail"] == "no_reverse_image_providers_configured"
