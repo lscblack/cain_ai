@@ -151,6 +151,13 @@ def extract_images_with_context(html: str, base_url: str) -> list[dict]:
 _EMAIL_RE = re.compile(r"\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b", re.I)
 _HANDLE_RE = re.compile(r"(?<![\w@])@([a-z0-9_]{3,30})\b", re.I)
 _EMAIL_SKIP = ("example.com", "sentry.io", "domain.com", "email.com", "yourdomain", "@2x", "@3x", ".png", ".jpg", ".webp", ".gif")
+# CSS at-rules + generic path/handle words that are not real usernames
+_USER_STOP = {
+    "share", "intent", "home", "login", "sharer", "channel", "company", "user", "in",
+    "keyframes", "media", "font", "font-face", "import", "supports", "charset", "page",
+    "type", "context", "embed", "2x", "3x", "watch", "about", "help", "privacy", "terms",
+    "profile", "pages", "groups", "hashtag", "explore", "search", "feed", "status",
+}
 # social profile URL -> username, reused for username extraction from links
 _SOCIAL_RE = re.compile(
     r"https?://(?:www\.)?(?:twitter|x|instagram|facebook|tiktok|github|gitlab|linkedin|youtube|t|telegram|pinterest|reddit)\.com/(?:@|in/|user/)?([a-z0-9._\-]{2,40})",
@@ -173,11 +180,11 @@ def extract_contacts(html: str, *, region: str | None = None) -> dict:
     usernames: list[str] = []
     for u in _SOCIAL_RE.findall(html):
         u = u.strip().lower()
-        if u and u not in usernames and u not in ("share", "intent", "home", "login", "sharer"):
+        if u and u not in usernames and u not in _USER_STOP:
             usernames.append(u)
     for h in _HANDLE_RE.findall(text):
         h = h.lower()
-        if h not in usernames:
+        if h not in usernames and h not in _USER_STOP:
             usernames.append(h)
 
     phones: list[str] = []
