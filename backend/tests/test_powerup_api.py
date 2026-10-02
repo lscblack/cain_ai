@@ -23,7 +23,10 @@ async def test_powerup_lists_providers(client, auth_headers):
     # local providers are healthy; serpapi unconfigured
     by = {p["name"]: p for p in providers}
     assert by["local_phone"]["healthy"] is True
-    assert by["serpapi_reverse_image"]["configured"] is False
+    # serpapi_reverse_image's configured flag reflects whether a key is set in env
+    from app.core.config import get_settings
+
+    assert by["serpapi_reverse_image"]["configured"] is bool(get_settings().serpapi_api_key)
     # no secrets leaked
     for p in providers:
         assert "api_key" not in p and "key" not in {k.lower() for k in p}

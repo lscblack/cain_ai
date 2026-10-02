@@ -99,8 +99,9 @@ export function Dashboard() {
         <span className="text-muted">job(s) pending</span>
         <div className="ml-auto flex gap-2">
           <Link to="/sources" className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink">Manage sources</Link>
-          <button onClick={clearQueue} disabled={!queued} className="border px-3 py-1.5 uppercase tracking-wider transition disabled:opacity-40"
-            style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Clear queue</button>
+          <Link to="/discover" className="border px-3 py-1.5 uppercase tracking-wider transition"
+            style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Discover new sources</Link>
+          <button onClick={clearQueue} disabled={!queued} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink disabled:opacity-40">Clear queue</button>
         </div>
       </div>
 

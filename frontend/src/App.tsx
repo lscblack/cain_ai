@@ -14,6 +14,7 @@ import { Graph } from "@/pages/Graph";
 import { Face } from "@/pages/Face";
 import { FaceIndex } from "@/pages/FaceIndex";
 import { Sources } from "@/pages/Sources";
+import { Discover } from "@/pages/Discover";
 import { PowerUp } from "@/pages/PowerUp";
 import { MapView } from "@/pages/MapView";
 import { Timeline } from "@/pages/Timeline";
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/face" element={<Face />} />
             <Route path="/faces" element={<FaceIndex />} />
             <Route path="/sources" element={<Sources />} />
+            <Route path="/discover" element={<Discover />} />
             <Route path="/graph" element={<Graph />} />
             <Route path="/map" element={<MapView />} />
             <Route path="/timeline" element={<Timeline />} />

@@ -72,6 +72,15 @@ async def public_lookup(
                 ],
             }
         )
+    # Self-learning: if we have little/no data on this term, queue it for discovery
+    # so next time it's searched KAI has crawled data + images about it.
+    try:
+        from app.discovery import learning
+
+        await learning.record_term(redis, needle, det.type.value, local_hits=len(results))
+    except Exception:
+        pass
+
     return {
         "query": q,
         "detected_type": det.type.value,

@@ -16,6 +16,7 @@ import {
   Zap,
   Activity,
   Database,
+  Radar,
   LogOut,
 } from "lucide-react";
 
@@ -33,6 +34,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: UserSearch, label: "Usernames", to: "/username" },
   { icon: Globe, label: "Domains" },
   { icon: Database, label: "Sources", to: "/sources" },
+  { icon: Radar, label: "Discover", to: "/discover" },
   { icon: Share2, label: "Graph", to: "/graph" },
   { icon: Map, label: "Map", to: "/map" },
   { icon: Clock, label: "Timeline", to: "/timeline" },

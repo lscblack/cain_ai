@@ -58,3 +58,20 @@ async def scheduler_loop() -> None:
         except Exception:
             logger.exception("scheduler tick failed")
         await asyncio.sleep(_TICK_SECONDS)
+
+
+_LEARNING_TICK_SECONDS = 900  # every 15 min, discover sources for data-poor searched terms
+
+
+async def learning_loop() -> None:
+    """Periodically turn searched-but-data-poor terms into new crawled sources."""
+    from app.discovery import learning
+
+    while True:
+        try:
+            run_id = await learning.process_pending(get_redis_client())
+            if run_id:
+                logger.info("learning: launched discovery run %s", run_id)
+        except Exception:
+            logger.exception("learning tick failed")
+        await asyncio.sleep(_LEARNING_TICK_SECONDS)

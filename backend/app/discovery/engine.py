@@ -1,0 +1,194 @@
+"""Discovery run coordinator: discover -> qualify -> score -> approve -> crawl.
+
+Progress is written to Redis so the UI can poll a run. Approved domains are added
+as sources (deduped) and optionally queued for crawling.
+"""
+from __future__ import annotations
+
+import json
+import time
+import uuid
+
+from redis.asyncio import Redis
+from sqlalchemy import select
+
+from app.core.logging import get_logger
+from app.crawlers.http import RobotsGate, httpx_fetch
+from app.crawlers.queue import enqueue_crawls
+from app.database.models.source import Source
+from app.database.session import async_session_maker
+from app.discovery.evaluate import evaluate_domain
+from app.discovery.queries import generate_queries
+from app.discovery.search import search_candidates
+
+logger = get_logger("kai.discovery")
+
+RUN_KEY = "kai:discovery:run:{id}"
+RUN_TTL = 60 * 60 * 24
+
+
+def _run_key(run_id: str) -> str:
+    return RUN_KEY.format(id=run_id)
+
+
+async def _save(redis: Redis, run_id: str, state: dict) -> None:
+    try:
+        await redis.set(_run_key(run_id), json.dumps(state), ex=RUN_TTL)
+    except Exception:
+        pass
+
+
+async def run_discovery(
+    run_id: str,
+    *,
+    redis: Redis,
+    country: str,
+    categories: list[str],
+    targets: list[str],
+    min_score: int = 60,
+    max_domains: int = 200,
+    auto_crawl: bool = False,
+) -> None:
+    state = {
+        "id": run_id, "status": "searching", "country": country, "categories": categories,
+        "targets": targets, "min_score": min_score, "max_domains": max_domains,
+        "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
+        "approved": 0, "rejected": 0, "current": None, "approved_list": [],
+        "started_at": time.time(), "progress": 0,
+    }
+    await _save(redis, run_id, state)
+
+    queries = generate_queries(country, categories, targets)
+    await _execute(
+        run_id, redis=redis, queries=queries, state=state,
+        min_score=min_score, max_domains=max_domains, auto_crawl=auto_crawl,
+    )
+
+
+async def run_term_discovery(
+    run_id: str,
+    *,
+    redis: Redis,
+    terms: list[str],
+    min_score: int = 55,
+    max_domains: int = 60,
+    auto_crawl: bool = True,
+) -> None:
+    """Self-learning path: discover sources for specific searched terms."""
+    state = {
+        "id": run_id, "status": "searching", "country": None, "categories": ["learning"],
+        "targets": terms, "min_score": min_score, "max_domains": max_domains,
+        "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
+        "approved": 0, "rejected": 0, "current": None, "approved_list": [],
+        "started_at": time.time(), "progress": 0, "kind": "learning",
+    }
+    await _save(redis, run_id, state)
+    queries = term_queries(terms)
+    await _execute(
+        run_id, redis=redis, queries=queries, state=state,
+        min_score=min_score, max_domains=max_domains, auto_crawl=auto_crawl,
+    )
+
+
+def term_queries(terms: list[str], *, limit: int = 40) -> list[str]:
+    """Literal public queries for arbitrary searched identifiers/names/text."""
+    out: list[str] = []
+
+    def add(q: str) -> None:
+        q = " ".join(q.split())
+        if q and q not in out:
+            out.append(q)
+
+    for t in terms:
+        t = (t or "").strip()
+        if not t:
+            continue
+        add(f'"{t}"')
+        add(f"{t} profile")
+        add(f"{t} photo")
+        add(f"{t} contact")
+    return out[:limit]
+
+
+async def _execute(
+    run_id: str,
+    *,
+    redis: Redis,
+    queries: list[str],
+    state: dict,
+    min_score: int,
+    max_domains: int,
+    auto_crawl: bool,
+) -> None:
+    candidates = await search_candidates(queries)
+    state["candidates"] = len(candidates)
+    state["status"] = "evaluating"
+    await _save(redis, run_id, state)
+
+    async with async_session_maker() as session:
+        known = set(
+            (await session.execute(select(Source.domain))).scalars().all()
+        )
+    state["already_known"] = sum(1 for d in candidates if d in known)
+    new_domains = [d for d in candidates if d not in known][:max_domains]
+    state["new_domains"] = len(new_domains)
+    await _save(redis, run_id, state)
+
+    robots = RobotsGate()
+    total = max(1, len(new_domains))
+    for i, domain in enumerate(new_domains):
+        state["current"] = domain
+        state["progress"] = round((i / total) * 100)
+        await _save(redis, run_id, state)
+        try:
+            ev = await evaluate_domain(domain, fetch=httpx_fetch, robots=robots.allowed)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("evaluate failed for %s: %s", domain, exc)
+            state["rejected"] += 1
+            state["evaluated"] += 1
+            continue
+        state["evaluated"] += 1
+        approved = ev.reachable and not ev.requires_auth and ev.score >= min_score
+        ev.approved = approved
+        if approved:
+            await _add_source(domain, ev.to_dict(), auto_crawl=auto_crawl, redis=redis)
+            state["approved"] += 1
+            state["approved_list"] = ([ev.to_dict()] + state["approved_list"])[:50]
+            known.add(domain)
+        else:
+            state["rejected"] += 1
+        state["last"] = ev.to_dict()
+        await _save(redis, run_id, state)
+
+    state["status"] = "done"
+    state["current"] = None
+    state["progress"] = 100
+    state["finished_at"] = time.time()
+    await _save(redis, run_id, state)
+    logger.info("discovery %s done: approved=%d rejected=%d", run_id, state["approved"], state["rejected"])
+
+
+async def _add_source(domain: str, ev: dict, *, auto_crawl: bool, redis: Redis) -> None:
+    async with async_session_maker() as session:
+        exists = (await session.execute(select(Source.id).where(Source.domain == domain))).scalar_one_or_none()
+        if exists is not None:
+            return
+        src = Source(
+            name=domain, base_url=f"https://{domain}/", domain=domain,
+            allowed_paths=[], excluded_paths=[], max_depth=1, max_pages=50,
+            schedule="manual", category="discovered",
+            priority="high" if ev.get("score", 0) >= 80 else "medium",
+        )
+        session.add(src)
+        await session.flush()
+        sid = src.id
+        await session.commit()
+    if auto_crawl:
+        try:
+            await enqueue_crawls(redis, [sid])
+        except Exception:
+            pass
+
+
+def new_run_id() -> str:
+    return uuid.uuid4().hex[:12]

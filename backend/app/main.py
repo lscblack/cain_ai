@@ -5,8 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    analyst, auth, emails, export, faces, geo, health, investigations, maps, phones,
-    powerup, public, search, settings as settings_api, sources, system, timeline, usernames,
+    analyst, auth, discovery, emails, export, faces, geo, health, investigations, maps,
+    phones, powerup, public, search, settings as settings_api, sources, system, timeline,
+    usernames,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(usernames.router)
     app.include_router(faces.router)
     app.include_router(sources.router)
+    app.include_router(discovery.router)
     app.include_router(powerup.router)
     app.include_router(analyst.router)
     app.include_router(maps.router)
