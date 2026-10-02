@@ -18,6 +18,7 @@ import { PowerUp } from "@/pages/PowerUp";
 import { MapView } from "@/pages/MapView";
 import { Timeline } from "@/pages/Timeline";
 import { System } from "@/pages/System";
+import { Home } from "@/pages/Home";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -30,30 +31,36 @@ export default function App() {
     );
   }
 
-  if (!operator) return <Login />;
-
   return (
     <BrowserRouter>
-      <AppShell>
+      {!operator ? (
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/phone" element={<Phone />} />
-          <Route path="/email" element={<Email />} />
-          <Route path="/username" element={<Username />} />
-          <Route path="/face" element={<Face />} />
-          <Route path="/faces" element={<FaceIndex />} />
-          <Route path="/sources" element={<Sources />} />
-          <Route path="/graph" element={<Graph />} />
-          <Route path="/map" element={<MapView />} />
-          <Route path="/timeline" element={<Timeline />} />
-          <Route path="/powerup" element={<PowerUp />} />
-          <Route path="/system" element={<System />} />
-          <Route path="/investigations" element={<Investigations />} />
-          <Route path="/investigations/:id" element={<Investigation />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<Login />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </AppShell>
+      ) : (
+        <AppShell>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/phone" element={<Phone />} />
+            <Route path="/email" element={<Email />} />
+            <Route path="/username" element={<Username />} />
+            <Route path="/face" element={<Face />} />
+            <Route path="/faces" element={<FaceIndex />} />
+            <Route path="/sources" element={<Sources />} />
+            <Route path="/graph" element={<Graph />} />
+            <Route path="/map" element={<MapView />} />
+            <Route path="/timeline" element={<Timeline />} />
+            <Route path="/powerup" element={<PowerUp />} />
+            <Route path="/system" element={<System />} />
+            <Route path="/investigations" element={<Investigations />} />
+            <Route path="/investigations/:id" element={<Investigation />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AppShell>
+      )}
     </BrowserRouter>
   );
 }

@@ -6,6 +6,7 @@ import threading
 import numpy as np
 
 from app.core.logging import get_logger
+from app.core.config import get_settings
 from app.intelligence.face.engine import DetectedFace, FaceEngine
 
 logger = get_logger("kai.face")
@@ -34,10 +35,25 @@ class InsightFaceEngine(FaceEngine):
             try:
                 from insightface.app import FaceAnalysis
 
-                app = FaceAnalysis(name=self.model_name, providers=["CPUExecutionProvider"])
-                app.prepare(ctx_id=-1, det_size=_DET_SIZE)
+                providers = ["CPUExecutionProvider"]
+                ctx_id = -1
+                if get_settings().face_use_gpu:
+                    try:
+                        import onnxruntime as ort
+
+                        if "CUDAExecutionProvider" in ort.get_available_providers():
+                            providers.insert(0, "CUDAExecutionProvider")
+                            ctx_id = 0
+                            logger.info("InsightFace GPU acceleration enabled")
+                        else:
+                            logger.info("CUDA provider unavailable; using CPU for InsightFace")
+                    except Exception as exc:  # GPU support is optional
+                        logger.info("GPU setup unavailable; using CPU for InsightFace: %s", exc)
+
+                app = FaceAnalysis(name=self.model_name, providers=providers)
+                app.prepare(ctx_id=ctx_id, det_size=_DET_SIZE)
                 self._app = app
-                logger.info("InsightFace engine loaded (%s)", self.model_name)
+                logger.info("InsightFace engine loaded (%s) with %s", self.model_name, providers)
                 return True
             except Exception as exc:  # model missing / import failure
                 self._load_error = str(exc)

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck } from "lucide-react";
+import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/types";
@@ -46,6 +47,7 @@ export function Login() {
         transition={{ duration: 0.3 }}
         className="w-full max-w-sm rounded-lg border border-line bg-panel p-7"
       >
+        <Link to="/" className="mb-5 inline-flex items-center gap-2 text-xs text-muted hover:text-ink"><ArrowLeft size={14} /> Public search</Link>
         <div className="mb-6">
           <div className="flex items-center gap-2 text-xl font-semibold tracking-wide">
             <ShieldCheck size={20} style={{ color: "var(--kai-verified)" }} /> KAI

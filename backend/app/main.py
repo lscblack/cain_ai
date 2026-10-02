@@ -10,6 +10,7 @@ from app.api import (
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
+from sqlmodel import SQLModel
 
 
 def create_app() -> FastAPI:
@@ -42,10 +43,12 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _startup() -> None:
-        import asyncio
-
+        from app.database import models as _models  # noqa: F401  (register tables on metadata)
+        from app.database.session import engine
         from app.core.seed import seed_admin, seed_default_sources
-        from app.crawlers.scheduler import scheduler_loop
+
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
 
         try:
             await seed_admin()
@@ -64,9 +67,6 @@ def create_app() -> FastAPI:
                 await _s.commit()
         except Exception:  # never block startup on seeding
             get_logger("kai.startup").exception("startup seeding failed")
-        # background crawl scheduler (manual sources are never auto-crawled)
-        app.state.scheduler_task = asyncio.create_task(scheduler_loop())
-
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(investigations.router)

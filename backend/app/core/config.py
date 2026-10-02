@@ -37,6 +37,7 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/kai"
     )
     redis_url: str = Field(default="redis://127.0.0.1:6379/0")
+    face_use_gpu: bool = Field(default=True)
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://127.0.0.1:5173"]

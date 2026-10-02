@@ -4,18 +4,24 @@ from __future__ import annotations
 import uuid
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
+from redis.asyncio import Redis
+
+from app.core.ratelimit import check_rate_limit
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_operator
 from app.core.logging import get_logger
 from app.crawlers.http import RobotsGate, httpx_fetch
+from app.crawlers.queue import enqueue_crawls
 from app.crawlers.runner import crawl_source
 from app.database.models.face import Face
 from app.database.models.source import Image, Page, Source
 from app.database.models.user import User
 from app.database.repositories.audit_repo import AuditRepository
+from app.core.redis import get_redis
 from app.database.session import async_session_maker, get_session
 from app.intelligence.face.service import get_face_engine
 from app.schemas.source import (
@@ -29,6 +35,46 @@ from app.schemas.source import (
 )
 
 router = APIRouter(prefix="/sources", tags=["sources"])
+
+
+class PublicSubmitIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    url: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/public-submit", status_code=status.HTTP_201_CREATED)
+async def public_submit_source(
+    body: PublicSubmitIn,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    """Public, unauthenticated: anyone can suggest a website to crawl.
+    Deduped by domain; rate-limited per IP. Added as manual (operator reviews/crawls)."""
+    ip = request.client.host if request.client else "unknown"
+    await check_rate_limit(redis, f"rl:pubsrc:{ip}", limit=10, window_seconds=3600)
+
+    try:
+        payload = SourceCreate(name=body.name, base_url=body.url)  # validates + SSRF + normalizes
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"invalid_url: {str(exc)[:160]}")
+
+    domain = urlsplit(payload.base_url).hostname or ""
+    existing = (
+        await session.execute(select(Source.id).where(Source.domain == domain))
+    ).scalar_one_or_none()
+    if existing is not None:
+        return {"status": "exists", "domain": domain}
+
+    src = Source(
+        name=payload.name, base_url=payload.base_url, domain=domain,
+        allowed_paths=[], excluded_paths=[], max_depth=1, max_pages=50,
+        schedule="manual", category="public-submission", priority="medium",
+    )
+    session.add(src)
+    await session.flush()
+    await AuditRepository(session).record("source.public_submit", detail={"domain": domain, "ip": ip})
+    return {"status": "created", "domain": domain}
 logger = get_logger("kai.sources")
 
 
@@ -275,9 +321,9 @@ async def _run_crawl_all(source_ids: list[uuid.UUID], concurrency: int = 2) -> N
 
 @router.post("/crawl-all", status_code=status.HTTP_202_ACCEPTED)
 async def crawl_all(
-    background: BackgroundTasks,
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
     category: str | None = None,
     priority: str | None = None,
 ) -> dict:
@@ -293,20 +339,20 @@ async def crawl_all(
     await AuditRepository(session).record(
         "source.crawl_all", actor_id=operator.id, detail={"count": len(ids)}
     )
-    background.add_task(_run_crawl_all, ids)
+    await enqueue_crawls(redis, ids)
     return {"status": "crawl_started", "scheduled": len(ids)}
 
 
 @router.post("/{sid}/crawl", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_crawl(
     sid: uuid.UUID,
-    background: BackgroundTasks,
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
 ) -> dict:
     src = await _get_or_404(sid, session)
     if src.status == "crawling":
         return {"status": "already_crawling", "source_id": str(sid)}
     await AuditRepository(session).record("source.crawl", actor_id=operator.id, detail={"domain": src.domain})
-    background.add_task(_run_crawl, sid)
+    await enqueue_crawls(redis, [sid])
     return {"status": "crawl_started", "source_id": str(sid)}

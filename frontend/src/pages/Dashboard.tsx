@@ -43,7 +43,7 @@ export function Dashboard() {
 
   return (
     <>
-      <form onSubmit={onSearch} className="mb-6 flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3">
+      <form onSubmit={onSearch} className="mb-6 flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-3 sm:px-4">
         <Search size={16} className="text-muted" />
         <input
           value={q}
@@ -53,7 +53,7 @@ export function Dashboard() {
         />
       </form>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
         {tiles.map(({ icon: Icon, label, value, to }, i) => (
           <motion.div key={label} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
             <Link to={to} className="block rounded-lg border border-line bg-panel p-4 hover:border-muted">
@@ -61,15 +61,15 @@ export function Dashboard() {
                 <span className="kai-metadata uppercase">{label}</span>
                 <Icon size={15} className="text-muted" />
               </div>
-              <div className="mt-2 font-mono text-2xl">{value.toLocaleString()}</div>
+              <div className="mt-2 font-mono text-xl sm:text-2xl">{value.toLocaleString()}</div>
             </Link>
           </motion.div>
         ))}
       </div>
 
       {/* Map shortcut */}
-      <Link to="/map" className="mb-6 flex h-40 items-center justify-center rounded-lg border border-line bg-panel-2 hover:border-muted">
-        <span className="flex items-center gap-2 kai-metadata">
+      <Link to="/map" className="mb-6 flex min-h-32 items-center justify-center rounded-lg border border-line bg-panel-2 p-5 text-center hover:border-muted sm:h-40">
+        <span className="flex flex-wrap items-center justify-center gap-2 kai-metadata">
           <Map size={16} /> OPEN LIVE INTELLIGENCE MAP — aircraft · vessels · fires · webcams
         </span>
       </Link>
@@ -85,9 +85,9 @@ export function Dashboard() {
           ) : (
             <div className="space-y-2">
               {cases.map((ci) => (
-                <Link key={ci.id} to={`/investigations/${ci.id}`} className="flex items-center justify-between rounded-md border border-line px-3 py-2 hover:border-muted">
-                  <span className="text-sm">{ci.name}</span>
-                  <span className="kai-metadata">{ci.code} · ent {ci.entity_count} · evd {ci.evidence_count}</span>
+                <Link key={ci.id} to={`/investigations/${ci.id}`} className="flex min-w-0 flex-col gap-1 rounded-md border border-line px-3 py-2 hover:border-muted sm:flex-row sm:items-center sm:justify-between">
+                  <span className="truncate text-sm">{ci.name}</span>
+                  <span className="kai-metadata shrink-0">{ci.code} · ent {ci.entity_count} · evd {ci.evidence_count}</span>
                 </Link>
               ))}
             </div>

@@ -65,6 +65,9 @@ cd backend
 alembic upgrade head
 uvicorn app.main:app --reload --app-dir .   # add --port 8001 if 8000 is taken
 
+# 4. Crawl worker (run in a second backend terminal)
+python -m app.crawlers.worker
+
 # 5. Frontend (new terminal)
 cd frontend
 cp .env.example .env   # set VITE_API_URL to match the backend port

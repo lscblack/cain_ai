@@ -91,11 +91,23 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-line bg-panel-2 px-6 py-3">
-          <div className="kai-metadata">OPERATOR / {operator?.email ?? "—"}</div>
+        <header className="flex items-center justify-between gap-4 border-b border-line bg-panel-2 px-4 py-3 sm:px-6">
+          <div className="min-w-0 truncate kai-metadata">OPERATOR / {operator?.email ?? "—"}</div>
           <StatusIndicator />
         </header>
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <nav className="flex gap-1 overflow-x-auto border-b border-line bg-panel-2 px-3 py-2 md:hidden">
+          {NAV.filter(({ to }) => to).map(({ icon: Icon, label, to }) => (
+            <NavLink
+              key={label}
+              to={to!}
+              end={to === "/"}
+              className={({ isActive }) => `flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${isActive ? "bg-panel text-ink" : "text-muted"}`}
+            >
+              <Icon size={14} /> {label}
+            </NavLink>
+          ))}
+        </nav>
+        <main className="min-w-0 flex-1 overflow-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
   );

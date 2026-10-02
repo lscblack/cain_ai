@@ -28,6 +28,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.home-grid {
+  background-image: linear-gradient(var(--kai-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--kai-border) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+}
+
+@keyframes scan {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
+}
+
 /* Thin, technical scrollbars */
 * {
   scrollbar-width: thin;

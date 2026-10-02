@@ -4,7 +4,16 @@ import { Activity } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Stats {
-  resources: { cpu_percent?: number; ram_percent?: number; ram_used_mb?: number; ram_total_mb?: number };
+  resources: {
+    cpu_percent?: number;
+    cpu_cores?: number;
+    cpu_process_percent?: number;
+    cpu_process_cores?: number;
+    cpu_process_threads?: number;
+    ram_percent?: number;
+    ram_used_mb?: number;
+    ram_total_mb?: number;
+  };
   services: Record<string, boolean>;
   counts: Record<string, number>;
 }
@@ -34,6 +43,8 @@ export function System() {
             <div className="kai-metadata mb-3 uppercase">Resources</div>
             <div className="space-y-1 font-mono text-sm">
               <div>CPU {stats.resources.cpu_percent ?? "—"}%</div>
+              <div>Cores {stats.resources.cpu_process_cores ?? "—"} / {stats.resources.cpu_cores ?? "—"}</div>
+              <div className="kai-metadata">Threads {stats.resources.cpu_process_threads ?? "—"}</div>
               <div>RAM {stats.resources.ram_percent ?? "—"}%</div>
               <div className="kai-metadata">
                 {stats.resources.ram_used_mb ?? "—"} / {stats.resources.ram_total_mb ?? "—"} MB

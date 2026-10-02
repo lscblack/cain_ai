@@ -1,0 +1,15 @@
+[Unit]
+Description=KAI crawl worker
+After=network-online.target kai-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/42da9889-4773-493d-914e-04647afdab69/projects/ventures/cain_ai/backend
+ExecStart=/home/lscblack/miniconda3/bin/conda run -n fastapi_setup --no-capture-output python -m app.crawlers.worker
+Restart=always
+RestartSec=3
+Environment=HOME=/home/lscblack
+
+[Install]
+WantedBy=default.target

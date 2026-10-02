@@ -129,7 +129,10 @@ async def test_search_stream_sse(client, auth_headers):
 
 
 @requires_engine
-async def test_discover_unavailable_without_providers(client, auth_headers):
+async def test_discover_unavailable_without_providers(client, auth_headers, monkeypatch):
+    # Force the no-provider branch regardless of any configured env keys.
+    from app.providers import registry as _reg
+    monkeypatch.setattr(_reg.registry, "by_type", lambda t: [])
     with open(FACE1, "rb") as f:
         r = await client.post(
             "/intelligence/face/discover",

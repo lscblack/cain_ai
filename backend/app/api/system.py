@@ -32,8 +32,14 @@ async def system_stats(
         import psutil
 
         vm = psutil.virtual_memory()
+        process = psutil.Process()
+        process_cpu_percent = process.cpu_percent(interval=0.1)
         resources = {
             "cpu_percent": psutil.cpu_percent(interval=0.1),
+            "cpu_cores": psutil.cpu_count(logical=True) or 1,
+            "cpu_process_percent": process_cpu_percent,
+            "cpu_process_cores": round(process_cpu_percent / 100, 2),
+            "cpu_process_threads": process.num_threads(),
             "ram_percent": vm.percent,
             "ram_used_mb": round(vm.used / 1024 / 1024),
             "ram_total_mb": round(vm.total / 1024 / 1024),

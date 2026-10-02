@@ -210,20 +210,13 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-@router.post("/search/stream")
-async def search_stream(
-    file: UploadFile = File(...),
-    investigation_id: uuid.UUID | None = Form(default=None),
-    top_k: int = Form(default=20),
-    operator: User = Depends(get_current_operator),
-    session: AsyncSession = Depends(get_session),
-    engine: FaceEngine = Depends(engine_dep),
+async def _search_stream_response(
+    data: bytes,
+    top_k: int,
+    session: AsyncSession,
+    engine: FaceEngine,
+    investigation_id: uuid.UUID | None = None,
 ) -> StreamingResponse:
-    """Stream face-search progress as Server-Sent Events."""
-    if not engine.available():
-        raise HTTPException(status_code=503, detail="face_engine_unavailable")
-    data = await _read_image(file)
-
     async def gen() -> AsyncGenerator[str, None]:
         yield _sse("stage", {"name": "image_received", "bytes": len(data)})
         try:
@@ -278,6 +271,36 @@ async def search_stream(
         )
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.post("/search/stream")
+async def search_stream(
+    file: UploadFile = File(...),
+    investigation_id: uuid.UUID | None = Form(default=None),
+    top_k: int = Form(default=20),
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+    engine: FaceEngine = Depends(engine_dep),
+) -> StreamingResponse:
+    """Stream face-search progress for authenticated operators."""
+    if not engine.available():
+        raise HTTPException(status_code=503, detail="face_engine_unavailable")
+    return await _search_stream_response(
+        await _read_image(file), top_k, session, engine, investigation_id
+    )
+
+
+@router.post("/public/search/stream")
+async def public_search_stream(
+    file: UploadFile = File(...),
+    top_k: int = Form(default=20),
+    session: AsyncSession = Depends(get_session),
+    engine: FaceEngine = Depends(engine_dep),
+) -> StreamingResponse:
+    """Public read-only face search used by the landing page."""
+    if not engine.available():
+        raise HTTPException(status_code=503, detail="face_engine_unavailable")
+    return await _search_stream_response(await _read_image(file), top_k, session, engine)
 
 
 async def _download_image(url: str) -> bytes | None:
@@ -459,3 +482,31 @@ async def dedupe_faces(
             except Exception:
                 pass
     return {"removed": len(remove_ids), "remaining": len(rows) - len(remove_ids)}
+
+
+@router.get("/public/crop/{face_id}")
+async def public_face_crop(face_id: str):
+    """Public crop thumbnail (landing page). Faces come from public sources."""
+    from fastapi.responses import FileResponse
+
+    path = crop_path(face_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="crop_not_found")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get("/public/index-sample")
+async def public_index_sample(limit: int = 48, session: AsyncSession = Depends(get_session)) -> dict:
+    """Public sample of indexed face crops — powers the landing-page scanner."""
+    from sqlalchemy import desc, select as _select
+    from app.database.models.face import Face as _Face
+
+    rows = (
+        await session.execute(_select(_Face).order_by(desc(_Face.created_at)).limit(max(1, min(limit, 120))))
+    ).scalars().all()
+    samples = [
+        {"face_id": str(r.id), "crop_url": f"/intelligence/face/public/crop/{r.id}"}
+        for r in rows
+        if has_crop(str(r.id))
+    ]
+    return {"samples": samples, "count": len(samples)}
