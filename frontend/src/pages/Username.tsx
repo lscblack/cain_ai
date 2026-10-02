@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AtSign, ExternalLink } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -40,21 +41,30 @@ export function Username() {
     }
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!username.trim()) return;
+  const [params] = useSearchParams();
+
+  async function run(value: string) {
+    if (!value.trim()) return;
     setLoading(true);
     try {
-      setResult(
-        await api.post<UsernameIntelligence>("/intelligence/username", {
-          username: username.trim(),
-        }),
-      );
+      setResult(await api.post<UsernameIntelligence>("/intelligence/username", { username: value.trim() }));
     } catch {
       setResult(null);
     } finally {
       setLoading(false);
     }
+  }
+
+  // auto-run when arriving with ?q= (pivot from a face result's contacts)
+  useEffect(() => {
+    const q = params.get("q");
+    if (q) { setUsername(q); run(q); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    run(username);
   }
 
   return (

@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AtSign, CheckCircle2, XCircle } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -24,22 +25,31 @@ export function Email() {
   const [result, setResult] = useState<EmailIntelligence | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!email.trim()) return;
+  const [params] = useSearchParams();
+
+  async function run(value: string) {
+    if (!value.trim()) return;
     setLoading(true);
     try {
-      setResult(
-        await api.post<EmailIntelligence>("/intelligence/email", {
-          email: email.trim(),
-          check_dns: checkDns,
-        }),
-      );
+      setResult(await api.post<EmailIntelligence>("/intelligence/email", {
+        email: value.trim(), check_dns: checkDns,
+      }));
     } catch {
       setResult(null);
     } finally {
       setLoading(false);
     }
+  }
+
+  useEffect(() => {
+    const q = params.get("q");
+    if (q) { setEmail(q); run(q); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    run(email);
   }
 
   const a = result?.analysis;

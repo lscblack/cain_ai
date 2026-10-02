@@ -24,6 +24,7 @@ from app.intelligence.face.crops import crop_path, has_crop, save_crop
 from app.intelligence.face.service import detect_and_embed_async, get_face_engine
 from app.intelligence.face.similarity import (
     POSSIBLE,
+    STRONG,
     band_for_similarity,
     cosine_similarity,
     is_match,

@@ -1,4 +1,5 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Phone as PhoneIcon } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -19,22 +20,31 @@ export function Phone() {
   const [result, setResult] = useState<PhoneIntelligence | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!number.trim()) return;
+  const [params] = useSearchParams();
+
+  async function run(value: string, reg?: string) {
+    if (!value.trim()) return;
     setLoading(true);
     try {
-      setResult(
-        await api.post<PhoneIntelligence>("/intelligence/phone", {
-          number: number.trim(),
-          region: region.trim() || undefined,
-        }),
-      );
+      setResult(await api.post<PhoneIntelligence>("/intelligence/phone", {
+        number: value.trim(), region: (reg ?? region).trim() || undefined,
+      }));
     } catch {
       setResult(null);
     } finally {
       setLoading(false);
     }
+  }
+
+  useEffect(() => {
+    const q = params.get("q");
+    if (q) { setNumber(q); run(q); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    run(number);
   }
 
   const a = result?.analysis;

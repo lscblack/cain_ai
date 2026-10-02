@@ -19,11 +19,22 @@ export function Dashboard() {
   const [q, setQ] = useState("");
   const [stats, setStats] = useState<Stats | null>(null);
   const [cases, setCases] = useState<InvestigationDetail[]>([]);
+  const [queued, setQueued] = useState<number | null>(null);
+
+  async function clearQueue() {
+    if (!confirm("Clear the crawl queue and reset stuck sources?")) return;
+    const r = await api.post<{ cleared: number }>("/sources/queue/clear").catch(() => null);
+    if (r) { alert(`Cleared ${r.cleared} queued crawl job(s).`); loadQueue(); }
+  }
+  function loadQueue() {
+    api.get<{ queued: number }>("/sources/queue").then((r) => setQueued(r.queued)).catch(() => setQueued(null));
+  }
 
   useEffect(() => {
     const load = () => {
       api.get<Stats>("/system/stats").then(setStats).catch(() => setStats(null));
       investigationsApi.list().then((c) => setCases(c.slice(0, 6))).catch(() => setCases([]));
+      loadQueue();
     };
     load();
     const id = setInterval(load, 8000);
@@ -77,6 +88,20 @@ export function Dashboard() {
             </Link>
           </motion.div>
         ))}
+      </div>
+
+      {/* crawl queue control */}
+      <div className="mb-6 flex flex-wrap items-center gap-3 border border-line bg-panel/95 px-4 py-3 font-mono text-xs">
+        <span className="kai-metadata uppercase tracking-wider">Crawl queue</span>
+        <span className="text-lg font-semibold" style={{ color: queued ? "var(--kai-warn)" : "var(--kai-verified)" }}>
+          {queued ?? "—"}
+        </span>
+        <span className="text-muted">job(s) pending</span>
+        <div className="ml-auto flex gap-2">
+          <Link to="/sources" className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink">Manage sources</Link>
+          <button onClick={clearQueue} disabled={!queued} className="border px-3 py-1.5 uppercase tracking-wider transition disabled:opacity-40"
+            style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Clear queue</button>
+        </div>
       </div>
 
       {/* map shortcut */}

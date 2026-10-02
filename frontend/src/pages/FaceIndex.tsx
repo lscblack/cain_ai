@@ -1,9 +1,26 @@
 import { useEffect, useState } from "react";
-import { Images, RefreshCw } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Images, RefreshCw, Users, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
 import { SourceFrame, type SourceContext } from "@/components/SourceFrame";
+
+/** Clickable contact chips that pivot to the internet-search tools. */
+function Contacts({ f }: { f: { phones?: string[]; emails?: string[]; usernames?: string[] } }) {
+  const chips: { v: string; to: string; color: string }[] = [];
+  (f.phones ?? []).slice(0, 2).forEach((p) => chips.push({ v: p, to: `/phone?q=${encodeURIComponent(p)}`, color: "var(--kai-verified)" }));
+  (f.emails ?? []).slice(0, 2).forEach((e) => chips.push({ v: e, to: `/email?q=${encodeURIComponent(e)}`, color: "var(--kai-warn)" }));
+  (f.usernames ?? []).slice(0, 3).forEach((u) => chips.push({ v: "@" + u, to: `/username?q=${encodeURIComponent(u)}`, color: "var(--kai-muted)" }));
+  if (chips.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {chips.map((c, i) => (
+        <Link key={i} to={c.to} title="Search the internet for this" className="truncate border border-line px-1 py-0.5 font-mono text-[9px] hover:border-accent" style={{ color: c.color, maxWidth: "100%" }}>{c.v}</Link>
+      ))}
+    </div>
+  );
+}
 
 interface IndexedFace {
   face_id: string;
@@ -16,6 +33,9 @@ interface IndexedFace {
   page_title: string | null;
   caption: string | null;
   names: string[];
+  emails?: string[];
+  phones?: string[];
+  usernames?: string[];
   image_url: string | null;
 }
 
@@ -26,6 +46,20 @@ export function FaceIndex() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [frameCtx, setFrameCtx] = useState<SourceContext | null>(null);
+  const [related, setRelated] = useState<any[] | null>(null);
+  const [relatedBusy, setRelatedBusy] = useState(false);
+
+  async function openRelated(id: string) {
+    setRelated([]); setRelatedBusy(true);
+    try {
+      const r = await api.get<{ related: any[] }>(`/intelligence/face/${id}/related`);
+      setRelated(r.related);
+    } catch {
+      setRelated([]);
+    } finally {
+      setRelatedBusy(false);
+    }
+  }
 
   function load(o = offset) {
     api.get<{ total: number; faces: IndexedFace[] }>(`/intelligence/face/index-list?limit=${PAGE}&offset=${o}`)
@@ -38,6 +72,32 @@ export function FaceIndex() {
   return (
     <div>
       {frameCtx && <SourceFrame ctx={frameCtx} onClose={() => setFrameCtx(null)} />}
+      {related !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setRelated(null)}>
+          <div className="max-h-[85vh] w-full max-w-4xl overflow-auto border border-line bg-panel p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <span className="kai-metadata uppercase tracking-wider"><Users size={13} className="mr-1 inline" /> Same person across sources · {related.length}</span>
+              <button onClick={() => setRelated(null)} className="rounded border border-line p-1 hover:bg-panel-2"><X size={14} /></button>
+            </div>
+            {relatedBusy ? <div className="kai-metadata">Searching index…</div> : related.length === 0 ? (
+              <div className="py-8 text-center font-mono text-xs text-muted">No other images of this person in the index.</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {related.map((rf) => (
+                  <div key={rf.face_id} className="border border-line bg-panel-2">
+                    <div className="aspect-square">{rf.crop_url && <AuthImg path={rf.crop_url} className="h-full w-full object-cover" />}</div>
+                    <div className="p-2">
+                      <div className="flex justify-between font-mono text-xs"><span className="text-accent">{rf.similarity_pct}%</span><span className="text-muted">{String(rf.band).replace("_", " ")}</span></div>
+                      {rf.source_url && <a href={rf.source_url} target="_blank" rel="noreferrer" className="mt-1 block truncate font-mono text-[10px] text-muted hover:text-ink">{rf.source_url}</a>}
+                      <Contacts f={rf} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="mb-5 flex items-center gap-2">
         <Images size={18} className="text-muted" />
         <h1 className="text-lg font-semibold">Available Faces</h1>
@@ -85,8 +145,9 @@ export function FaceIndex() {
               {f.names && f.names.length > 0 && (
                 <div className="kai-metadata truncate" style={{ color: "var(--kai-warn)" }}>{f.names.slice(0, 2).join(", ")}</div>
               )}
+              <Contacts f={f} />
               <div className="mt-1 flex items-center justify-between">
-                <span className="kai-metadata">q {Math.round((f.quality ?? 0) * 100)}%</span>
+                <button onClick={() => openRelated(f.face_id)} className="kai-metadata hover:text-ink" title="Find the same person across sources">same person</button>
                 {f.source_url && f.source_url.startsWith("http") && (
                   <button
                     onClick={() => setFrameCtx({ url: f.source_url!, title: f.page_title, caption: f.caption, names: f.names, imageUrl: f.image_url })}

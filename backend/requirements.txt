@@ -23,3 +23,5 @@ onnx==1.23.1
 opencv-python-headless
 numpy
 psutil==5.9.8
+httpx[socks]
+socksio==1.0.0
