@@ -319,6 +319,43 @@ async def _run_crawl_all(source_ids: list[uuid.UUID], concurrency: int = 2) -> N
     await asyncio.gather(*[_one(sid) for sid in source_ids], return_exceptions=True)
 
 
+@router.get("/queue")
+async def queue_status(
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    from app.crawlers.queue import CRAWL_QUEUE
+
+    try:
+        depth = int(await redis.llen(CRAWL_QUEUE))
+    except Exception:
+        depth = 0
+    return {"queued": depth}
+
+
+@router.post("/queue/clear")
+async def queue_clear(
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    """Empty the crawl queue and reset any 'crawling' sources to idle."""
+    from sqlalchemy import update as _update
+
+    from app.crawlers.queue import CRAWL_QUEUE
+
+    removed = 0
+    try:
+        removed = int(await redis.llen(CRAWL_QUEUE))
+        await redis.delete(CRAWL_QUEUE)
+    except Exception:
+        pass
+    await session.execute(_update(Source).where(Source.status == "crawling").values(status="idle"))
+    await session.flush()
+    await AuditRepository(session).record("source.queue_clear", actor_id=operator.id, detail={"removed": removed})
+    return {"cleared": removed}
+
+
 @router.post("/crawl-all", status_code=status.HTTP_202_ACCEPTED)
 async def crawl_all(
     operator: User = Depends(get_current_operator),

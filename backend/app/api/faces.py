@@ -543,3 +543,59 @@ async def public_compare(
         "band": band.value if band else "no_match",
         "note": "Similarity between two faces. Not an identity determination.",
     }
+
+
+async def _related_faces(face_id: str, session: AsyncSession, *, limit: int = 24) -> dict:
+    """Other indexed faces likely the same person (across sources), with contacts."""
+    from sqlalchemy import select as _select
+    from app.database.models.face import Face as _Face
+
+    target = (await session.execute(_select(_Face).where(_Face.id == face_id))).scalar_one_or_none()
+    if target is None or not target.embedding:
+        raise HTTPException(status_code=404, detail="face_not_found")
+    corpus = await FaceRepository(session).list_with_embeddings()
+    by_id = {str(r.id): r for r in corpus}
+    ranked = rank_by_cosine(
+        list(target.embedding), [(str(r.id), r.embedding) for r in corpus], floor=STRONG
+    )
+    out = []
+    seen_hash = {target.image_hash}
+    for fid, score in ranked:
+        if fid == face_id:
+            continue
+        rec = by_id[fid]
+        if rec.image_hash in seen_hash:  # skip identical image dupes
+            continue
+        seen_hash.add(rec.image_hash)
+        ex = rec.extra or {}
+        band = band_for_similarity(score)
+        out.append({
+            "face_id": fid,
+            "crop_url": f"/intelligence/face/public/crop/{fid}" if has_crop(fid) else None,
+            "similarity_pct": round(score * 100, 1),
+            "band": band.value if band else "no_match",
+            "source_url": rec.source_url,
+            "page_title": ex.get("page_title"),
+            "names": ex.get("names") or [],
+            "emails": ex.get("emails") or [],
+            "phones": ex.get("phones") or [],
+            "usernames": ex.get("usernames") or [],
+        })
+        if len(out) >= limit:
+            break
+    return {"face_id": face_id, "related": out, "count": len(out),
+            "note": "Faces with strong similarity across sources — likely the same person, not confirmed."}
+
+
+@router.get("/{face_id}/related")
+async def related_faces(
+    face_id: str,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await _related_faces(face_id, session)
+
+
+@router.get("/public/{face_id}/related")
+async def public_related_faces(face_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    return await _related_faces(face_id, session)

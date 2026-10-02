@@ -68,6 +68,11 @@ def validate_public_url(url: str, *, resolver: Resolver | None = None) -> SafeUr
     if not host:
         raise UnsafeUrlError("missing host")
 
+    # Tor hidden services (.onion) do not resolve via DNS and have no IP; they are
+    # reached only through the Tor SOCKS proxy, so skip IP/DNS checks here.
+    if host.lower().endswith(".onion"):
+        return SafeUrl(url=url, scheme=scheme, host=host, port=parts.port, resolved_ips=())
+
     # If the host is itself a literal IP, check it directly.
     try:
         literal = ipaddress.ip_address(host)

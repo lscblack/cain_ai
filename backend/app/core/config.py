@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://127.0.0.1:6379/0")
     face_use_gpu: bool = Field(default=True)
+    # Tor SOCKS proxy for .onion crawling (empty = onion disabled)
+    tor_socks_proxy: str = Field(default="")
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://127.0.0.1:5173"]

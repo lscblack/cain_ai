@@ -6,10 +6,19 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.net import UnsafeUrlError, validate_public_url
 from app.crawlers.runner import Fetched
 
 _UA = "KAI-OSINT/0.1 (+local research; public pages only; honours robots.txt)"
+
+
+def _proxy_for(url: str) -> str | None:
+    """Return the Tor SOCKS proxy for .onion URLs when configured, else None."""
+    host = urlsplit(url).hostname or ""
+    if host.lower().endswith(".onion"):
+        return get_settings().tor_socks_proxy or None
+    return None
 
 
 async def httpx_fetch(url: str) -> Fetched:
@@ -17,9 +26,13 @@ async def httpx_fetch(url: str) -> Fetched:
         validate_public_url(url)
     except UnsafeUrlError:
         return Fetched(status=0)
+    proxy = _proxy_for(url)
+    if urlsplit(url).hostname.lower().endswith(".onion") and not proxy:
+        return Fetched(status=0)  # onion requested but Tor not configured
     try:
         async with httpx.AsyncClient(
-            timeout=15.0, follow_redirects=True, headers={"User-Agent": _UA}
+            timeout=30.0 if proxy else 15.0, follow_redirects=True,
+            headers={"User-Agent": _UA}, proxy=proxy,
         ) as client:
             resp = await client.get(url)
             return Fetched(
