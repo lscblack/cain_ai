@@ -78,7 +78,10 @@ function FaceScanner({ active, pct }: { active: boolean; pct: number }) {
   );
 }
 
+type Mode = "search" | "compare";
+
 export function Home() {
+  const [mode, setMode] = useState<Mode>("search");
   const [file, setFile] = useState<File | null>(null);
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [scanned, setScanned] = useState<number | null>(null);
@@ -90,6 +93,34 @@ export function Home() {
   const [done, setDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewUrl = useObjectUrl(file);
+
+  // 1:1 compare
+  const [cmpA, setCmpA] = useState<File | null>(null);
+  const [cmpB, setCmpB] = useState<File | null>(null);
+  const cmpAUrl = useObjectUrl(cmpA);
+  const cmpBUrl = useObjectUrl(cmpB);
+  const cmpARef = useRef<HTMLInputElement>(null);
+  const cmpBRef = useRef<HTMLInputElement>(null);
+  const [cmpResult, setCmpResult] = useState<any>(null);
+  const [cmpBusy, setCmpBusy] = useState(false);
+  const [cmpErr, setCmpErr] = useState<string | null>(null);
+
+  async function compare() {
+    if (!cmpA || !cmpB || cmpBusy) return;
+    setCmpBusy(true); setCmpErr(null); setCmpResult(null);
+    try {
+      const body = new FormData();
+      body.append("file_a", cmpA);
+      body.append("file_b", cmpB);
+      const r = await fetch(`${API_BASE}/intelligence/face/public/compare`, { method: "POST", body });
+      if (!r.ok) { setCmpErr(r.status === 503 ? "Face engine is offline." : "Comparison failed."); return; }
+      setCmpResult(await r.json());
+    } catch {
+      setCmpErr("Unable to reach the service.");
+    } finally {
+      setCmpBusy(false);
+    }
+  }
 
   // website submission
   const [siteName, setSiteName] = useState("");
@@ -209,6 +240,20 @@ export function Home() {
 
         <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 }} className="relative">
           <div className="absolute -inset-4 bg-accent/5 blur-3xl" aria-hidden="true" />
+          {/* mode tabs */}
+          <div className="relative mb-3 flex gap-2 font-mono text-xs">
+            {([["search", "SEARCH INDEX"], ["compare", "COMPARE TWO"]] as [Mode, string][]).map(([m, label]) => (
+              <button key={m} type="button" onClick={() => setMode(m)}
+                className="border px-4 py-2 tracking-wider transition"
+                style={mode === m
+                  ? { borderColor: "var(--kai-accent)", color: "var(--kai-ink)", background: "rgba(229,72,77,0.08)" }
+                  : { borderColor: "var(--kai-border)", color: "var(--kai-muted)" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === "search" && (
           <div className="relative grid gap-3 border border-line bg-panel/95 p-3 shadow-2xl sm:grid-cols-2 sm:p-4">
             {/* query / upload */}
             <div className="flex flex-col">
@@ -243,11 +288,58 @@ export function Home() {
               <div className="mt-2 font-mono text-[10px] text-muted">{scanned != null && indexed != null ? `${scanned} / ${indexed} compared` : "awaiting query"}</div>
             </div>
           </div>
-          {error && <div className="mt-3 border border-accent/40 bg-accent/5 px-3 py-2 font-mono text-xs text-accent">{error}</div>}
+          )}
+
+          {mode === "compare" && (
+          <div className="relative border border-line bg-panel/95 p-3 shadow-2xl sm:p-4">
+            <div className="flex items-center justify-between border-b border-line pb-2 font-mono text-[11px] uppercase tracking-wider text-muted">
+              <span className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-verified" /> 1:1 face compare</span>
+              <span className="text-accent">{cmpBusy ? "COMPARING…" : cmpResult ? "DONE" : "TWO IMAGES"}</span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {([["A", cmpAUrl, cmpARef, setCmpA], ["B", cmpBUrl, cmpBRef, setCmpB]] as const).map(([label, url, ref, setter]) => (
+                <div key={label}>
+                  <button type="button" onClick={() => ref.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type.startsWith("image/")) { setter(f); setCmpResult(null); } }}
+                    className="group flex min-h-[180px] w-full items-center justify-center overflow-hidden border border-dashed border-line bg-panel-2 transition hover:border-accent/70">
+                    {url ? <img src={url} alt={`face ${label}`} className="h-full max-h-[240px] w-full object-contain" /> : (
+                      <span className="flex flex-col items-center gap-2 text-center">
+                        <span className="flex h-10 w-10 items-center justify-center border border-line bg-panel text-accent group-hover:border-accent"><ImagePlus size={18} /></span>
+                        <span className="font-mono text-xs">IMAGE {label}</span>
+                      </span>
+                    )}
+                  </button>
+                  <input ref={ref} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0] ?? null; setter(f); setCmpResult(null); }} />
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={compare} disabled={!cmpA || !cmpB || cmpBusy}
+              className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 bg-accent px-4 font-mono text-xs font-semibold tracking-wider text-white transition hover:brightness-110 disabled:opacity-40">
+              <ScanFace size={16} /> {cmpBusy ? "COMPARING…" : "COMPARE FACES"}
+            </button>
+            {cmpBusy && <div className="mt-3 h-1 overflow-hidden bg-panel-2"><div className="h-full w-1/3 animate-[scan_1.1s_ease-in-out_infinite] bg-accent" /></div>}
+            {cmpResult && (
+              cmpResult.comparable ? (
+                <div className="mt-4 border border-line bg-panel-2 p-4 text-center">
+                  <div className="font-mono text-5xl font-semibold" style={{ color: "var(--kai-accent)" }}>{cmpResult.similarity_pct}%</div>
+                  <div className="mt-2 font-mono text-xs uppercase tracking-wider text-muted">{String(cmpResult.band).replaceAll("_", " ")}</div>
+                  <div className="mt-3 border-t border-line pt-2 font-mono text-[10px] text-muted">{cmpResult.note}</div>
+                </div>
+              ) : (
+                <div className="mt-4 border border-line bg-panel-2 p-4 text-center font-mono text-xs text-muted">NO FACE DETECTED IN ONE OR BOTH IMAGES</div>
+              )
+            )}
+            {cmpErr && <div className="mt-3 border border-accent/40 bg-accent/5 px-3 py-2 font-mono text-xs text-accent">{cmpErr}</div>}
+          </div>
+          )}
+
+          {mode === "search" && error && <div className="mt-3 border border-accent/40 bg-accent/5 px-3 py-2 font-mono text-xs text-accent">{error}</div>}
         </motion.div>
       </section>
 
       {/* results */}
+      {mode === "search" && (
       <section className="relative mx-auto w-11/12 max-w-[1700px] pb-14">
         <div className="mb-4 flex items-end justify-between border-b border-line pb-3">
           <div className="font-mono text-xs uppercase tracking-[0.2em] text-muted">Query output</div>
@@ -272,6 +364,7 @@ export function Home() {
           </div>
         )}
       </section>
+      )}
 
       {/* public website submission */}
       <section className="relative mx-auto w-11/12 max-w-[1700px] pb-16">

@@ -510,3 +510,27 @@ async def public_index_sample(limit: int = 48, session: AsyncSession = Depends(g
         if has_crop(str(r.id))
     ]
     return {"samples": samples, "count": len(samples)}
+
+
+@router.post("/public/compare")
+async def public_compare(
+    file_a: UploadFile = File(...),
+    file_b: UploadFile = File(...),
+    engine: FaceEngine = Depends(engine_dep),
+) -> dict:
+    """Public 1:1 face comparison used by the landing page (no account)."""
+    _require_engine(engine)
+    a = await detect_and_embed_async(engine, await _read_image(file_a))
+    b = await detect_and_embed_async(engine, await _read_image(file_b))
+    if not a or not b:
+        return {"comparable": False, "detail": "no_face_detected_in_one_or_both",
+                "faces_a": len(a), "faces_b": len(b)}
+    score = cosine_similarity(a[0].embedding, b[0].embedding)
+    band = band_for_similarity(score)
+    return {
+        "comparable": True,
+        "similarity": round(score, 4),
+        "similarity_pct": round(max(score, 0.0) * 100, 1),
+        "band": band.value if band else "no_match",
+        "note": "Similarity between two faces. Not an identity determination.",
+    }

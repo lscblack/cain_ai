@@ -155,3 +155,16 @@ async def test_dedupe_empty(client, auth_headers):
     r = await client.post("/intelligence/face/dedupe", headers=auth_headers)
     assert r.status_code == 200
     assert r.json()["removed"] == 0
+
+
+@requires_engine
+async def test_public_compare(client):
+    with open(FACE1, "rb") as a, open(FACE1, "rb") as b:
+        same = await client.post("/intelligence/face/public/compare",
+            files={"file_a": ("a.jpg", a, "image/jpeg"), "file_b": ("b.jpg", b, "image/jpeg")})
+    assert same.status_code == 200 and same.json()["comparable"] is True
+    assert same.json()["similarity"] > 0.9
+    with open(FACE1, "rb") as a, open(FACE2, "rb") as b:
+        diff = await client.post("/intelligence/face/public/compare",
+            files={"file_a": ("a.jpg", a, "image/jpeg"), "file_b": ("b.jpg", b, "image/jpeg")})
+    assert diff.json()["similarity"] < same.json()["similarity"]
