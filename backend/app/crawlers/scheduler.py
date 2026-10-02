@@ -75,3 +75,23 @@ async def learning_loop() -> None:
         except Exception:
             logger.exception("learning tick failed")
         await asyncio.sleep(_LEARNING_TICK_SECONDS)
+
+
+_DEDUPE_TICK_SECONDS = 1800  # every 30 min, auto-remove near-identical faces (no clicking)
+
+
+async def dedupe_loop() -> None:
+    """Automatically drop near-duplicate faces on a schedule so the index stays clean."""
+    from app.intelligence.face.dedupe import run_dedupe
+
+    # Small initial delay so startup work settles first.
+    await asyncio.sleep(120)
+    while True:
+        try:
+            async with async_session_maker() as session:
+                result = await run_dedupe(session)
+            if result.get("removed"):
+                logger.info("dedupe: auto-removed %d duplicate face(s)", result["removed"])
+        except Exception:
+            logger.exception("dedupe tick failed")
+        await asyncio.sleep(_DEDUPE_TICK_SECONDS)

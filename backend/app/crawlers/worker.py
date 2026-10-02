@@ -14,7 +14,7 @@ from app.api.sources import _run_crawl
 from app.core.logging import get_logger
 from app.core.redis import get_redis_client
 from app.crawlers.queue import CRAWL_QUEUE, DISCOVERY_QUEUE
-from app.crawlers.scheduler import learning_loop, scheduler_loop
+from app.crawlers.scheduler import dedupe_loop, learning_loop, scheduler_loop
 
 logger = get_logger("kai.crawl-worker")
 
@@ -86,6 +86,7 @@ async def run() -> None:
         asyncio.create_task(_consume_queue(DISCOVERY_QUEUE, _run_discovery_job)),
         asyncio.create_task(scheduler_loop()),
         asyncio.create_task(learning_loop()),
+        asyncio.create_task(dedupe_loop()),
     ]
     try:
         await asyncio.gather(*tasks)
