@@ -66,7 +66,14 @@ async def public_lookup(
                 "phones": p.phones,
                 "usernames": p.usernames,
                 "faces": [
-                    {"face_id": str(fa.id), "crop_url": f"/intelligence/face/public/crop/{fa.id}"}
+                    {
+                        "face_id": str(fa.id),
+                        "crop_url": f"/intelligence/face/public/crop/{fa.id}",
+                        # Full direct links — the exact page and image URL the face was
+                        # found at, never reduced to the root domain.
+                        "source_url": fa.source_url,
+                        "image_url": (fa.extra or {}).get("image_url"),
+                    }
                     for fa in faces
                     if has_crop(str(fa.id))
                 ],

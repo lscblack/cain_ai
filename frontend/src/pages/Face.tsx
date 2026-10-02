@@ -383,17 +383,21 @@ export function Face() {
                               </div>
                             )}
                             {m.source_url && (
-                              <div className="mt-2 flex gap-2">
-                                <button
-                                  onClick={() => setFrameCtx({ url: m.source_url!, title: m.page_title, caption: m.caption, names: m.names, imageUrl: m.image_url })}
-                                  className="rounded border border-line px-2 py-1 text-xs hover:bg-panel-2"
-                                >
-                                  Open in frame
-                                </button>
-                                <a href={m.source_url} target="_blank" rel="noreferrer" className="rounded border border-line px-2 py-1 text-xs hover:bg-panel-2">
-                                  Read more ↗
-                                </a>
-                              </div>
+                              <>
+                                <a href={m.source_url} target="_blank" rel="noreferrer" title={m.source_url} className="kai-metadata mt-2 block truncate hover:text-ink">↳ page: {m.source_url}</a>
+                                {m.image_url && <a href={m.image_url} target="_blank" rel="noreferrer" title={m.image_url} className="kai-metadata block truncate hover:text-ink" style={{ color: "var(--kai-accent)" }}>↳ image: {m.image_url}</a>}
+                                <div className="mt-2 flex gap-2">
+                                  <button
+                                    onClick={() => setFrameCtx({ url: m.source_url!, title: m.page_title, caption: m.caption, names: m.names, imageUrl: m.image_url })}
+                                    className="rounded border border-line px-2 py-1 text-xs hover:bg-panel-2"
+                                  >
+                                    Open in frame
+                                  </button>
+                                  <a href={m.source_url} target="_blank" rel="noreferrer" className="rounded border border-line px-2 py-1 text-xs hover:bg-panel-2">
+                                    Read more ↗
+                                  </a>
+                                </div>
+                              </>
                             )}
                           </div>
                         </div>

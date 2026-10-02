@@ -12,6 +12,7 @@ interface SearchMatch {
   crop_url?: string | null;
   page_title?: string | null;
   source_url?: string | null;
+  image_url?: string | null;
   names?: string[];
   emails?: string[];
   phones?: string[];
@@ -395,11 +396,23 @@ export function Home() {
                   <div className="max-h-[360px] space-y-2 overflow-auto">
                     {lookup.results.map((r: any, i: number) => (
                       <div key={i} className="border border-line bg-panel-2 p-3">
-                        <a href={r.page_url} target="_blank" rel="noreferrer" className="block truncate text-sm hover:text-accent">{r.page_title || r.page_url}</a>
-                        <div className="truncate font-mono text-[10px] text-muted">{r.domain}</div>
+                        {r.page_title && <div className="truncate text-sm">{r.page_title}</div>}
+                        {/* full direct page link — not the root domain */}
+                        <a href={r.page_url} target="_blank" rel="noreferrer" className="block break-all font-mono text-[10px] text-muted hover:text-accent">{r.page_url}</a>
                         {r.faces?.length > 0 && (
                           <div className="mt-2 flex gap-1 overflow-x-auto">
-                            {r.faces.map((fa: any) => <img key={fa.face_id} src={`${API_BASE}${fa.crop_url}`} alt="" className="h-12 w-12 flex-shrink-0 border border-line object-cover" />)}
+                            {r.faces.map((fa: any) => (
+                              <a
+                                key={fa.face_id}
+                                href={fa.image_url || fa.source_url || r.page_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={fa.image_url || fa.source_url || ""}
+                                className="flex-shrink-0"
+                              >
+                                <img src={`${API_BASE}${fa.crop_url}`} alt="" className="h-12 w-12 border border-line object-cover transition hover:border-accent" />
+                              </a>
+                            ))}
                           </div>
                         )}
                         <div className="mt-2 flex flex-wrap gap-1 font-mono text-[10px]">
@@ -440,7 +453,8 @@ export function Home() {
                 <div className="p-3">
                   <div className="flex justify-between font-mono text-xs"><span className="text-accent">{m.similarity_pct}%</span><span className="text-muted">{m.band.replaceAll("_", " ")}</span></div>
                   <div className="mt-2 truncate text-sm">{m.names?.[0] ?? m.page_title ?? "Unattributed"}</div>
-                  {m.source_url && <a href={m.source_url} target="_blank" rel="noreferrer" className="mt-1 block truncate font-mono text-[10px] text-muted hover:text-ink">{m.source_url}</a>}
+                  {m.source_url && <a href={m.source_url} target="_blank" rel="noreferrer" title={m.source_url} className="mt-1 block truncate font-mono text-[10px] text-muted hover:text-ink">↳ page: {m.source_url}</a>}
+                  {m.image_url && <a href={m.image_url} target="_blank" rel="noreferrer" title={m.image_url} className="block truncate font-mono text-[10px] text-muted hover:text-accent">↳ image: {m.image_url}</a>}
                   {((m.phones?.length ?? 0) + (m.emails?.length ?? 0) + (m.usernames?.length ?? 0)) > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1 font-mono text-[9px]">
                       {(m.phones ?? []).slice(0, 2).map((p) => <span key={p} className="border border-line px-1 py-0.5 text-verified">{p}</span>)}

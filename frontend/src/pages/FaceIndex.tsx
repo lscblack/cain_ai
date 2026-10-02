@@ -145,6 +145,12 @@ export function FaceIndex() {
               {f.names && f.names.length > 0 && (
                 <div className="kai-metadata truncate" style={{ color: "var(--kai-warn)" }}>{f.names.slice(0, 2).join(", ")}</div>
               )}
+              {f.source_url && f.source_url.startsWith("http") && (
+                <a href={f.source_url} target="_blank" rel="noreferrer" title={f.source_url} className="kai-metadata block truncate hover:text-ink">↳ page: {f.source_url}</a>
+              )}
+              {f.image_url && (
+                <a href={f.image_url} target="_blank" rel="noreferrer" title={f.image_url} className="kai-metadata block truncate hover:text-ink" style={{ color: "var(--kai-accent)" }}>↳ image: {f.image_url}</a>
+              )}
               <Contacts f={f} />
               <div className="mt-1 flex items-center justify-between">
                 <button onClick={() => openRelated(f.face_id)} className="kai-metadata hover:text-ink" title="Find the same person across sources">same person</button>
