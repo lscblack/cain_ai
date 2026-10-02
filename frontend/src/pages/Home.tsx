@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, Globe, ImagePlus, Plus, ScanFace, ShieldCheck, Upload } from "lucide-react";
 import { motion } from "framer-motion";
+
+import { usePasteImage } from "@/lib/usePasteImage";
 
 interface SearchMatch {
   face_id: string;
@@ -156,6 +158,23 @@ export function Home() {
     setFile(next); setMatches([]); setError(null); setDone(false); setStage("IMAGE READY");
   }
 
+  // Paste (Ctrl/Cmd+V) an image anywhere → routes to the active tool.
+  // In compare mode it fills slot A first, then B.
+  const onPasteImage = useCallback(
+    (f: File) => {
+      if (mode === "compare") {
+        setCmpResult(null);
+        if (!cmpA) setCmpA(f);
+        else setCmpB(f);
+      } else {
+        setMode("search");
+        selectFile(f);
+      }
+    },
+    [mode, cmpA],
+  );
+  usePasteImage(onPasteImage);
+
   async function search() {
     if (!file || busy) return;
     setBusy(true); setMatches([]); setScanned(null); setIndexed(null); setPct(0); setError(null); setDone(false);
@@ -290,7 +309,7 @@ export function Home() {
                 {previewUrl ? <img src={previewUrl} alt="query" className="h-full max-h-[320px] w-full object-contain" /> : (
                   <span className="flex flex-col items-center gap-3 px-6 text-center">
                     <span className="flex h-12 w-12 items-center justify-center border border-line bg-panel text-accent group-hover:border-accent"><ImagePlus size={22} /></span>
-                    <span><strong className="block font-mono text-sm">DROP IMAGE</strong><small className="mt-1 block text-muted">or choose a file</small></span>
+                    <span><strong className="block font-mono text-sm">DROP IMAGE</strong><small className="mt-1 block text-muted">drag, paste (Ctrl+V), or choose a file</small></span>
                   </span>
                 )}
               </button>

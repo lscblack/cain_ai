@@ -26,12 +26,19 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 
 class DiscoveryRunIn(BaseModel):
-    country: str = Field(default="rwanda", max_length=80)
+    countries: list[str] = Field(default_factory=list, max_length=30)
+    country: str | None = Field(default=None, max_length=80)  # back-compat (single)
     categories: list[str] = Field(default_factory=lambda: ["people", "phone", "images"])
     targets: list[str] = Field(default_factory=lambda: ["phone", "username", "images"])
     min_score: int = Field(default=60, ge=0, le=100)
     max_domains: int = Field(default=200, ge=1, le=500)
     auto_crawl: bool = False
+
+    def resolved_countries(self) -> list[str]:
+        out = [c.strip() for c in self.countries if c and c.strip()]
+        if not out and self.country and self.country.strip():
+            out = [self.country.strip()]
+        return out or ["rwanda"]
 
 
 class DiscoveryRunStarted(BaseModel):
@@ -58,7 +65,7 @@ async def start_discovery(
     run_id = new_run_id()
     params = {
         "run_id": run_id,
-        "country": body.country,
+        "countries": body.resolved_countries(),
         "categories": body.categories,
         "targets": body.targets,
         "min_score": body.min_score,

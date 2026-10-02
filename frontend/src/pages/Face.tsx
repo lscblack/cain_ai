@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ScanFace, Upload } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
 import { SourceFrame, type SourceContext } from "@/components/SourceFrame";
+import { usePasteImage } from "@/lib/usePasteImage";
+
+function imageFromDrop(e: React.DragEvent): File | null {
+  const f = e.dataTransfer.files?.[0] ?? null;
+  return f && f.type.startsWith("image/") ? f : null;
+}
 
 type Mode = "search" | "compare" | "discover";
 
@@ -63,6 +69,16 @@ export function Face() {
   const [compareFile, setCompareFile] = useState<File | null>(null);
   const queryUrl = useObjectUrl(queryFile);
   const compareUrl = useObjectUrl(compareFile);
+
+  // Paste (Ctrl/Cmd+V) an image → query slot, or the compare slot once a query exists.
+  const onPasteImage = useCallback(
+    (f: File) => {
+      if (mode === "compare" && queryFile) setCompareFile(f);
+      else setQueryFile(f);
+    },
+    [mode, queryFile],
+  );
+  usePasteImage(onPasteImage);
 
   const [matches, setMatches] = useState<SearchMatch[] | null>(null);
   const [compareResult, setCompareResult] = useState<any>(null);
@@ -232,7 +248,9 @@ export function Face() {
           <div className="kai-metadata uppercase">Query face</div>
           <div
             onClick={() => queryInput.current?.click()}
-            className="flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-line bg-panel-2"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); const f = imageFromDrop(e); if (f) setQueryFile(f); }}
+            className="flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-dashed border-line bg-panel-2 transition hover:border-accent/70"
           >
             {queryUrl ? (
               <img src={queryUrl} alt="query" className="h-full w-full object-cover" />
@@ -240,6 +258,7 @@ export function Face() {
               <div className="flex flex-col items-center gap-2 text-muted">
                 <Upload size={22} />
                 <span className="text-xs">Upload a face</span>
+                <span className="kai-metadata">drag · paste · click</span>
               </div>
             )}
           </div>
@@ -254,13 +273,18 @@ export function Face() {
           {mode === "compare" && (
             <>
               <div className="kai-metadata uppercase">Compare against</div>
-              <label className="flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-line bg-panel-2">
+              <label
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); const f = imageFromDrop(e); if (f) setCompareFile(f); }}
+                className="flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-dashed border-line bg-panel-2 transition hover:border-accent/70"
+              >
                 {compareUrl ? (
                   <img src={compareUrl} alt="compare" className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex flex-col items-center gap-2 text-muted">
                     <Upload size={22} />
                     <span className="text-xs">Second face</span>
+                    <span className="kai-metadata">drag · paste · click</span>
                   </div>
                 )}
                 <input type="file" accept="image/*" hidden onChange={(e) => setCompareFile(e.target.files?.[0] ?? null)} />

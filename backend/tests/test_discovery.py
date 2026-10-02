@@ -22,6 +22,25 @@ def test_generate_queries_defaults_when_empty():
     assert out  # falls back to default categories/targets
 
 
+def test_generate_queries_multi_covers_all_countries():
+    out = q.generate_queries_multi(["rwanda", "kenya"], ["people"], ["phone"])
+    assert any("Rwanda" in x for x in out)
+    assert any("Kenya" in x for x in out)
+    assert len(out) == len(set(out))  # deduped across countries
+
+
+def test_generate_queries_multi_defaults_empty():
+    assert q.generate_queries_multi([], ["people"], ["phone"])  # falls back to rwanda
+
+
+def test_discovery_run_in_resolved_countries():
+    from app.api.discovery import DiscoveryRunIn
+
+    assert DiscoveryRunIn(countries=["kenya", "uganda"]).resolved_countries() == ["kenya", "uganda"]
+    assert DiscoveryRunIn(country="ghana").resolved_countries() == ["ghana"]  # back-compat
+    assert DiscoveryRunIn().resolved_countries() == ["rwanda"]  # default
+
+
 def test_generate_queries_custom_category_and_target():
     # custom/unlisted category + target must still produce queries
     out = q.generate_queries("rwanda", ["lawyers"], ["fax"])

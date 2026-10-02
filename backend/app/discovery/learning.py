@@ -13,19 +13,23 @@ import time
 from redis.asyncio import Redis
 
 from app.core.logging import get_logger
-from app.discovery.engine import new_run_id, run_term_discovery
+from app.crawlers.queue import enqueue_discovery
+from app.discovery.engine import _save, new_run_id, run_term_discovery
 from app.discovery.search import search_available
 
 logger = get_logger("kai.discovery.learning")
 
 TERMS_KEY = "kai:discovery:terms"          # hash term -> json meta
 PENDING_KEY = "kai:discovery:terms:pending"  # set of terms awaiting discovery
+SEEN_KEY = "kai:discovery:term:seen:{term}"  # debounce: per-term cooldown
 LOW_DATA_HITS = 3  # at or below this many local hits => term is "data-poor"
 MAX_TERM_LEN = 120
+AUTO_COOLDOWN = 60 * 60 * 12  # don't auto-rediscover the same term more than ~2x/day
 
 
 async def record_term(redis: Redis, term: str, kind: str, *, local_hits: int) -> None:
-    """Note a searched term. Queue it for discovery when local data is scarce."""
+    """Note a searched term, and immediately kick off discovery when local data is
+    scarce so the next time someone searches it we already have data (+ images)."""
     term = (term or "").strip()
     if not term or len(term) > MAX_TERM_LEN:
         return
@@ -40,10 +44,42 @@ async def record_term(redis: Redis, term: str, kind: str, *, local_hits: int) ->
         await redis.hset(TERMS_KEY, term, json.dumps(meta))
         if local_hits <= LOW_DATA_HITS:
             await redis.sadd(PENDING_KEY, term)
+            await _auto_discover(redis, term, kind)
         else:
             await redis.srem(PENDING_KEY, term)
     except Exception as exc:  # noqa: BLE001
         logger.debug("record_term failed: %s", exc)
+
+
+async def _auto_discover(redis: Redis, term: str, kind: str) -> str | None:
+    """Enqueue an immediate (background) discovery for a data-poor term, debounced.
+
+    Returns the run id if a run was queued, else None (unavailable / cooling down).
+    """
+    if not search_available():
+        return None
+    # Debounce: only one auto-run per term per cooldown window.
+    try:
+        fresh = await redis.set(SEEN_KEY.format(term=term), "1", nx=True, ex=AUTO_COOLDOWN)
+    except Exception:
+        fresh = True
+    if not fresh:
+        return None
+    run_id = new_run_id()
+    try:
+        await redis.srem(PENDING_KEY, term)  # it's being handled now
+        await _save(redis, run_id, {
+            "id": run_id, "status": "queued", "kind": "learning", "targets": [term],
+            "progress": 0, "candidates": 0, "already_known": 0, "new_domains": 0,
+            "evaluated": 0, "approved": 0, "rejected": 0, "current": None,
+            "approved_list": [], "started_at": time.time(),
+        })
+        await enqueue_discovery(redis, {"kind": "terms", "run_id": run_id, "terms": [term]})
+        logger.info("auto-discovery %s queued for data-poor term %r (%s)", run_id, term, kind)
+        return run_id
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("auto-discover enqueue failed: %s", exc)
+        return None
 
 
 async def list_terms(redis: Redis) -> list[dict]:

@@ -20,7 +20,7 @@ logger = get_logger("kai.crawl-worker")
 
 
 async def _run_discovery_job(raw: str) -> None:
-    from app.discovery.engine import run_discovery
+    from app.discovery.engine import run_discovery, run_term_discovery
 
     try:
         job = json.loads(raw)
@@ -28,10 +28,21 @@ async def _run_discovery_job(raw: str) -> None:
         logger.warning("discovery worker: bad job payload")
         return
     redis = get_redis_client()
+    if job.get("kind") == "terms":
+        # Self-learning run: discover sources for specific searched terms.
+        await run_term_discovery(
+            job["run_id"],
+            redis=redis,
+            terms=job.get("terms", []),
+            min_score=job.get("min_score", 55),
+            max_domains=job.get("max_domains", 60),
+            auto_crawl=job.get("auto_crawl", True),
+        )
+        return
     await run_discovery(
         job["run_id"],
         redis=redis,
-        country=job.get("country", ""),
+        countries=job.get("countries") or ([job["country"]] if job.get("country") else None),
         categories=job.get("categories", []),
         targets=job.get("targets", []),
         min_score=job.get("min_score", 60),

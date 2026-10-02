@@ -18,7 +18,7 @@ from app.crawlers.queue import enqueue_crawls
 from app.database.models.source import Source
 from app.database.session import async_session_maker
 from app.discovery.evaluate import evaluate_domain
-from app.discovery.queries import generate_queries
+from app.discovery.queries import generate_queries_multi
 from app.discovery.search import search_candidates
 
 logger = get_logger("kai.discovery")
@@ -42,15 +42,18 @@ async def run_discovery(
     run_id: str,
     *,
     redis: Redis,
-    country: str,
+    countries: list[str] | None = None,
+    country: str | None = None,  # back-compat: single country
     categories: list[str],
     targets: list[str],
     min_score: int = 60,
     max_domains: int = 200,
     auto_crawl: bool = False,
 ) -> None:
+    countries = [c for c in (countries or ([country] if country else [])) if c] or ["rwanda"]
     state = {
-        "id": run_id, "status": "searching", "country": country, "categories": categories,
+        "id": run_id, "status": "searching", "countries": countries,
+        "country": countries[0], "categories": categories,
         "targets": targets, "min_score": min_score, "max_domains": max_domains,
         "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
         "approved": 0, "rejected": 0, "current": None, "approved_list": [],
@@ -58,7 +61,7 @@ async def run_discovery(
     }
     await _save(redis, run_id, state)
 
-    queries = generate_queries(country, categories, targets)
+    queries = generate_queries_multi(countries, categories, targets)
     await _execute(
         run_id, redis=redis, queries=queries, state=state,
         min_score=min_score, max_domains=max_domains, auto_crawl=auto_crawl,
@@ -201,6 +204,6 @@ async def mark_queued(redis: Redis, run_id: str, params: dict) -> None:
         "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
         "approved": 0, "rejected": 0, "current": None, "approved_list": [],
         "started_at": time.time(),
-        **{k: params.get(k) for k in ("country", "categories", "targets", "min_score", "max_domains")},
+        **{k: params.get(k) for k in ("countries", "country", "categories", "targets", "min_score", "max_domains")},
     }
     await _save(redis, run_id, state)

@@ -71,3 +71,24 @@ def generate_queries(
     add(f"{label} public figures profiles")
 
     return queries[:limit]
+
+
+def generate_queries_multi(
+    countries: list[str],
+    categories: list[str],
+    targets: list[str],
+    *,
+    limit: int = 60,
+) -> list[str]:
+    """Combine per-country queries across several regions, deduped, capped."""
+    countries = [c for c in (countries or []) if c and c.strip()] or ["rwanda"]
+    # Per-country share keeps the combined set bounded as countries grow.
+    per = max(8, limit // len(countries))
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in countries:
+        for q in generate_queries(c, categories, targets, limit=per):
+            if q not in seen:
+                seen.add(q)
+                out.append(q)
+    return out[:limit]

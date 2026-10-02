@@ -58,7 +58,9 @@ function normalize(v: string): string {
 
 export function Discover() {
   const [available, setAvailable] = useState<boolean | null>(null);
-  const [country, setCountry] = useState("rwanda");
+  const [countries, setCountries] = useState<string[]>(["rwanda"]);
+  const [countryOptions, setCountryOptions] = useState<string[]>(COUNTRIES);
+  const [customCountry, setCustomCountry] = useState("");
   const [categories, setCategories] = useState<string[]>(["people", "phone", "images"]);
   const [targets, setTargets] = useState<string[]>(["phone", "username", "images"]);
   const [minScore, setMinScore] = useState(60);
@@ -100,9 +102,13 @@ export function Discover() {
 
   async function start() {
     setError(null);
+    if (countries.length === 0) {
+      setError("Select at least one country.");
+      return;
+    }
     try {
       const res = await api.post<{ id: string }>("/discovery/run", {
-        country,
+        countries,
         categories,
         targets,
         min_score: minScore,
@@ -160,20 +166,33 @@ export function Discover() {
         <section className="border border-line bg-panel-2 p-5">
           <div className="mb-4 kai-metadata">DISCOVER NEW SOURCES</div>
 
-          <label className="mb-3 block text-sm">
-            <span className="mb-1 block text-muted uppercase tracking-wider text-xs">Region / Country</span>
-            <select
-              value={country}
-              onChange={(e) => setCountry(e.target.value)}
-              className="w-full border border-line bg-base px-3 py-2 text-ink"
-            >
-              {COUNTRIES.map((c) => (
-                <option key={c} value={c}>
+          <div className="mb-3">
+            <span className="mb-1 block text-muted uppercase tracking-wider text-xs">
+              Regions / Countries ({countries.length})
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {countryOptions.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCountries((l) => toggle(l, c))}
+                  className={`border px-3 py-1.5 text-xs uppercase tracking-wider transition ${
+                    countries.includes(c) ? "border-accent text-accent" : "border-line text-muted hover:text-ink"
+                  }`}
+                >
                   {c}
-                </option>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+            <AddChip
+              value={customCountry}
+              setValue={setCustomCountry}
+              placeholder="Add a country…"
+              onAdd={(v) => {
+                setCountryOptions((o) => (o.includes(v) ? o : [...o, v]));
+                setCountries((l) => (l.includes(v) ? l : [...l, v]));
+              }}
+            />
+          </div>
 
           <div className="mb-3">
             <span className="mb-1 block text-muted uppercase tracking-wider text-xs">Categories</span>
