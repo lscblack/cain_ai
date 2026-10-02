@@ -52,6 +52,10 @@ function toggle(list: string[], v: string): string[] {
   return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
 }
 
+function normalize(v: string): string {
+  return v.trim().toLowerCase();
+}
+
 export function Discover() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [country, setCountry] = useState("rwanda");
@@ -60,6 +64,10 @@ export function Discover() {
   const [minScore, setMinScore] = useState(60);
   const [maxDomains, setMaxDomains] = useState(500);
   const [autoCrawl, setAutoCrawl] = useState(true);
+  const [catOptions, setCatOptions] = useState<string[]>(CATEGORIES);
+  const [tgtOptions, setTgtOptions] = useState<string[]>(TARGETS);
+  const [customCat, setCustomCat] = useState("");
+  const [customTgt, setCustomTgt] = useState("");
   const [run, setRun] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [terms, setTerms] = useState<Term[]>([]);
@@ -170,7 +178,7 @@ export function Discover() {
           <div className="mb-3">
             <span className="mb-1 block text-muted uppercase tracking-wider text-xs">Categories</span>
             <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map((c) => (
+              {catOptions.map((c) => (
                 <button
                   key={c}
                   onClick={() => setCategories((l) => toggle(l, c))}
@@ -182,12 +190,21 @@ export function Discover() {
                 </button>
               ))}
             </div>
+            <AddChip
+              value={customCat}
+              setValue={setCustomCat}
+              placeholder="Add a category…"
+              onAdd={(v) => {
+                setCatOptions((o) => (o.includes(v) ? o : [...o, v]));
+                setCategories((l) => (l.includes(v) ? l : [...l, v]));
+              }}
+            />
           </div>
 
           <div className="mb-3">
             <span className="mb-1 block text-muted uppercase tracking-wider text-xs">Targets</span>
             <div className="flex flex-wrap gap-2">
-              {TARGETS.map((t) => (
+              {tgtOptions.map((t) => (
                 <button
                   key={t}
                   onClick={() => setTargets((l) => toggle(l, t))}
@@ -199,6 +216,15 @@ export function Discover() {
                 </button>
               ))}
             </div>
+            <AddChip
+              value={customTgt}
+              setValue={setCustomTgt}
+              placeholder="Add a target…"
+              onAdd={(v) => {
+                setTgtOptions((o) => (o.includes(v) ? o : [...o, v]));
+                setTargets((l) => (l.includes(v) ? l : [...l, v]));
+              }}
+            />
           </div>
 
           <div className="mb-4 grid grid-cols-2 gap-4">
@@ -333,6 +359,48 @@ export function Discover() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function AddChip({
+  value,
+  setValue,
+  placeholder,
+  onAdd,
+}: {
+  value: string;
+  setValue: (v: string) => void;
+  placeholder: string;
+  onAdd: (v: string) => void;
+}) {
+  function commit() {
+    const v = normalize(value);
+    if (v) onAdd(v);
+    setValue("");
+  }
+  return (
+    <div className="mt-2 flex gap-2">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          }
+        }}
+        placeholder={placeholder}
+        className="flex-1 border border-line bg-base px-3 py-1.5 text-xs text-ink placeholder:text-muted/60"
+      />
+      <button
+        type="button"
+        onClick={commit}
+        disabled={!value.trim()}
+        className="border border-line px-3 py-1.5 text-xs uppercase tracking-wider text-muted transition hover:border-accent hover:text-accent disabled:opacity-40"
+      >
+        Add
+      </button>
     </div>
   );
 }

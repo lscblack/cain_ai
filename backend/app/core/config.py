@@ -37,7 +37,13 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/kai"
     )
     redis_url: str = Field(default="redis://127.0.0.1:6379/0")
-    face_use_gpu: bool = Field(default=True)
+    face_use_gpu: bool = Field(default=True)  # use GPU only when a working CUDA driver is present
+    # Cap CPU threads used by face inference so background work never saturates the box.
+    # 0 = auto (half the cores, min 2). Ignored when the GPU is in use.
+    face_cpu_threads: int = Field(default=0)
+    # Nice value applied to the (CPU) face-inference worker thread so interactive
+    # requests and the rest of the system keep priority (0-19; higher = lower priority).
+    face_infer_nice: int = Field(default=10)
     # Tor SOCKS proxy for .onion crawling (empty = onion disabled)
     tor_socks_proxy: str = Field(default="")
 

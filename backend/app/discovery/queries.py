@@ -59,7 +59,10 @@ def generate_queries(
     # site:ccTLD operator queries targeting the identifiers we want
     if tld:
         for t in tgts:
-            for hint in _TARGET_HINTS.get(t, []):
+            # Known targets expand to curated hints; custom/unlisted ones use the
+            # literal term so operator-typed targets still drive discovery.
+            hints = _TARGET_HINTS.get(t) or [f'"{t}"']
+            for hint in hints:
                 add(f"site:{tld} {hint}")
     # broad directory queries
     add(f"{label} business directory phone")

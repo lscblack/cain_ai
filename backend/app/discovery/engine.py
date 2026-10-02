@@ -192,3 +192,15 @@ async def _add_source(domain: str, ev: dict, *, auto_crawl: bool, redis: Redis) 
 
 def new_run_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+async def mark_queued(redis: Redis, run_id: str, params: dict) -> None:
+    """Write an initial 'queued' state so the UI can poll before the worker starts."""
+    state = {
+        "id": run_id, "status": "queued", "progress": 0,
+        "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
+        "approved": 0, "rejected": 0, "current": None, "approved_list": [],
+        "started_at": time.time(),
+        **{k: params.get(k) for k in ("country", "categories", "targets", "min_score", "max_domains")},
+    }
+    await _save(redis, run_id, state)

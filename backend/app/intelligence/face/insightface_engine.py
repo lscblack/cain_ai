@@ -1,6 +1,10 @@
-"""InsightFace (buffalo_l / ArcFace r50) CPU backend."""
+"""InsightFace (buffalo_l / ArcFace r50) backend — GPU when a real CUDA driver is
+present, otherwise CPU with a bounded thread budget so background work (crawling,
+discovery, bulk indexing) never saturates the machine."""
 from __future__ import annotations
 
+import ctypes
+import os
 import threading
 
 import numpy as np
@@ -12,6 +16,44 @@ from app.intelligence.face.engine import DetectedFace, FaceEngine
 logger = get_logger("kai.face")
 
 _DET_SIZE = (640, 640)
+
+
+def cuda_is_usable() -> bool:
+    """True only if a CUDA driver is actually loadable AND a device exists.
+
+    ``onnxruntime.get_available_providers()`` lists ``CUDAExecutionProvider`` whenever
+    the GPU build is installed, even on a box with no NVIDIA driver — so we probe the
+    driver directly via libcuda to avoid trying (and failing) to run on a phantom GPU.
+    """
+    try:
+        import onnxruntime as ort
+
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            return False
+    except Exception:
+        return False
+    for libname in ("libcuda.so.1", "libcuda.so", "nvcuda.dll"):
+        try:
+            cuda = ctypes.CDLL(libname)
+        except OSError:
+            continue
+        try:
+            if cuda.cuInit(0) != 0:  # not CUDA_SUCCESS
+                continue
+            count = ctypes.c_int(0)
+            if cuda.cuDeviceGetCount(ctypes.byref(count)) == 0 and count.value > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _cpu_thread_budget() -> int:
+    configured = get_settings().face_cpu_threads
+    if configured and configured > 0:
+        return configured
+    cores = os.cpu_count() or 2
+    return max(2, cores // 2)
 
 
 class InsightFaceEngine(FaceEngine):
@@ -33,22 +75,28 @@ class InsightFaceEngine(FaceEngine):
             if self._app is not None:
                 return True
             try:
+                use_gpu = get_settings().face_use_gpu and cuda_is_usable()
+                if not use_gpu:
+                    # Bound CPU thread pools BEFORE importing onnxruntime/insightface so a
+                    # single detection can't peg all 24 cores and stall the rest of the box.
+                    budget = str(_cpu_thread_budget())
+                    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                                "NUMEXPR_NUM_THREADS", "ORT_NUM_THREADS"):
+                        os.environ.setdefault(var, budget)
+
                 from insightface.app import FaceAnalysis
 
-                providers = ["CPUExecutionProvider"]
-                ctx_id = -1
-                if get_settings().face_use_gpu:
-                    try:
-                        import onnxruntime as ort
-
-                        if "CUDAExecutionProvider" in ort.get_available_providers():
-                            providers.insert(0, "CUDAExecutionProvider")
-                            ctx_id = 0
-                            logger.info("InsightFace GPU acceleration enabled")
-                        else:
-                            logger.info("CUDA provider unavailable; using CPU for InsightFace")
-                    except Exception as exc:  # GPU support is optional
-                        logger.info("GPU setup unavailable; using CPU for InsightFace: %s", exc)
+                if use_gpu:
+                    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                    ctx_id = 0
+                    logger.info("InsightFace GPU acceleration enabled (CUDA device detected)")
+                else:
+                    providers = ["CPUExecutionProvider"]
+                    ctx_id = -1
+                    logger.info(
+                        "InsightFace running on CPU (no usable CUDA driver); thread budget=%s",
+                        os.environ.get("OMP_NUM_THREADS"),
+                    )
 
                 app = FaceAnalysis(name=self.model_name, providers=providers)
                 app.prepare(ctx_id=ctx_id, det_size=_DET_SIZE)

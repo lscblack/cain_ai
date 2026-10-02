@@ -22,6 +22,13 @@ def test_generate_queries_defaults_when_empty():
     assert out  # falls back to default categories/targets
 
 
+def test_generate_queries_custom_category_and_target():
+    # custom/unlisted category + target must still produce queries
+    out = q.generate_queries("rwanda", ["lawyers"], ["fax"])
+    assert any("lawyers" in x for x in out)  # custom category used literally
+    assert any('site:.rw "fax"' == x for x in out)  # custom target quoted literal
+
+
 def test_term_queries_quotes_literal_terms():
     out = term_queries(["John Doe", "  "])
     assert '"John Doe"' in out

@@ -5,6 +5,7 @@ Run with ``python -m app.crawlers.worker`` beside the web application.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError as RedisTimeoutError
@@ -12,42 +13,75 @@ from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutErr
 from app.api.sources import _run_crawl
 from app.core.logging import get_logger
 from app.core.redis import get_redis_client
-from app.crawlers.queue import CRAWL_QUEUE
+from app.crawlers.queue import CRAWL_QUEUE, DISCOVERY_QUEUE
 from app.crawlers.scheduler import learning_loop, scheduler_loop
 
 logger = get_logger("kai.crawl-worker")
 
 
-async def _consume() -> None:
+async def _run_discovery_job(raw: str) -> None:
+    from app.discovery.engine import run_discovery
+
+    try:
+        job = json.loads(raw)
+    except Exception:
+        logger.warning("discovery worker: bad job payload")
+        return
+    redis = get_redis_client()
+    await run_discovery(
+        job["run_id"],
+        redis=redis,
+        country=job.get("country", ""),
+        categories=job.get("categories", []),
+        targets=job.get("targets", []),
+        min_score=job.get("min_score", 60),
+        max_domains=job.get("max_domains", 200),
+        auto_crawl=job.get("auto_crawl", False),
+    )
+
+
+async def _consume_queue(queue: str, handler) -> None:
+    """Drain a single Redis list, one job at a time, forever.
+
+    Each queue gets its own consumer so a long crawl backlog can never starve
+    operator-triggered discovery (and vice versa).
+    """
     redis = get_redis_client()
     while True:
         try:
-            popped = await redis.blpop(CRAWL_QUEUE, timeout=5)
+            popped = await redis.blpop(queue, timeout=5)
         except RedisTimeoutError:
-            # Idle wait expired with no job queued — expected, keep polling.
-            continue
+            continue  # idle wait expired — expected
         except RedisConnectionError:
-            logger.warning("crawl worker: redis connection lost, retrying")
+            logger.warning("worker: redis connection lost on %s, retrying", queue)
             await asyncio.sleep(1)
             continue
-        _queue, source_id = popped or (None, None)
-        if source_id is None:
+        if not popped:
             continue
+        _q, value = popped
         try:
-            await _run_crawl(uuid.UUID(source_id))
+            await handler(value)
         except Exception:
-            logger.exception("crawl worker failed for source %s", source_id)
+            logger.exception("worker job failed (%s): %s", queue, value)
+
+
+async def _handle_crawl(value: str) -> None:
+    await _run_crawl(uuid.UUID(value))
 
 
 async def run() -> None:
-    scheduler = asyncio.create_task(scheduler_loop())
-    learning = asyncio.create_task(learning_loop())
+    tasks = [
+        asyncio.create_task(_consume_queue(CRAWL_QUEUE, _handle_crawl)),
+        asyncio.create_task(_consume_queue(DISCOVERY_QUEUE, _run_discovery_job)),
+        asyncio.create_task(scheduler_loop()),
+        asyncio.create_task(learning_loop()),
+    ]
     try:
-        await _consume()
+        await asyncio.gather(*tasks)
     finally:
-        scheduler.cancel()
-        learning.cancel()
-        await asyncio.gather(scheduler, learning, return_exceptions=True)
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 if __name__ == "__main__":

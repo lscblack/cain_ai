@@ -10,6 +10,11 @@ ExecStart=/home/lscblack/miniconda3/bin/conda run -n fastapi_setup --no-capture-
 Restart=always
 RestartSec=3
 Environment=HOME=/home/lscblack
+# Background work (crawling/discovery/indexing) must yield to interactive use.
+Nice=10
+CPUWeight=20
+IOSchedulingClass=idle
+IOSchedulingPriority=7
 
 [Install]
 WantedBy=default.target
