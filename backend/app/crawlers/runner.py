@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.net import UnsafeUrlError, validate_public_url
 from app.crawlers.extract import (
+    extract_contacts,
     extract_images_with_context,
     extract_links,
     extract_page_meta,
@@ -162,8 +163,12 @@ async def crawl_source(
             page.crawl_status = "ok"
             meta = extract_page_meta(html)
             page_names = extract_person_names(html)
+            contacts = extract_contacts(html)
             page.title = meta.get("title")
             page.description = meta.get("description")
+            page.emails = contacts["emails"]
+            page.phones = contacts["phones"]
+            page.usernames = contacts["usernames"]
             session.add(page)
             await session.flush()
 
@@ -174,7 +179,9 @@ async def crawl_source(
                 faces_added, is_dup = await _process_image(
                     session, source, page, ctx["url"], fetch=fetch, engine=engine, stats=stats,
                     safe=safe, context={"alt": ctx.get("alt"), "caption": ctx.get("caption"),
-                                        "page_title": page.title, "names": page_names},
+                                        "page_title": page.title, "names": page_names,
+                                        "emails": contacts["emails"], "phones": contacts["phones"],
+                                        "usernames": contacts["usernames"]},
                     seen_embeddings=seen_embeddings,
                 )
                 if is_dup:
@@ -285,6 +292,9 @@ async def _process_image(
                     "caption": ctx.get("caption"),
                     "alt": ctx.get("alt"),
                     "names": ctx.get("names") or [],
+                    "emails": ctx.get("emails") or [],
+                    "phones": ctx.get("phones") or [],
+                    "usernames": ctx.get("usernames") or [],
                 },
             )
             session.add(rec)

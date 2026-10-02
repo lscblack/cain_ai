@@ -11,6 +11,9 @@ interface SearchMatch {
   page_title?: string | null;
   source_url?: string | null;
   names?: string[];
+  emails?: string[];
+  phones?: string[];
+  usernames?: string[];
 }
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
@@ -78,7 +81,7 @@ function FaceScanner({ active, pct }: { active: boolean; pct: number }) {
   );
 }
 
-type Mode = "search" | "compare";
+type Mode = "search" | "compare" | "lookup";
 
 export function Home() {
   const [mode, setMode] = useState<Mode>("search");
@@ -119,6 +122,25 @@ export function Home() {
       setCmpErr("Unable to reach the service.");
     } finally {
       setCmpBusy(false);
+    }
+  }
+
+  // public lookup (phone / email / username)
+  const [lq, setLq] = useState("");
+  const [lookup, setLookup] = useState<any>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
+
+  async function runLookup(e: React.FormEvent) {
+    e.preventDefault();
+    if (lq.trim().length < 2 || lookupBusy) return;
+    setLookupBusy(true); setLookup(null);
+    try {
+      const r = await fetch(`${API_BASE}/public/lookup?q=${encodeURIComponent(lq.trim())}`);
+      setLookup(await r.json());
+    } catch {
+      setLookup({ error: true });
+    } finally {
+      setLookupBusy(false);
     }
   }
 
@@ -242,7 +264,7 @@ export function Home() {
           <div className="absolute -inset-4 bg-accent/5 blur-3xl" aria-hidden="true" />
           {/* mode tabs */}
           <div className="relative mb-3 flex gap-2 font-mono text-xs">
-            {([["search", "SEARCH INDEX"], ["compare", "COMPARE TWO"]] as [Mode, string][]).map(([m, label]) => (
+            {([["search", "SEARCH INDEX"], ["compare", "COMPARE TWO"], ["lookup", "PHONE / EMAIL / USER"]] as [Mode, string][]).map(([m, label]) => (
               <button key={m} type="button" onClick={() => setMode(m)}
                 className="border px-4 py-2 tracking-wider transition"
                 style={mode === m
@@ -334,6 +356,48 @@ export function Home() {
           </div>
           )}
 
+          {mode === "lookup" && (
+          <div className="relative border border-line bg-panel/95 p-3 shadow-2xl sm:p-4">
+            <div className="flex items-center justify-between border-b border-line pb-2 font-mono text-[11px] uppercase tracking-wider text-muted">
+              <span className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-verified" /> identifier lookup</span>
+              <span className="text-accent">{lookupBusy ? "SEARCHING…" : lookup ? `${lookup.count ?? 0} PAGES` : "PHONE · EMAIL · USER"}</span>
+            </div>
+            <form onSubmit={runLookup} className="mt-3 flex gap-2">
+              <input value={lq} onChange={(e) => setLq(e.target.value)} placeholder="+250788123456 · name@site.com · @handle"
+                className="min-h-11 flex-1 border border-line bg-panel-2 px-3 font-mono text-sm outline-none focus:border-accent" />
+              <button className="inline-flex min-h-11 items-center justify-center gap-2 bg-accent px-5 font-mono text-xs font-semibold tracking-wider text-white transition hover:brightness-110 disabled:opacity-40" disabled={lookupBusy}>LOOKUP</button>
+            </form>
+            {lookup && !lookup.error && (
+              <div className="mt-3">
+                <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted">detected: <span className="text-accent">{lookup.detected_type}</span> · {lookup.count} result(s)</div>
+                {lookup.count === 0 ? (
+                  <div className="border border-line bg-panel-2 px-3 py-6 text-center font-mono text-xs text-muted">NOT FOUND IN CURRENT INDEX</div>
+                ) : (
+                  <div className="max-h-[360px] space-y-2 overflow-auto">
+                    {lookup.results.map((r: any, i: number) => (
+                      <div key={i} className="border border-line bg-panel-2 p-3">
+                        <a href={r.page_url} target="_blank" rel="noreferrer" className="block truncate text-sm hover:text-accent">{r.page_title || r.page_url}</a>
+                        <div className="truncate font-mono text-[10px] text-muted">{r.domain}</div>
+                        {r.faces?.length > 0 && (
+                          <div className="mt-2 flex gap-1 overflow-x-auto">
+                            {r.faces.map((fa: any) => <img key={fa.face_id} src={`${API_BASE}${fa.crop_url}`} alt="" className="h-12 w-12 flex-shrink-0 border border-line object-cover" />)}
+                          </div>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-1 font-mono text-[10px]">
+                          {(r.phones ?? []).slice(0, 4).map((p: string) => <span key={p} className="border border-line px-1.5 py-0.5 text-verified">{p}</span>)}
+                          {(r.emails ?? []).slice(0, 4).map((em: string) => <span key={em} className="border border-line px-1.5 py-0.5" style={{ color: "var(--kai-warn)" }}>{em}</span>)}
+                          {(r.usernames ?? []).slice(0, 5).map((u: string) => <span key={u} className="border border-line px-1.5 py-0.5 text-muted">@{u}</span>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 font-mono text-[10px] text-muted">{lookup.note}</div>
+              </div>
+            )}
+          </div>
+          )}
+
           {mode === "search" && error && <div className="mt-3 border border-accent/40 bg-accent/5 px-3 py-2 font-mono text-xs text-accent">{error}</div>}
         </motion.div>
       </section>
@@ -358,6 +422,13 @@ export function Home() {
                   <div className="flex justify-between font-mono text-xs"><span className="text-accent">{m.similarity_pct}%</span><span className="text-muted">{m.band.replaceAll("_", " ")}</span></div>
                   <div className="mt-2 truncate text-sm">{m.names?.[0] ?? m.page_title ?? "Unattributed"}</div>
                   {m.source_url && <a href={m.source_url} target="_blank" rel="noreferrer" className="mt-1 block truncate font-mono text-[10px] text-muted hover:text-ink">{m.source_url}</a>}
+                  {((m.phones?.length ?? 0) + (m.emails?.length ?? 0) + (m.usernames?.length ?? 0)) > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1 font-mono text-[9px]">
+                      {(m.phones ?? []).slice(0, 2).map((p) => <span key={p} className="border border-line px-1 py-0.5 text-verified">{p}</span>)}
+                      {(m.emails ?? []).slice(0, 2).map((e) => <span key={e} className="truncate border border-line px-1 py-0.5" style={{ color: "var(--kai-warn)", maxWidth: "100%" }}>{e}</span>)}
+                      {(m.usernames ?? []).slice(0, 3).map((u) => <span key={u} className="border border-line px-1 py-0.5 text-muted">@{u}</span>)}
+                    </div>
+                  )}
                 </div>
               </motion.article>
             ))}

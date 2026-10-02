@@ -43,6 +43,9 @@ class Page(UUIDMixin, TimestampMixin, table=True):
     faces_found: int = Field(default=0)
     title: str | None = Field(default=None)
     description: str | None = Field(default=None)
+    emails: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False, server_default="[]"))
+    phones: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False, server_default="[]"))
+    usernames: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False, server_default="[]"))
 
 
 class Image(UUIDMixin, TimestampMixin, table=True):

@@ -89,3 +89,14 @@ async def system_stats(
             "domains": await _count_entity("domain"),
         },
     }
+
+
+@router.get("/analytics")
+async def usage_analytics(
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    """Public-usage analytics: visitors and feature usage (hashed IPs only)."""
+    from app.core.analytics import read_analytics
+
+    return await read_analytics(redis)

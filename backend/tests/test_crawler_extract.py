@@ -108,3 +108,27 @@ def test_extract_images_with_context():
     assert imgs[0]["url"] == "https://news.rw/uploads/jean.jpg"
     assert imgs[0]["alt"] == "Jean Bosco at the expo"
     assert imgs[0]["caption"] == "Jean Bosco speaks"
+
+
+from app.crawlers.extract import extract_contacts
+
+CONTACT_HTML = """
+<html><body>
+<p>Contact us at info@kigalitoday.com or sales@kigalitoday.com.</p>
+<p>Call +250788123456 or +250 788 999 000.</p>
+<a href="https://twitter.com/kigalitoday">Twitter</a>
+<a href="https://instagram.com/kt_press">IG</a>
+Follow @osint_rw for updates. Spacer @2x icon.
+</body></html>
+"""
+
+
+def test_extract_contacts():
+    c = extract_contacts(CONTACT_HTML, region="RW")
+    assert "info@kigalitoday.com" in c["emails"]
+    assert "sales@kigalitoday.com" in c["emails"]
+    assert "+250788123456" in c["phones"]
+    assert "kigalitoday" in c["usernames"]      # from twitter link
+    assert "kt_press" in c["usernames"]         # from instagram link
+    assert "osint_rw" in c["usernames"]         # @handle
+    assert "2x" not in c["usernames"]           # @2x filtered (too short / not handle)

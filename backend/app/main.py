@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     analyst, auth, emails, export, faces, geo, health, investigations, maps, phones,
-    powerup, search, settings as settings_api, sources, system, timeline, usernames,
+    powerup, public, search, settings as settings_api, sources, system, timeline, usernames,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -39,6 +39,30 @@ def create_app() -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        return response
+
+    @app.middleware("http")
+    async def usage_analytics(request, call_next):
+        response = await call_next(request)
+        try:
+            path = request.url.path
+            event = None
+            if path.endswith("/face/public/search/stream"):
+                event = "public_search"
+            elif path.endswith("/face/public/compare"):
+                event = "public_compare"
+            elif path.endswith("/public/lookup"):
+                event = "public_lookup"
+            elif path.endswith("/sources/public-submit"):
+                event = "public_submit"
+            if event and response.status_code < 500:
+                from app.core.analytics import record_event
+                from app.core.redis import get_redis_client
+
+                ip = request.client.host if request.client else "unknown"
+                await record_event(get_redis_client(), event, ip, detail=path)
+        except Exception:
+            pass
         return response
 
     @app.on_event("startup")
@@ -82,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(timeline.router)
     app.include_router(export.router)
     app.include_router(system.router)
+    app.include_router(public.router)
     app.include_router(geo.router)
     app.include_router(settings_api.router)
 

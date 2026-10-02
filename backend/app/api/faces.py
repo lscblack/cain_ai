@@ -192,6 +192,9 @@ async def search(
                 "page_title": (rec.extra or {}).get("page_title"),
                 "caption": (rec.extra or {}).get("caption"),
                 "names": (rec.extra or {}).get("names") or [],
+                "emails": (rec.extra or {}).get("emails") or [],
+                "phones": (rec.extra or {}).get("phones") or [],
+                "usernames": (rec.extra or {}).get("usernames") or [],
                 "image_url": (rec.extra or {}).get("image_url"),
             }
         )
@@ -254,6 +257,9 @@ async def _search_stream_response(
                         "page_title": (rec.extra or {}).get("page_title"),
                         "caption": (rec.extra or {}).get("caption"),
                         "names": (rec.extra or {}).get("names") or [],
+                        "emails": (rec.extra or {}).get("emails") or [],
+                        "phones": (rec.extra or {}).get("phones") or [],
+                        "usernames": (rec.extra or {}).get("usernames") or [],
                         "image_url": (rec.extra or {}).get("image_url"),
                     }
                 )
@@ -427,6 +433,9 @@ async def index_list(
             "page_title": (r.extra or {}).get("page_title"),
             "caption": (r.extra or {}).get("caption"),
             "names": (r.extra or {}).get("names") or [],
+            "emails": (r.extra or {}).get("emails") or [],
+            "phones": (r.extra or {}).get("phones") or [],
+            "usernames": (r.extra or {}).get("usernames") or [],
             "image_url": (r.extra or {}).get("image_url"),
         }
         for r in rows

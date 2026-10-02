@@ -148,6 +148,55 @@ def extract_images_with_context(html: str, base_url: str) -> list[dict]:
     return out
 
 
+_EMAIL_RE = re.compile(r"\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b", re.I)
+_HANDLE_RE = re.compile(r"(?<![\w@])@([a-z0-9_]{3,30})\b", re.I)
+_EMAIL_SKIP = ("example.com", "sentry.io", "domain.com", "email.com", "yourdomain", "@2x", "@3x", ".png", ".jpg", ".webp", ".gif")
+# social profile URL -> username, reused for username extraction from links
+_SOCIAL_RE = re.compile(
+    r"https?://(?:www\.)?(?:twitter|x|instagram|facebook|tiktok|github|gitlab|linkedin|youtube|t|telegram|pinterest|reddit)\.com/(?:@|in/|user/)?([a-z0-9._\-]{2,40})",
+    re.I,
+)
+
+
+def extract_contacts(html: str, *, region: str | None = None) -> dict:
+    """Best-effort emails / phones / usernames from a page.
+    Phones validated via libphonenumber (international + optional default region)."""
+    html = html or ""
+    text = _clean(html)
+
+    emails: list[str] = []
+    for m in _EMAIL_RE.findall(html):
+        e = m.lower()
+        if e not in emails and not any(s in e for s in _EMAIL_SKIP):
+            emails.append(e)
+
+    usernames: list[str] = []
+    for u in _SOCIAL_RE.findall(html):
+        u = u.strip().lower()
+        if u and u not in usernames and u not in ("share", "intent", "home", "login", "sharer"):
+            usernames.append(u)
+    for h in _HANDLE_RE.findall(text):
+        h = h.lower()
+        if h not in usernames:
+            usernames.append(h)
+
+    phones: list[str] = []
+    try:
+        import phonenumbers
+
+        regions = [None] + ([region] if region else [])
+        for reg in regions:
+            for match in phonenumbers.PhoneNumberMatcher(text, reg):
+                if phonenumbers.is_valid_number(match.number):
+                    e164 = phonenumbers.format_number(match.number, phonenumbers.PhoneNumberFormat.E164)
+                    if e164 not in phones:
+                        phones.append(e164)
+    except Exception:
+        pass
+
+    return {"emails": emails[:50], "phones": phones[:50], "usernames": usernames[:50]}
+
+
 def path_allowed(url: str, allowed: list[str], excluded: list[str]) -> bool:
     path = urlsplit(url).path or "/"
     if any(path.startswith(e) for e in excluded if e):
