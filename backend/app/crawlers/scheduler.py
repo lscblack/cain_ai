@@ -77,15 +77,15 @@ async def learning_loop() -> None:
         await asyncio.sleep(_LEARNING_TICK_SECONDS)
 
 
-_DEDUPE_TICK_SECONDS = 1800  # every 30 min, auto-remove near-identical faces (no clicking)
+_DEDUPE_TICK_SECONDS = 3600  # hourly auto-remove of near-identical faces (no clicking)
 
 
 async def dedupe_loop() -> None:
     """Automatically drop near-duplicate faces on a schedule so the index stays clean."""
     from app.intelligence.face.dedupe import run_dedupe
 
-    # Small initial delay so startup work settles first.
-    await asyncio.sleep(120)
+    # Delay the first pass so startup + any active crawl settles first.
+    await asyncio.sleep(600)
     while True:
         try:
             async with async_session_maker() as session:

@@ -9,9 +9,11 @@ never blocks interactive API traffic or the worker's other background loops.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from urllib.parse import urlsplit
 
 import anyio
+import numpy as np
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +21,6 @@ from app.core.logging import get_logger
 from app.database.models.face import Face
 from app.intelligence.face.crops import crop_path
 from app.intelligence.face.similarity import DEDUP_THRESHOLD
-from app.intelligence.face.vector_index import max_similarity
 
 logger = get_logger("kai.face.dedupe")
 
@@ -35,17 +36,33 @@ def _host(url: str | None) -> str:
 
 def _find_duplicates(rows: list[tuple]) -> list:
     """Pure-CPU pass: rows are (id, host, embedding) ordered best-quality-first.
-    Returns the ids of near-identical faces to drop (keeping the first/best per host)."""
-    kept: dict[str, list[list[float]]] = {}
-    remove_ids: list = []
+    Returns ids of near-identical faces to drop (keeping the best per host).
+
+    Per host we keep a single growing matrix of unit-normalised embeddings and do
+    one vectorised dot product per face — O(k) per face instead of rebuilding the
+    whole bucket array every comparison (which made large hosts O(k^2) allocations).
+    """
+    by_host: dict[str, list[tuple]] = defaultdict(list)
     for fid, host, emb in rows:
-        if not emb:
-            continue
-        bucket = kept.setdefault(host, [])
-        if max_similarity(list(emb), bucket) >= DEDUP_THRESHOLD:
-            remove_ids.append(fid)
-        else:
-            bucket.append(list(emb))
+        if emb:
+            by_host[host].append((fid, emb))
+
+    remove_ids: list = []
+    for host, items in by_host.items():
+        dim = len(items[0][1])
+        kept = np.empty((len(items), dim), dtype=np.float32)  # preallocated once
+        n = 0
+        for fid, emb in items:
+            v = np.asarray(emb, dtype=np.float32)
+            if v.shape[0] != dim:
+                continue
+            norm = np.linalg.norm(v)
+            v = v / (norm or 1e-12)
+            if n and float((kept[:n] @ v).max()) >= DEDUP_THRESHOLD:
+                remove_ids.append(fid)
+                continue
+            kept[n] = v
+            n += 1
     return remove_ids
 
 

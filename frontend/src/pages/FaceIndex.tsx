@@ -147,10 +147,7 @@ export function FaceIndex() {
                 <div className="kai-metadata truncate" style={{ color: "var(--kai-warn)" }}>{f.names.slice(0, 2).join(", ")}</div>
               )}
               {f.source_url && f.source_url.startsWith("http") && (
-                <a href={f.source_url} target="_blank" rel="noreferrer" title={f.source_url} className="kai-metadata block truncate hover:text-ink">↳ page: {f.source_url}</a>
-              )}
-              {f.image_url && (
-                <a href={f.image_url} target="_blank" rel="noreferrer" title={f.image_url} className="kai-metadata block truncate hover:text-ink" style={{ color: "var(--kai-accent)" }}>↳ image: {f.image_url}</a>
+                <a href={f.source_url} target="_blank" rel="noreferrer" title={f.source_url} className="kai-metadata block truncate hover:text-ink">found on: {f.source_url}</a>
               )}
               <Contacts f={f} />
               <div className="mt-1 flex items-center justify-between">

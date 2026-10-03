@@ -4,6 +4,13 @@ Run with ``python -m app.crawlers.worker`` beside the web application.
 """
 from __future__ import annotations
 
+import os
+
+# Cap BLAS/OMP threads BEFORE numpy is imported, so background numpy work
+# (dedupe, similarity) can never peg all cores and starve crawling.
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, "6")
+
 import asyncio
 import json
 import uuid

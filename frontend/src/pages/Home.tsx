@@ -404,10 +404,10 @@ export function Home() {
                             {r.faces.map((fa: any) => (
                               <a
                                 key={fa.face_id}
-                                href={fa.image_url || fa.source_url || r.page_url}
+                                href={fa.source_url || r.page_url}
                                 target="_blank"
                                 rel="noreferrer"
-                                title={fa.image_url || fa.source_url || ""}
+                                title={fa.source_url || r.page_url}
                                 className="flex-shrink-0"
                               >
                                 <img src={`${API_BASE}${fa.crop_url}`} alt="" className="h-12 w-12 border border-line object-cover transition hover:border-accent" />
@@ -453,8 +453,7 @@ export function Home() {
                 <div className="p-3">
                   <div className="flex justify-between font-mono text-xs"><span className="text-accent">{m.similarity_pct}%</span><span className="text-muted">{m.band.replaceAll("_", " ")}</span></div>
                   <div className="mt-2 truncate text-sm">{m.names?.[0] ?? m.page_title ?? "Unattributed"}</div>
-                  {m.source_url && <a href={m.source_url} target="_blank" rel="noreferrer" title={m.source_url} className="mt-1 block truncate font-mono text-[10px] text-muted hover:text-ink">↳ page: {m.source_url}</a>}
-                  {m.image_url && <a href={m.image_url} target="_blank" rel="noreferrer" title={m.image_url} className="block truncate font-mono text-[10px] text-muted hover:text-accent">↳ image: {m.image_url}</a>}
+                  {m.source_url && <a href={m.source_url} target="_blank" rel="noreferrer" title={m.source_url} className="mt-1 block truncate font-mono text-[10px] text-muted hover:text-accent">found on: {m.source_url}</a>}
                   {((m.phones?.length ?? 0) + (m.emails?.length ?? 0) + (m.usernames?.length ?? 0)) > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1 font-mono text-[9px]">
                       {(m.phones ?? []).slice(0, 2).map((p) => <span key={p} className="border border-line px-1 py-0.5 text-verified">{p}</span>)}
