@@ -56,6 +56,40 @@ def _cpu_thread_budget() -> int:
     return max(2, cores // 2)
 
 
+_ort_capped = False
+
+
+def _cap_onnxruntime_threads(n: int) -> None:
+    """Force onnxruntime sessions to a bounded intra-op pool.
+
+    onnxruntime ignores OMP/ORT_NUM_THREADS env vars and sizes its pool to every
+    physical core (and pins its own threads), so it hogs the whole machine. There's
+    no API hook through insightface, so wrap InferenceSession to inject SessionOptions
+    with a capped thread count unless the caller passed their own.
+    """
+    global _ort_capped
+    if _ort_capped:
+        return
+    try:
+        import onnxruntime as ort
+
+        _orig = ort.InferenceSession
+
+        def _capped(*args, **kwargs):
+            if not kwargs.get("sess_options"):
+                so = ort.SessionOptions()
+                so.intra_op_num_threads = max(1, n)
+                so.inter_op_num_threads = 1
+                kwargs["sess_options"] = so
+            return _orig(*args, **kwargs)
+
+        ort.InferenceSession = _capped
+        _ort_capped = True
+        logger.info("onnxruntime intra-op threads capped at %d", n)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("could not cap onnxruntime threads: %s", exc)
+
+
 class InsightFaceEngine(FaceEngine):
     model_name = "buffalo_l"
     model_version = "arcface_r50_w600k"
@@ -83,6 +117,7 @@ class InsightFaceEngine(FaceEngine):
                     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
                                 "NUMEXPR_NUM_THREADS", "ORT_NUM_THREADS"):
                         os.environ.setdefault(var, budget)
+                    _cap_onnxruntime_threads(_cpu_thread_budget())
 
                 from insightface.app import FaceAnalysis
 

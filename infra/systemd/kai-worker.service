@@ -15,6 +15,9 @@ Nice=10
 CPUWeight=20
 IOSchedulingClass=idle
 IOSchedulingPriority=7
+# Hard cap total CPU to ~7 cores (kernel-enforced), regardless of how many
+# threads onnxruntime spawns/pins — keeps the desktop usable. 100% = 1 core.
+CPUQuota=700%
 
 [Install]
 WantedBy=default.target
