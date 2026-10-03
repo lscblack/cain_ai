@@ -49,7 +49,14 @@ class Settings(BaseSettings):
     crawl_max_pages_ceiling: int = Field(default=1500)
     # How many sources the worker crawls in parallel (face inference stays
     # serialised; this keeps one giant source from blocking all the others).
-    crawl_consumers: int = Field(default=3)
+    crawl_consumers: int = Field(default=2)
+    # Pin the worker process to this many CPU cores. onnxruntime ignores thread
+    # env caps and sizes its pool to all physical cores, hogging the machine; a
+    # CPU affinity bound is the only reliable cap. 0 = no pin.
+    worker_cpu_cores: int = Field(default=8)
+    # Max images face-processed per crawled page (pages commit after all of them,
+    # so a high cap makes image-heavy pages take minutes).
+    crawl_max_images_per_page: int = Field(default=12)
     # Tor SOCKS proxy for .onion crawling (empty = onion disabled)
     tor_socks_proxy: str = Field(default="")
 

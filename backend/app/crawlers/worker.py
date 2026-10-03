@@ -6,10 +6,25 @@ from __future__ import annotations
 
 import os
 
-# Cap BLAS/OMP threads BEFORE numpy is imported, so background numpy work
-# (dedupe, similarity) can never peg all cores and starve crawling.
-for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-    os.environ.setdefault(_var, "6")
+# Cap thread pools BEFORE numpy / onnxruntime are imported.
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS", "ORT_NUM_THREADS"):
+    os.environ.setdefault(_var, "4")
+
+
+def _pin_cpu() -> None:
+    """Pin this worker to a subset of cores. onnxruntime ignores thread-count env
+    vars and spreads across every physical core, thrashing the whole machine; a
+    hard CPU-affinity bound is the only reliable way to keep the desktop usable."""
+    try:
+        from app.core.config import get_settings
+
+        n = get_settings().worker_cpu_cores
+        total = os.cpu_count() or 1
+        if n and 0 < n < total and hasattr(os, "sched_setaffinity"):
+            os.sched_setaffinity(0, set(range(total - n, total)))  # last n cores
+    except Exception:
+        pass
 
 import asyncio
 import json
@@ -90,6 +105,7 @@ async def _handle_crawl(value: str) -> None:
 async def run() -> None:
     from app.core.config import get_settings
 
+    _pin_cpu()
     n_crawlers = max(1, get_settings().crawl_consumers)
     tasks = [
         # Multiple crawl consumers so one huge source can't block all the others.

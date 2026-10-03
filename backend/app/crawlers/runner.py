@@ -187,7 +187,8 @@ async def crawl_source(
             session.add(page)
             await session.flush()
 
-            contexts = extract_images_with_context(html, url)[:_MAX_IMAGES_PER_PAGE]
+            _img_cap = min(_MAX_IMAGES_PER_PAGE, get_settings().crawl_max_images_per_page)
+            contexts = extract_images_with_context(html, url)[:_img_cap]
             page_images = 0
             page_faces = 0
             for ctx in contexts:
