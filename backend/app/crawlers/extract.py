@@ -150,6 +150,29 @@ def extract_images_with_context(html: str, base_url: str) -> list[dict]:
 
 _EMAIL_RE = re.compile(r"\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b", re.I)
 _HANDLE_RE = re.compile(r"(?<![\w@])@([a-z0-9_]{3,30})\b", re.I)
+# explicit mailto: / tel: links — the most reliable contact signal
+_MAILTO_RE = re.compile(r"mailto:([^\"'?>\s]+)", re.I)
+_TEL_RE = re.compile(r"tel:(\+?[0-9().\-\s]{6,20})", re.I)
+
+# ccTLD -> default phone region, so local-format numbers (0788…) parse, not just +…
+_TLD_REGION = {
+    "rw": "RW", "ke": "KE", "ug": "UG", "tz": "TZ", "ng": "NG", "et": "ET",
+    "gh": "GH", "za": "ZA", "ma": "MA", "eg": "EG", "sn": "SN", "ci": "CI",
+    "cm": "CM", "zm": "ZM", "zw": "ZW", "bw": "BW", "mw": "MW", "mz": "MZ",
+    "uk": "GB", "us": "US", "ca": "CA", "fr": "FR", "de": "DE", "in": "IN",
+}
+
+
+def region_for_host(host: str | None) -> str | None:
+    """Guess a default phone region from a hostname's TLD (e.g. igihe.rw -> RW)."""
+    if not host:
+        return None
+    parts = host.lower().rsplit(".", 2)
+    tld = parts[-1]
+    # handle second-level domains like co.ke / co.za
+    if len(parts) >= 2 and parts[-2] in ("co", "or", "ac", "go", "com", "net", "org"):
+        return _TLD_REGION.get(tld) or _TLD_REGION.get(parts[-2])
+    return _TLD_REGION.get(tld)
 _EMAIL_SKIP = ("example.com", "sentry.io", "domain.com", "email.com", "yourdomain", "@2x", "@3x", ".png", ".jpg", ".webp", ".gif")
 # CSS at-rules + generic path/handle words that are not real usernames
 _USER_STOP = {
@@ -172,9 +195,10 @@ def extract_contacts(html: str, *, region: str | None = None) -> dict:
     text = _clean(html)
 
     emails: list[str] = []
-    for m in _EMAIL_RE.findall(html):
-        e = m.lower()
-        if e not in emails and not any(s in e for s in _EMAIL_SKIP):
+    # mailto: links first (most reliable), then any plain-text / inline emails
+    for m in list(_MAILTO_RE.findall(html)) + list(_EMAIL_RE.findall(html)):
+        e = m.split("?")[0].strip().lower()
+        if _EMAIL_RE.fullmatch(e) and e not in emails and not any(s in e for s in _EMAIL_SKIP):
             emails.append(e)
 
     usernames: list[str] = []
@@ -191,13 +215,20 @@ def extract_contacts(html: str, *, region: str | None = None) -> dict:
     try:
         import phonenumbers
 
+        # Scan the page text AND explicit tel: links, under both international (None)
+        # and the site's default region so local-format numbers (0788…) also parse.
+        tel_text = " ".join(_TEL_RE.findall(html))
+        haystacks = [text, tel_text]
         regions = [None] + ([region] if region else [])
         for reg in regions:
-            for match in phonenumbers.PhoneNumberMatcher(text, reg):
-                if phonenumbers.is_valid_number(match.number):
-                    e164 = phonenumbers.format_number(match.number, phonenumbers.PhoneNumberFormat.E164)
-                    if e164 not in phones:
-                        phones.append(e164)
+            for hay in haystacks:
+                if not hay:
+                    continue
+                for match in phonenumbers.PhoneNumberMatcher(hay, reg):
+                    if phonenumbers.is_valid_number(match.number):
+                        e164 = phonenumbers.format_number(match.number, phonenumbers.PhoneNumberFormat.E164)
+                        if e164 not in phones:
+                            phones.append(e164)
     except Exception:
         pass
 

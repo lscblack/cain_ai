@@ -17,6 +17,7 @@ import {
   Activity,
   Database,
   Radar,
+  Contact,
   LogOut,
 } from "lucide-react";
 
@@ -32,6 +33,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: Phone, label: "Phones", to: "/phone" },
   { icon: AtSign, label: "Emails", to: "/email" },
   { icon: UserSearch, label: "Usernames", to: "/username" },
+  { icon: Contact, label: "Contacts", to: "/contacts" },
   { icon: Globe, label: "Domains" },
   { icon: Database, label: "Sources", to: "/sources" },
   { icon: Radar, label: "Discover", to: "/discover" },

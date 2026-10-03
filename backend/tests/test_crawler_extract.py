@@ -132,3 +132,26 @@ def test_extract_contacts():
     assert "kt_press" in c["usernames"]         # from instagram link
     assert "osint_rw" in c["usernames"]         # @handle
     assert "2x" not in c["usernames"]           # @2x filtered (too short / not handle)
+
+
+LOCAL_HTML = """
+<html><body>
+<a href="mailto:hello@igihe.rw?subject=hi">Email</a>
+<a href="tel:+250788000111">Call</a>
+<p>Office line 0788 123 456 or 078-812-3456.</p>
+</body></html>
+"""
+
+
+def test_extract_contacts_local_format_and_mailto_tel():
+    from app.crawlers.extract import region_for_host
+
+    assert region_for_host("igihe.rw") == "RW"
+    assert region_for_host("news.co.ke") == "KE"
+
+    c = extract_contacts(LOCAL_HTML, region="RW")
+    assert "hello@igihe.rw" in c["emails"]          # from mailto:, query stripped
+    assert "+250788000111" in c["phones"]           # from tel:
+    assert "+250788123456" in c["phones"]           # local 0788… parsed via region
+    # no region => local-format number is missed (regression guard for the old behaviour)
+    assert "+250788123456" not in extract_contacts(LOCAL_HTML)["phones"]

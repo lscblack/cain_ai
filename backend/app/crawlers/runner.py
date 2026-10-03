@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.net import UnsafeUrlError, validate_public_url
 from app.crawlers.extract import (
     extract_contacts,
+    region_for_host,
     extract_images_with_context,
     extract_links,
     extract_page_meta,
@@ -149,6 +150,15 @@ async def crawl_source(
         if existing is not None and existing.content_hash == content_hash:
             existing.last_crawled_at = _now()
             existing.crawl_status = "skipped"
+            # Content unchanged, but we already have the HTML in hand — backfill
+            # contacts with the improved extractor for pages the old one missed
+            # (no phones AND no emails), so re-crawls enrich the existing index.
+            if not existing.phones and not existing.emails:
+                contacts = extract_contacts(html, region=region_for_host(base_host))
+                if contacts["emails"] or contacts["phones"] or contacts["usernames"]:
+                    existing.emails = contacts["emails"]
+                    existing.phones = contacts["phones"]
+                    existing.usernames = contacts["usernames"]
             stats.pages_skipped += 1
             await session.flush()
         else:
@@ -163,7 +173,7 @@ async def crawl_source(
             page.crawl_status = "ok"
             meta = extract_page_meta(html)
             page_names = extract_person_names(html)
-            contacts = extract_contacts(html)
+            contacts = extract_contacts(html, region=region_for_host(base_host))
             page.title = meta.get("title")
             page.description = meta.get("description")
             page.emails = contacts["emails"]
