@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Nice value applied to the (CPU) face-inference worker thread so interactive
     # requests and the rest of the system keep priority (0-19; higher = lower priority).
     face_infer_nice: int = Field(default=10)
+    # Hard ceiling on pages crawled per source run, regardless of the source's
+    # configured max_pages — stops one huge site from monopolising the worker.
+    crawl_max_pages_ceiling: int = Field(default=1500)
+    # How many sources the worker crawls in parallel (face inference stays
+    # serialised; this keeps one giant source from blocking all the others).
+    crawl_consumers: int = Field(default=3)
     # Tor SOCKS proxy for .onion crawling (empty = onion disabled)
     tor_socks_proxy: str = Field(default="")
 

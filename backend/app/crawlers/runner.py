@@ -106,7 +106,12 @@ async def crawl_source(
     queue: deque[tuple[str, int]] = deque([(source.base_url, 0)])
     visited: set[str] = set()
 
-    while queue and stats.pages_processed < source.max_pages:
+    # Respect the source's max_pages but never exceed the global ceiling, so one
+    # site configured with an absurd cap can't monopolise the worker.
+    from app.core.config import get_settings
+    page_budget = min(source.max_pages, get_settings().crawl_max_pages_ceiling)
+
+    while queue and stats.pages_processed < page_budget:
         url, depth = queue.popleft()
         if url in visited:
             continue

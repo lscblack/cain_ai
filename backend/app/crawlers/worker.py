@@ -88,8 +88,12 @@ async def _handle_crawl(value: str) -> None:
 
 
 async def run() -> None:
+    from app.core.config import get_settings
+
+    n_crawlers = max(1, get_settings().crawl_consumers)
     tasks = [
-        asyncio.create_task(_consume_queue(CRAWL_QUEUE, _handle_crawl)),
+        # Multiple crawl consumers so one huge source can't block all the others.
+        *[asyncio.create_task(_consume_queue(CRAWL_QUEUE, _handle_crawl)) for _ in range(n_crawlers)],
         asyncio.create_task(_consume_queue(DISCOVERY_QUEUE, _run_discovery_job)),
         asyncio.create_task(scheduler_loop()),
         asyncio.create_task(learning_loop()),
