@@ -13,6 +13,9 @@ interface SearchMatch {
   page_title?: string | null;
   source_url?: string | null;
   image_url?: string | null;
+  description?: string | null;
+  age?: number | null;
+  sex?: string | null;
   names?: string[];
   emails?: string[];
   phones?: string[];
@@ -452,13 +455,24 @@ export function Home() {
                 <div className="aspect-square bg-panel-2">{m.crop_url && <img src={pub(m.crop_url)} alt="match" className="h-full w-full object-cover" />}</div>
                 <div className="p-3">
                   <div className="flex justify-between font-mono text-xs"><span className="text-accent">{m.similarity_pct}%</span><span className="text-muted">{m.band.replaceAll("_", " ")}</span></div>
-                  <div className="mt-2 truncate text-sm">{m.names?.[0] ?? m.page_title ?? "Unattributed"}</div>
-                  {m.source_url && <a href={m.source_url} target="_blank" rel="noreferrer" title={m.source_url} className="mt-1 block truncate font-mono text-[10px] text-muted hover:text-accent">found on: {m.source_url}</a>}
+                  <div className="mt-2 truncate text-sm font-semibold">{m.names?.[0] ?? m.page_title ?? "Unattributed"}</div>
+                  {(m.sex || (m.age ?? 0) > 0) && (
+                    <div className="mt-0.5 font-mono text-[10px] text-muted">
+                      {[m.sex, (m.age ?? 0) > 0 ? `~${m.age}y` : null].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
+                  {/* auto-generated dossier line from everything found on the page */}
+                  {m.description && (
+                    <div className="mt-2 border-l-2 border-accent/50 bg-panel-2 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted">
+                      {m.description}
+                    </div>
+                  )}
+                  {m.source_url && <a href={m.source_url} target="_blank" rel="noreferrer" title={m.source_url} className="mt-2 block truncate font-mono text-[10px] text-muted hover:text-accent">⌕ found on: {m.source_url}</a>}
                   {((m.phones?.length ?? 0) + (m.emails?.length ?? 0) + (m.usernames?.length ?? 0)) > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1 font-mono text-[9px]">
-                      {(m.phones ?? []).slice(0, 2).map((p) => <span key={p} className="border border-line px-1 py-0.5 text-verified">{p}</span>)}
-                      {(m.emails ?? []).slice(0, 2).map((e) => <span key={e} className="truncate border border-line px-1 py-0.5" style={{ color: "var(--kai-warn)", maxWidth: "100%" }}>{e}</span>)}
-                      {(m.usernames ?? []).slice(0, 3).map((u) => <span key={u} className="border border-line px-1 py-0.5 text-muted">@{u}</span>)}
+                      {(m.phones ?? []).slice(0, 3).map((p) => <span key={p} className="border border-line px-1 py-0.5 text-verified">{p}</span>)}
+                      {(m.emails ?? []).slice(0, 3).map((e) => <span key={e} className="truncate border border-line px-1 py-0.5" style={{ color: "var(--kai-warn)", maxWidth: "100%" }}>{e}</span>)}
+                      {(m.usernames ?? []).slice(0, 4).map((u) => <span key={u} className="border border-line px-1 py-0.5 text-muted">@{u}</span>)}
                     </div>
                   )}
                 </div>

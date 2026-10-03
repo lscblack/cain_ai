@@ -35,6 +35,9 @@ interface SearchMatch {
   caption?: string | null;
   names?: string[];
   image_url?: string | null;
+  description?: string | null;
+  age?: number | null;
+  sex?: string | null;
 }
 
 const BAND_LABEL: Record<string, string> = {
@@ -373,11 +376,18 @@ export function Face() {
                                 {BAND_LABEL[m.band] ?? m.band}
                               </span>
                             </div>
-                            {m.page_title && <div className="mt-1 truncate text-sm">{m.page_title}</div>}
-                            {m.caption && <div className="kai-metadata mt-0.5 line-clamp-2">{m.caption}</div>}
-                            {m.names && m.names.length > 0 && (
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {m.names.slice(0, 4).map((n) => (
+                            {(m.names?.[0] || m.page_title) && <div className="mt-1 truncate text-sm font-semibold">{m.names?.[0] ?? m.page_title}</div>}
+                            {(m.sex || (m.age ?? 0) > 0) && (
+                              <div className="kai-metadata mt-0.5">{[m.sex, (m.age ?? 0) > 0 ? `~${m.age}y` : null].filter(Boolean).join(" · ")}</div>
+                            )}
+                            {m.description && (
+                              <div className="mt-2 border-l-2 px-2 py-1.5 font-mono text-[11px] leading-relaxed" style={{ borderColor: "var(--kai-accent)", background: "var(--kai-panel-2)", color: "var(--kai-muted)" }}>
+                                {m.description}
+                              </div>
+                            )}
+                            {m.names && m.names.length > 1 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {m.names.slice(1, 4).map((n) => (
                                   <span key={n} className="rounded border border-line px-1.5 py-0.5 text-xs" style={{ color: "var(--kai-warn)" }}>{n}</span>
                                 ))}
                               </div>

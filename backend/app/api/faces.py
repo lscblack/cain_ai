@@ -21,6 +21,7 @@ from app.database.repositories.face_repo import FaceRepository
 from app.database.session import get_session
 from app.intelligence.face.engine import FaceEngine
 from app.intelligence.face.crops import crop_path, has_crop, save_crop
+from app.intelligence.face.describe import describe_face
 from app.intelligence.face.service import detect_and_embed_async, get_face_engine
 from app.intelligence.face.similarity import (
     POSSIBLE,
@@ -197,6 +198,9 @@ async def search(
                 "phones": (rec.extra or {}).get("phones") or [],
                 "usernames": (rec.extra or {}).get("usernames") or [],
                 "image_url": (rec.extra or {}).get("image_url"),
+                "age": (rec.extra or {}).get("age"),
+                "sex": (rec.extra or {}).get("sex"),
+                "description": describe_face(rec.extra, rec.source_url),
             }
         )
     return {
@@ -262,6 +266,9 @@ async def _search_stream_response(
                         "phones": (rec.extra or {}).get("phones") or [],
                         "usernames": (rec.extra or {}).get("usernames") or [],
                         "image_url": (rec.extra or {}).get("image_url"),
+                        "age": (rec.extra or {}).get("age"),
+                        "sex": (rec.extra or {}).get("sex"),
+                        "description": describe_face(rec.extra, rec.source_url),
                     }
                 )
             if corpus and i % 50 == 0:
@@ -438,6 +445,9 @@ async def index_list(
             "phones": (r.extra or {}).get("phones") or [],
             "usernames": (r.extra or {}).get("usernames") or [],
             "image_url": (r.extra or {}).get("image_url"),
+            "age": (r.extra or {}).get("age"),
+            "sex": (r.extra or {}).get("sex"),
+            "description": describe_face(r.extra, r.source_url),
         }
         for r in rows
     ]

@@ -37,6 +37,7 @@ interface IndexedFace {
   phones?: string[];
   usernames?: string[];
   image_url: string | null;
+  description?: string | null;
 }
 
 const PAGE = 60;
@@ -145,6 +146,9 @@ export function FaceIndex() {
               )}
               {f.names && f.names.length > 0 && (
                 <div className="kai-metadata truncate" style={{ color: "var(--kai-warn)" }}>{f.names.slice(0, 2).join(", ")}</div>
+              )}
+              {f.description && (
+                <div className="kai-metadata mt-1 line-clamp-3 border-l-2 border-accent/40 pl-1.5" title={f.description}>{f.description}</div>
               )}
               {f.source_url && f.source_url.startsWith("http") && (
                 <a href={f.source_url} target="_blank" rel="noreferrer" title={f.source_url} className="kai-metadata block truncate hover:text-ink">found on: {f.source_url}</a>

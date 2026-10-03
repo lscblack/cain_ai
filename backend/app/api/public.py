@@ -20,6 +20,7 @@ from app.database.models.source import Page
 from app.database.session import get_session
 from app.intelligence.detect import QueryType, detect_query_type
 from app.intelligence.face.crops import has_crop
+from app.intelligence.face.describe import describe_face
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -73,6 +74,8 @@ async def public_lookup(
                         # found at, never reduced to the root domain.
                         "source_url": fa.source_url,
                         "image_url": (fa.extra or {}).get("image_url"),
+                        "names": (fa.extra or {}).get("names") or [],
+                        "description": describe_face(fa.extra, fa.source_url),
                     }
                     for fa in faces
                     if has_crop(str(fa.id))
