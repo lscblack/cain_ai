@@ -6,21 +6,47 @@ kind of queries an analyst would run to find image/contact-rich public sites.
 from __future__ import annotations
 
 # High-value OSINT source sites to target by name, with the `site:` operator.
+# Any publicly reachable platform that can host an individual's profile/portfolio.
 _NAME_SITES = [
-    "en.wikipedia.org", "github.com", "linkedin.com/in", "x.com", "twitter.com",
-    "instagram.com", "facebook.com", "youtube.com", "medium.com", "behance.net",
-    "dribbble.com", "about.me", "gravatar.com", "researchgate.net", "scholar.google.com",
-    "crunchbase.com", "angel.co", "keybase.io", "gitlab.com", "stackoverflow.com",
+    # encyclopedic / knowledge
+    "en.wikipedia.org", "wikidata.org", "wikitree.com",
+    # code / dev
+    "github.com", "gitlab.com", "bitbucket.org", "huggingface.co", "kaggle.com",
+    "stackoverflow.com", "dev.to", "replit.com", "codepen.io", "npmjs.com", "pypi.org",
+    # professional / business
+    "linkedin.com/in", "crunchbase.com", "wellfound.com", "angel.co", "f6s.com",
+    "producthunt.com", "opencorporates.com", "zoominfo.com", "theorg.com",
+    # social
+    "x.com", "twitter.com", "instagram.com", "facebook.com", "tiktok.com",
+    "threads.net", "bsky.app", "mastodon.social", "reddit.com", "t.me", "vk.com",
+    "pinterest.com", "tumblr.com", "snapchat.com",
+    # media / creative portfolios
+    "youtube.com", "vimeo.com", "medium.com", "substack.com", "behance.net",
+    "dribbble.com", "artstation.com", "deviantart.com", "soundcloud.com",
+    "500px.com", "flickr.com", "unsplash.com", "contently.com", "muckrack.com",
+    # identity / bio hubs & personal-site hosts
+    "about.me", "gravatar.com", "linktr.ee", "carrd.co", "notion.site",
+    "github.io", "wordpress.com", "wixsite.com", "weebly.com", "webflow.io",
+    "blogspot.com", "medium.com", "beacons.ai", "bio.link", "read.cv", "polywork.com",
+    # academic / research
+    "researchgate.net", "scholar.google.com", "orcid.org", "academia.edu",
+    "ssrn.com", "arxiv.org", "semanticscholar.org", "dblp.org", "loop.frontiersin.org",
+    # verification / keys
+    "keybase.io", "gist.github.com",
 ]
-# Free-text angles that surface portfolios / bios / contact pages for a person.
+# Free-text angles that surface portfolios / bios / personal sites / contact pages.
 _NAME_ANGLES = [
-    "portfolio", "profile", "biography", "CV resume", "LinkedIn", "GitHub",
-    "Wikipedia", "photo", "contact email", "phone", "about", "interview",
-    "speaker", "founder", "author", "team member", "press",
+    "portfolio", "personal website", "personal site", "official website", "homepage",
+    "profile", "biography", "bio", "about", "CV", "resume", "curriculum vitae",
+    "LinkedIn", "GitHub", "Wikipedia", "portfolio site", "my work", "projects",
+    "photo", "headshot", "contact email", "phone number", "WhatsApp",
+    "interview", "speaker", "keynote", "founder", "CEO", "author", "artist",
+    "designer", "developer", "engineer", "team member", "staff", "faculty",
+    "press", "news", "profile picture", "@gmail.com", "blog",
 ]
 
 
-def name_deep_queries(names: list[str], *, per_name: int = 26) -> list[str]:
+def name_deep_queries(names: list[str], *, per_name: int = 48) -> list[str]:
     """Deep per-person queries across portfolios, Wikipedia, GitHub, socials, news.
 
     No network — these are the public-search strings the discovery engine then runs.
@@ -34,22 +60,19 @@ def name_deep_queries(names: list[str], *, per_name: int = 26) -> list[str]:
             seen.add(q)
             out.append(q)
 
+    # Split the per-name budget so both targeted sites AND free-text angles
+    # (personal website / portfolio / bio) always get queried.
+    angle_budget = min(len(_NAME_ANGLES), max(10, per_name // 4))
+    site_budget = max(1, per_name - angle_budget)
     for raw in names:
         n = (raw or "").strip()
         if not n:
             continue
         quoted = f'"{n}"'
-        count = 0
-        for site in _NAME_SITES:
+        for site in _NAME_SITES[:site_budget]:
             add(f"{quoted} site:{site}")
-            count += 1
-            if count >= per_name:
-                break
-        for angle in _NAME_ANGLES:
-            if count >= per_name:
-                break
+        for angle in _NAME_ANGLES[:angle_budget]:
             add(f"{quoted} {angle}")
-            count += 1
     return out
 
 # country -> (search label, ccTLD)

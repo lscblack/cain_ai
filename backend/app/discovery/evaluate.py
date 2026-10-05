@@ -107,6 +107,6 @@ async def evaluate_domain(
     if ev.robots_ok:
         score += 5; ev.signals.append("robots_ok")
     if ev.requires_auth:
-        score -= 40; ev.signals.append("auth_required")
+        score -= 15; ev.signals.append("auth_wall")
     ev.score = max(0, min(100, score))
     return ev

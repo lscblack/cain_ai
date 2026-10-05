@@ -102,7 +102,7 @@ async def run_name_investigation(
     redis: Redis,
     names: list[str],
     auto_crawl: bool = True,
-    max_domains: int = 80,
+    max_domains: int = 150,
 ) -> None:
     """Batch investigation: discover + crawl sources for a list of names so KAI can
     surface the images/phones/emails/usernames that might belong to them. Per-name
@@ -113,7 +113,7 @@ async def run_name_investigation(
     names = [n.strip() for n in names if n and n.strip()]
     state = {
         "id": run_id, "status": "discovering", "kind": "investigation", "names": names,
-        "targets": names, "min_score": 55, "max_domains": max_domains,
+        "targets": names, "min_score": 45, "max_domains": max_domains,
         "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
         "approved": 0, "rejected": 0, "current": None, "approved_list": [],
         "onion_sources": 0, "onion_enabled": onion_available(),
@@ -139,11 +139,12 @@ async def run_name_investigation(
         await _save(redis, run_id, state)
 
     # 2) Clearnet: deep per-person queries across portfolios, Wikipedia, GitHub,
-    #    socials, news — discover, qualify and crawl.
-    queries = name_deep_queries(names)
+    #    socials, news — discover, qualify and crawl. Capped to bound SerpAPI cost
+    #    on large name batches (each query is one search call).
+    queries = name_deep_queries(names)[:300]
     await _execute(
         run_id, redis=redis, queries=queries, state=state,
-        min_score=55, max_domains=max_domains, auto_crawl=auto_crawl,
+        min_score=45, max_domains=max_domains, auto_crawl=auto_crawl,
     )
 
 
@@ -205,7 +206,10 @@ async def _execute(
             state["evaluated"] += 1
             continue
         state["evaluated"] += 1
-        approved = ev.reachable and not ev.requires_auth and ev.score >= min_score
+        # Keep any reachable source that scores — an auth link on the page no longer
+        # hard-rejects it (many portfolios/socials show public profiles behind a soft
+        # login prompt). The score still carries a penalty for a real auth wall.
+        approved = ev.reachable and ev.score >= min_score
         ev.approved = approved
         if approved:
             await _add_source(domain, ev.to_dict(), auto_crawl=auto_crawl, redis=redis)
