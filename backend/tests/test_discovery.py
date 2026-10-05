@@ -41,6 +41,45 @@ def test_discovery_run_in_resolved_countries():
     assert DiscoveryRunIn().resolved_countries() == ["rwanda"]  # default
 
 
+def test_name_deep_queries_covers_key_sources():
+    from app.discovery.queries import name_deep_queries
+
+    out = name_deep_queries(["Jane Doe"])
+    assert '"Jane Doe" site:en.wikipedia.org' in out
+    assert '"Jane Doe" site:github.com' in out
+    assert '"Jane Doe" site:linkedin.com/in' in out
+    assert any("portfolio" in q for q in out)
+    assert len(out) == len(set(out))  # deduped
+
+
+def test_onion_extraction_from_ahmia_html():
+    from app.discovery.onion import _extract_onions
+
+    html = (
+        "<a href=/search/redirect?redirect_url="
+        "http%3A%2F%2Fzqktlwiuavvvqqt4ybvgvi7tyo4hjl5xgfuvpdf6otjiycgwqbym2qad.onion%2Fw>x</a>"
+        " and raw http://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/?q=x"
+        " clearnet https://github.com/x ignored"
+    )
+    onions = _extract_onions(html)
+    assert all(".onion" in u for u in onions)
+    assert any("zqktlwiu" in u for u in onions)
+    assert any("duckduckgog" in u for u in onions)
+    assert len(onions) == 2  # deduped by host, clearnet excluded
+
+
+@pytest.mark.anyio
+async def test_search_onion_injectable():
+    from app.discovery import onion as onionmod
+
+    async def fake_get(url):
+        assert "ahmia.fi" in url
+        return "http://zqktlwiuavvvqqt4ybvgvi7tyo4hjl5xgfuvpdf6otjiycgwqbym2qad.onion/"
+
+    res = await onionmod.search_onion("Jane Doe", http_get=fake_get)
+    assert res and res[0].endswith(".onion/")
+
+
 def test_generate_queries_custom_category_and_target():
     # custom/unlisted category + target must still produce queries
     out = q.generate_queries("rwanda", ["lawyers"], ["fax"])

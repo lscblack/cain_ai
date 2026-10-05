@@ -107,12 +107,16 @@ async def run_name_investigation(
     """Batch investigation: discover + crawl sources for a list of names so KAI can
     surface the images/phones/emails/usernames that might belong to them. Per-name
     dossiers are computed live from the corpus by the API as crawls land."""
+    from app.discovery.onion import onion_available
+    from app.discovery.queries import name_deep_queries
+
     names = [n.strip() for n in names if n and n.strip()]
     state = {
         "id": run_id, "status": "discovering", "kind": "investigation", "names": names,
         "targets": names, "min_score": 55, "max_domains": max_domains,
         "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
         "approved": 0, "rejected": 0, "current": None, "approved_list": [],
+        "onion_sources": 0, "onion_enabled": onion_available(),
         "started_at": time.time(), "progress": 0,
     }
     await _save(redis, run_id, state)
@@ -121,7 +125,22 @@ async def run_name_investigation(
         await redis.ltrim(INVESTIGATIONS_KEY, 0, 199)
     except Exception:
         pass
-    queries = term_queries(names, limit=60)
+
+    # 1) Dark web: find .onion sites for the names via Ahmia and queue Tor crawls.
+    if onion_available():
+        state["status"] = "searching dark web"
+        await _save(redis, run_id, state)
+        try:
+            state["onion_sources"] = await discover_onion_for(
+                names, redis=redis, auto_crawl=auto_crawl
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("onion phase failed: %s", exc)
+        await _save(redis, run_id, state)
+
+    # 2) Clearnet: deep per-person queries across portfolios, Wikipedia, GitHub,
+    #    socials, news — discover, qualify and crawl.
+    queries = name_deep_queries(names)
     await _execute(
         run_id, redis=redis, queries=queries, state=state,
         min_score=55, max_domains=max_domains, auto_crawl=auto_crawl,
@@ -226,6 +245,51 @@ async def _add_source(domain: str, ev: dict, *, auto_crawl: bool, redis: Redis) 
             await enqueue_crawls(redis, [sid])
         except Exception:
             pass
+
+
+async def _add_onion_source(url: str, *, auto_crawl: bool, redis: Redis) -> bool:
+    """Add a discovered .onion URL as a source and (optionally) queue a Tor crawl."""
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(url).hostname or "").lower()
+    if not host.endswith(".onion"):
+        return False
+    async with async_session_maker() as session:
+        exists = (await session.execute(select(Source.id).where(Source.domain == host))).scalar_one_or_none()
+        if exists is not None:
+            return False
+        src = Source(
+            name=host, base_url=url if url.startswith("http") else f"http://{host}/",
+            domain=host, allowed_paths=[], excluded_paths=[], max_depth=1, max_pages=40,
+            schedule="manual", category="onion", priority="medium",
+        )
+        session.add(src)
+        await session.flush()
+        sid = src.id
+        await session.commit()
+    if auto_crawl:
+        try:
+            await enqueue_crawls(redis, [sid])
+        except Exception:
+            pass
+    return True
+
+
+async def discover_onion_for(names: list[str], *, redis: Redis, auto_crawl: bool, per_name: int = 12) -> int:
+    """Search Ahmia for each name and add the resulting .onion sites as sources."""
+    from app.discovery.onion import onion_available, search_onion
+
+    if not onion_available():
+        return 0
+    added = 0
+    for name in names:
+        try:
+            for url in await search_onion(name, limit=per_name):
+                if await _add_onion_source(url, auto_crawl=auto_crawl, redis=redis):
+                    added += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("onion discovery failed for %r: %s", name, exc)
+    return added
 
 
 def new_run_id() -> str:

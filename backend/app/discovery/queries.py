@@ -5,6 +5,53 @@ kind of queries an analyst would run to find image/contact-rich public sites.
 """
 from __future__ import annotations
 
+# High-value OSINT source sites to target by name, with the `site:` operator.
+_NAME_SITES = [
+    "en.wikipedia.org", "github.com", "linkedin.com/in", "x.com", "twitter.com",
+    "instagram.com", "facebook.com", "youtube.com", "medium.com", "behance.net",
+    "dribbble.com", "about.me", "gravatar.com", "researchgate.net", "scholar.google.com",
+    "crunchbase.com", "angel.co", "keybase.io", "gitlab.com", "stackoverflow.com",
+]
+# Free-text angles that surface portfolios / bios / contact pages for a person.
+_NAME_ANGLES = [
+    "portfolio", "profile", "biography", "CV resume", "LinkedIn", "GitHub",
+    "Wikipedia", "photo", "contact email", "phone", "about", "interview",
+    "speaker", "founder", "author", "team member", "press",
+]
+
+
+def name_deep_queries(names: list[str], *, per_name: int = 26) -> list[str]:
+    """Deep per-person queries across portfolios, Wikipedia, GitHub, socials, news.
+
+    No network — these are the public-search strings the discovery engine then runs.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str) -> None:
+        q = " ".join(q.split())
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+
+    for raw in names:
+        n = (raw or "").strip()
+        if not n:
+            continue
+        quoted = f'"{n}"'
+        count = 0
+        for site in _NAME_SITES:
+            add(f"{quoted} site:{site}")
+            count += 1
+            if count >= per_name:
+                break
+        for angle in _NAME_ANGLES:
+            if count >= per_name:
+                break
+            add(f"{quoted} {angle}")
+            count += 1
+    return out
+
 # country -> (search label, ccTLD)
 _COUNTRIES = {
     "rwanda": ("Rwanda", ".rw"),

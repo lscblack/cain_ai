@@ -73,11 +73,15 @@ function DossierView({ d }: { d: Dossier }) {
         <div>
           <div className="kai-metadata mb-2 uppercase">Pages ({d.pages.length})</div>
           <div className="max-h-56 space-y-1 overflow-auto">
-            {d.pages.map((p) => (
-              <a key={p.url} href={p.url} target="_blank" rel="noreferrer" title={p.url} className="block truncate border border-line bg-base px-2 py-1.5 font-mono text-[11px] text-muted hover:border-accent hover:text-ink">
-                {p.title || p.url}
-              </a>
-            ))}
+            {d.pages.map((p) => {
+              const onion = /\.onion(\/|$|:)/i.test(p.url);
+              return (
+                <a key={p.url} href={p.url} target="_blank" rel="noreferrer" title={p.url} className="flex items-center gap-1.5 truncate border border-line bg-base px-2 py-1.5 font-mono text-[11px] text-muted hover:border-accent hover:text-ink">
+                  {onion && <span title="dark web (.onion)" className="shrink-0 text-accent">🧅</span>}
+                  <span className="truncate">{p.title || p.url}</span>
+                </a>
+              );
+            })}
           </div>
         </div>
       )}
@@ -203,9 +207,16 @@ function NamesTab() {
           <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted">Select or start an investigation to see dossiers.</div>
         ) : (
           <>
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-2 flex items-center justify-between">
               <span className="kai-metadata uppercase">Dossiers</span>
               <span className={`text-xs uppercase ${detail.status === "done" ? "text-verified" : "text-accent"}`}>{detail.status}</span>
+            </div>
+            <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted">
+              <span>sources approved: <span className="text-ink">{detail.approved ?? 0}</span></span>
+              <span>new domains: <span className="text-ink">{detail.new_domains ?? 0}</span></span>
+              <span className={detail.onion_enabled ? "" : "opacity-50"}>
+                🧅 dark web: {detail.onion_enabled ? <span className="text-accent">{detail.onion_sources ?? 0} onion source(s)</span> : "tor off"}
+              </span>
             </div>
             <div className="mb-3 flex flex-wrap gap-1">
               {(detail.names ?? []).map((n: string) => {

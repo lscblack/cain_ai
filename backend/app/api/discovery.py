@@ -185,6 +185,7 @@ async def get_investigation(
         "id": run_id, "status": st.get("status"), "progress": st.get("progress", 0),
         "names": st.get("names") or [], "approved": st.get("approved", 0),
         "new_domains": st.get("new_domains", 0), "evaluated": st.get("evaluated", 0),
+        "onion_sources": st.get("onion_sources", 0), "onion_enabled": st.get("onion_enabled", False),
         "dossiers": dossiers,
     }
 
