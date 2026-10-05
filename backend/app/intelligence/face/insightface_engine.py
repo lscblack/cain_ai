@@ -64,8 +64,10 @@ def _cap_onnxruntime_threads(n: int) -> None:
 
     onnxruntime ignores OMP/ORT_NUM_THREADS env vars and sizes its pool to every
     physical core (and pins its own threads), so it hogs the whole machine. There's
-    no API hook through insightface, so wrap InferenceSession to inject SessionOptions
-    with a capped thread count unless the caller passed their own.
+    no API hook through insightface, so we SUBCLASS InferenceSession to inject
+    SessionOptions when the caller didn't pass their own. It must be a subclass, not
+    a wrapper function — insightface does `class PickableInferenceSession(
+    onnxruntime.InferenceSession)`, and you can't subclass a function.
     """
     global _ort_capped
     if _ort_capped:
@@ -74,16 +76,22 @@ def _cap_onnxruntime_threads(n: int) -> None:
         import onnxruntime as ort
 
         _orig = ort.InferenceSession
+        if getattr(_orig, "_kai_capped", False):
+            _ort_capped = True
+            return
 
-        def _capped(*args, **kwargs):
-            if not kwargs.get("sess_options"):
-                so = ort.SessionOptions()
-                so.intra_op_num_threads = max(1, n)
-                so.inter_op_num_threads = 1
-                kwargs["sess_options"] = so
-            return _orig(*args, **kwargs)
+        class _CappedInferenceSession(_orig):  # type: ignore[misc, valid-type]
+            _kai_capped = True
 
-        ort.InferenceSession = _capped
+            def __init__(self, *args, **kwargs):
+                if not kwargs.get("sess_options"):
+                    so = ort.SessionOptions()
+                    so.intra_op_num_threads = max(1, n)
+                    so.inter_op_num_threads = 1
+                    kwargs["sess_options"] = so
+                super().__init__(*args, **kwargs)
+
+        ort.InferenceSession = _CappedInferenceSession
         _ort_capped = True
         logger.info("onnxruntime intra-op threads capped at %d", n)
     except Exception as exc:  # noqa: BLE001
