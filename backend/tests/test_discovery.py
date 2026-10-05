@@ -129,6 +129,29 @@ async def test_ddg_fallback_parses_results():
     assert set(out) == {"example.rw", "portfolio.me"}
 
 
+@pytest.mark.anyio
+async def test_search_candidates_free_round_robin(monkeypatch):
+    seen = {"duckduckgo": [], "mojeek": [], "searxng": []}
+
+    def mk(name, dom):
+        async def eng(q):
+            seen[name].append(q)
+            return [f"https://{dom}/{q}"]
+        return eng
+
+    monkeypatch.setattr(s, "FREE_ENGINES", [
+        ("duckduckgo", mk("duckduckgo", "ddg.test")),
+        ("mojeek", mk("mojeek", "moj.test")),
+        ("searxng", mk("searxng", "sx.test")),
+    ])
+    out = await s.search_candidates_free(["q0", "q1", "q2", "q3"], delay=0)
+    # round-robin: q0->ddg, q1->mojeek, q2->searx, q3->ddg
+    assert seen["duckduckgo"] == ["q0", "q3"]
+    assert seen["mojeek"] == ["q1"]
+    assert seen["searxng"] == ["q2"]
+    assert {"ddg.test", "moj.test", "sx.test"} <= set(out)
+
+
 def test_serpapi_error_response_stops_cleanly(monkeypatch):
     import anyio
 

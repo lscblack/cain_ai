@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Crosshair, Play, Users, Radar, Trash2, ChevronRight } from "lucide-react";
+import { Crosshair, Play, Users, Radar, Trash2, ChevronRight, RotateCw } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
@@ -143,6 +143,19 @@ function NamesTab() {
     }
   }
 
+  async function reinvestigate(names: string[], e: React.MouseEvent) {
+    e.stopPropagation();
+    if (names.length === 0) return;
+    try {
+      const r = await api.post<{ id: string }>("/discovery/investigate", { names, auto_crawl: autoCrawl });
+      setMsg(`Re-investigating ${names.length} name(s)…`);
+      await load();
+      open(r.id);
+    } catch (e: any) {
+      setMsg(e?.detail || "Re-investigate failed.");
+    }
+  }
+
   async function open(id: string) {
     setOpenId(id);
     setActiveName(null);
@@ -188,14 +201,18 @@ function NamesTab() {
           {runs.length === 0 ? <p className="text-sm text-muted">None yet.</p> : (
             <div className="space-y-1">
               {runs.map((r) => (
-                <button key={r.id} onClick={() => open(r.id)}
-                  className={`flex w-full items-center justify-between border px-2.5 py-2 text-left text-xs transition ${openId === r.id ? "border-accent" : "border-line hover:border-muted"}`}>
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-mono text-ink">{r.names.slice(0, 3).join(", ")}{r.names.length > 3 ? `  +${r.names.length - 3}` : ""}</span>
-                  </span>
-                  <span className={`ml-2 shrink-0 uppercase ${r.status === "done" ? "text-verified" : "text-accent"}`}>{r.status}</span>
+                <div key={r.id}
+                  className={`flex items-center justify-between border px-2.5 py-2 text-xs transition ${openId === r.id ? "border-accent" : "border-line hover:border-muted"}`}>
+                  <button onClick={() => open(r.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                    <span className="min-w-0 flex-1 truncate font-mono text-ink">{r.names.slice(0, 3).join(", ")}{r.names.length > 3 ? `  +${r.names.length - 3}` : ""}</span>
+                    <span className={`shrink-0 uppercase ${r.status === "done" ? "text-verified" : "text-accent"}`}>{r.status}</span>
+                  </button>
+                  <button onClick={(e) => reinvestigate(r.names, e)} title="Re-investigate these names (fresh crawl)"
+                    className="ml-2 shrink-0 text-muted transition hover:text-accent">
+                    <RotateCw size={13} />
+                  </button>
                   <ChevronRight size={13} className="ml-1 shrink-0 text-muted" />
-                </button>
+                </div>
               ))}
             </div>
           )}
