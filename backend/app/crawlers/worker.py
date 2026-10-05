@@ -42,7 +42,7 @@ logger = get_logger("kai.crawl-worker")
 
 
 async def _run_discovery_job(raw: str) -> None:
-    from app.discovery.engine import run_discovery, run_term_discovery
+    from app.discovery.engine import run_discovery, run_name_investigation, run_term_discovery
 
     try:
         job = json.loads(raw)
@@ -50,6 +50,15 @@ async def _run_discovery_job(raw: str) -> None:
         logger.warning("discovery worker: bad job payload")
         return
     redis = get_redis_client()
+    if job.get("kind") == "names":
+        # Batch name investigation from the dashboard.
+        await run_name_investigation(
+            job["run_id"],
+            redis=redis,
+            names=job.get("names", []),
+            auto_crawl=job.get("auto_crawl", True),
+        )
+        return
     if job.get("kind") == "terms":
         # Self-learning run: discover sources for specific searched terms.
         await run_term_discovery(

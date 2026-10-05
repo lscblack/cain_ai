@@ -12,13 +12,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.deps import get_current_operator
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.crawlers.queue import enqueue_discovery
 from app.database.models.user import User
+from app.database.session import get_session
 from app.discovery import learning
-from app.discovery.engine import _run_key, mark_queued, new_run_id
+from app.discovery.dossier import gather_dossier
+from app.discovery.engine import INVESTIGATIONS_KEY, _run_key, mark_queued, new_run_id
 from app.discovery.search import search_available
 
 logger = get_logger("kai.api.discovery")
@@ -106,3 +110,98 @@ async def clear_terms(
     redis: Redis = Depends(get_redis),
 ) -> None:
     await learning.clear_terms(redis)
+
+
+# ── Name investigations (batch) ──────────────────────────────────────────────
+
+class InvestigateIn(BaseModel):
+    names: list[str] = Field(min_length=1, max_length=500)
+    auto_crawl: bool = True
+
+
+@router.post("/investigate", response_model=DiscoveryRunStarted, status_code=status.HTTP_202_ACCEPTED)
+async def investigate_names(
+    body: InvestigateIn,
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+) -> DiscoveryRunStarted:
+    """Upload a list of names → background investigation that discovers + crawls
+    sources and surfaces the images/phones/emails/usernames that might belong to them."""
+    names = [n.strip() for n in body.names if n and n.strip()][:500]
+    if not names:
+        raise HTTPException(status_code=422, detail="No valid names provided.")
+    run_id = new_run_id()
+    await mark_queued(redis, run_id, {"targets": names})
+    # reflect investigation shape in the queued state
+    raw = await redis.get(_run_key(run_id))
+    state = json.loads(raw) if raw else {}
+    state.update({"kind": "investigation", "names": names, "status": "queued"})
+    await redis.set(_run_key(run_id), json.dumps(state), ex=60 * 60 * 24)
+    await redis.lpush(INVESTIGATIONS_KEY, run_id)
+    await redis.ltrim(INVESTIGATIONS_KEY, 0, 199)
+    await enqueue_discovery(redis, {"kind": "names", "run_id": run_id, "names": names, "auto_crawl": body.auto_crawl})
+    logger.info("name investigation %s queued by %s (%d names)", run_id, operator.email, len(names))
+    return DiscoveryRunStarted(id=run_id, available=search_available())
+
+
+@router.get("/investigations")
+async def list_investigations(
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    try:
+        ids = await redis.lrange(INVESTIGATIONS_KEY, 0, 50)
+    except Exception:
+        ids = []
+    out = []
+    for rid in ids:
+        rid = rid.decode() if isinstance(rid, bytes) else rid
+        raw = await redis.get(_run_key(rid))
+        if not raw:
+            continue
+        st = json.loads(raw)
+        out.append({
+            "id": rid, "status": st.get("status"), "names": st.get("names") or [],
+            "approved": st.get("approved", 0), "started_at": st.get("started_at"),
+            "progress": st.get("progress", 0),
+        })
+    return {"investigations": out}
+
+
+@router.get("/investigations/{run_id}")
+async def get_investigation(
+    run_id: str,
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    raw = await redis.get(_run_key(run_id))
+    if raw is None:
+        raise HTTPException(status_code=404, detail="Investigation not found or expired.")
+    st = json.loads(raw)
+    # Live per-name dossiers from the current corpus (keep enriching as crawls land).
+    dossiers = [await gather_dossier(session, n, as_name=True) for n in (st.get("names") or [])]
+    return {
+        "id": run_id, "status": st.get("status"), "progress": st.get("progress", 0),
+        "names": st.get("names") or [], "approved": st.get("approved", 0),
+        "new_domains": st.get("new_domains", 0), "evaluated": st.get("evaluated", 0),
+        "dossiers": dossiers,
+    }
+
+
+@router.get("/public-searches")
+async def public_searches(
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """What public users searched + a live dossier of results for each term."""
+    terms = await learning.list_terms(redis)
+    out = []
+    for t in terms[:40]:
+        term = t.get("term")
+        if not term:
+            continue
+        d = await gather_dossier(session, term)
+        out.append({**t, "dossier": d})
+    return {"searches": out}

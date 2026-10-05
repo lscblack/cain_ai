@@ -93,6 +93,41 @@ async def run_term_discovery(
     )
 
 
+INVESTIGATIONS_KEY = "kai:discovery:investigations"  # recent investigation run ids
+
+
+async def run_name_investigation(
+    run_id: str,
+    *,
+    redis: Redis,
+    names: list[str],
+    auto_crawl: bool = True,
+    max_domains: int = 80,
+) -> None:
+    """Batch investigation: discover + crawl sources for a list of names so KAI can
+    surface the images/phones/emails/usernames that might belong to them. Per-name
+    dossiers are computed live from the corpus by the API as crawls land."""
+    names = [n.strip() for n in names if n and n.strip()]
+    state = {
+        "id": run_id, "status": "discovering", "kind": "investigation", "names": names,
+        "targets": names, "min_score": 55, "max_domains": max_domains,
+        "candidates": 0, "already_known": 0, "new_domains": 0, "evaluated": 0,
+        "approved": 0, "rejected": 0, "current": None, "approved_list": [],
+        "started_at": time.time(), "progress": 0,
+    }
+    await _save(redis, run_id, state)
+    try:
+        await redis.lpush(INVESTIGATIONS_KEY, run_id)
+        await redis.ltrim(INVESTIGATIONS_KEY, 0, 199)
+    except Exception:
+        pass
+    queries = term_queries(names, limit=60)
+    await _execute(
+        run_id, redis=redis, queries=queries, state=state,
+        min_score=55, max_domains=max_domains, auto_crawl=auto_crawl,
+    )
+
+
 def term_queries(terms: list[str], *, limit: int = 40) -> list[str]:
     """Literal public queries for arbitrary searched identifiers/names/text."""
     out: list[str] = []
