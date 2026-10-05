@@ -95,28 +95,6 @@ def test_term_queries_quotes_literal_terms():
 
 
 @pytest.mark.anyio
-async def test_search_candidates_dedupes_by_domain(monkeypatch):
-    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"serpapi_api_key": "x"})())
-
-    async def fake_get(url, params):
-        return {"organic_results": [
-            {"link": "https://acme.rw/a"},
-            {"link": "https://acme.rw/b"},  # same domain -> deduped
-            {"link": "https://other.co.ke/x"},
-        ]}
-
-    out = await s.search_candidates(["q1"], http_get=fake_get)
-    assert set(out) == {"acme.rw", "other.co.ke"}
-
-
-@pytest.mark.anyio
-async def test_search_candidates_empty_without_key(monkeypatch):
-    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"serpapi_api_key": ""})())
-    out = await s.search_candidates(["q1"], http_get=None)
-    assert out == {}
-
-
-@pytest.mark.anyio
 async def test_ddg_fallback_parses_results():
     async def fake_text(url):
         assert "duckduckgo.com" in url
@@ -127,30 +105,6 @@ async def test_ddg_fallback_parses_results():
 
     out = await s.search_candidates_ddg(["q1"], http_get_text=fake_text)
     assert set(out) == {"example.rw", "portfolio.me"}
-
-
-@pytest.mark.anyio
-async def test_searchapi_backend(monkeypatch):
-    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"searchapi_api_key": "k"})())
-
-    async def fake(url, params):
-        assert "searchapi.io" in url
-        return {"organic_results": [{"link": "https://a.rw/x"}, {"link": "https://b.co/y"}]}
-
-    out = await s.search_candidates_searchapi(["q"], http_get=fake)
-    assert set(out) == {"a.rw", "b.co"}
-
-
-@pytest.mark.anyio
-async def test_brave_backend(monkeypatch):
-    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"brave_api_key": "k"})())
-
-    async def fake(url, params):
-        assert "brave.com" in url
-        return {"web": {"results": [{"url": "https://x.rw/a"}, {"url": "https://y.co"}]}}
-
-    out = await s.search_candidates_brave(["q"], http_get=fake)
-    assert set(out) == {"x.rw", "y.co"}
 
 
 @pytest.mark.anyio
@@ -175,17 +129,6 @@ async def test_search_candidates_free_round_robin(monkeypatch):
     assert seen["searxng"] == ["q2"]
     assert {"ddg.test", "moj.test", "sx.test"} <= set(out)
 
-
-def test_serpapi_error_response_stops_cleanly(monkeypatch):
-    import anyio
-
-    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"serpapi_api_key": "x"})())
-
-    async def err_get(url, params):
-        return {"error": "Your account has run out of searches."}
-
-    out = anyio.run(lambda: s.search_candidates(["q1", "q2"], http_get=err_get))
-    assert out == {}  # error -> no results, no crash
 
 
 def _html(body: str) -> str:

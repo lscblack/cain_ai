@@ -38,6 +38,10 @@ async def gather_dossier(
     emails: set[str] = set()
     phones: set[str] = set()
     usernames: set[str] = set()
+    titles: set[str] = set()
+    orgs: set[str] = set()
+    locations: set[str] = set()
+    social: set[str] = set()
     pages_out: list[dict] = []
 
     # 1) Faces that name this person (names/free text are detected as UNKNOWN).
@@ -67,6 +71,12 @@ async def gather_dossier(
                 phones.add(p)
             for u in ex.get("usernames") or []:
                 usernames.add(u)
+            for t in ex.get("titles") or []:
+                titles.add(t)
+            for o in ex.get("orgs") or []:
+                orgs.add(o)
+            for lc in ex.get("locations") or []:
+                locations.add(lc)
             if has_crop(str(fa.id)):
                 faces_out.append({
                     "face_id": str(fa.id),
@@ -97,6 +107,15 @@ async def gather_dossier(
             phones.add(ph)
         for u in p.usernames or []:
             usernames.add(u)
+        pm = p.meta or {}
+        for t in pm.get("titles") or []:
+            titles.add(t)
+        for o in pm.get("orgs") or []:
+            orgs.add(o)
+        for lc in pm.get("locations") or []:
+            locations.add(lc)
+        for so in pm.get("social") or []:
+            social.add(so)
         pages_out.append({
             "url": p.url,
             "title": p.title,
@@ -113,11 +132,18 @@ async def gather_dossier(
         "phones": sorted(phones),
         "emails": sorted(emails),
         "usernames": sorted(usernames),
+        "titles": sorted(titles),
+        "orgs": sorted(orgs),
+        "locations": sorted(locations),
+        "social": sorted(social),
         "counts": {
             "faces": len(faces_out),
             "pages": len(pages_out),
             "phones": len(phones),
             "emails": len(emails),
             "usernames": len(usernames),
+            "titles": len(titles),
+            "orgs": len(orgs),
+            "locations": len(locations),
         },
     }

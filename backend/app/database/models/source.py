@@ -46,6 +46,8 @@ class Page(UUIDMixin, TimestampMixin, table=True):
     emails: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False, server_default="[]"))
     phones: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False, server_default="[]"))
     usernames: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False, server_default="[]"))
+    # structured schema.org/OpenGraph map: {titles, orgs, locations, social, descriptions}
+    meta: dict = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False, server_default="{}"))
 
 
 class Image(UUIDMixin, TimestampMixin, table=True):

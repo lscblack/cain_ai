@@ -83,9 +83,20 @@ def describe_face(extra: dict | None, source_url: str | None) -> str:
     phones = extra.get("phones") or []
     usernames = extra.get("usernames") or []
 
+    titles = [t for t in (extra.get("titles") or []) if t][:2]
+    orgs = [o for o in (extra.get("orgs") or []) if o][:2]
+    locations = [lc for lc in (extra.get("locations") or []) if lc][:2]
+
     parts: list[str] = []
     if names:
         parts.append(f"Possible identity: {', '.join(names)}")
+    if titles:
+        role = ", ".join(titles) + (f" at {', '.join(orgs)}" if orgs else "")
+        parts.append(role)
+    elif orgs:
+        parts.append(f"linked to {', '.join(orgs)}")
+    if locations:
+        parts.append(f"located in {', '.join(locations)}")
     demo: list[str] = []
     if sex:
         demo.append(sex)

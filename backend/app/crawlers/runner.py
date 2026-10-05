@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.net import UnsafeUrlError, validate_public_url
 from app.crawlers.extract import (
     extract_contacts,
+    extract_structured,
+    enrich_from_structured,
     region_for_host,
     extract_images_with_context,
     extract_links,
@@ -178,7 +180,14 @@ async def crawl_source(
             page.crawl_status = "ok"
             meta = extract_page_meta(html)
             page_names = extract_person_names(html)
-            contacts = extract_contacts(html, region=region_for_host(base_host))
+            _region = region_for_host(base_host)
+            contacts = extract_contacts(html, region=_region)
+            # Fold schema.org/OpenGraph structured data in — titles, orgs, locations,
+            # social links, and extra emails/phones — for a fuller map of the target.
+            structured = extract_structured(html)
+            contacts, page_names, page.meta = enrich_from_structured(
+                contacts, page_names, structured, region=_region
+            )
             page.title = meta.get("title")
             page.description = meta.get("description")
             page.emails = contacts["emails"]
@@ -197,7 +206,9 @@ async def crawl_source(
                     safe=safe, context={"alt": ctx.get("alt"), "caption": ctx.get("caption"),
                                         "page_title": page.title, "names": page_names,
                                         "emails": contacts["emails"], "phones": contacts["phones"],
-                                        "usernames": contacts["usernames"]},
+                                        "usernames": contacts["usernames"],
+                                        "titles": page.meta.get("titles"), "orgs": page.meta.get("orgs"),
+                                        "locations": page.meta.get("locations")},
                     seen_embeddings=seen_embeddings,
                 )
                 if is_dup:
@@ -311,6 +322,9 @@ async def _process_image(
                     "emails": ctx.get("emails") or [],
                     "phones": ctx.get("phones") or [],
                     "usernames": ctx.get("usernames") or [],
+                    "titles": ctx.get("titles") or [],
+                    "orgs": ctx.get("orgs") or [],
+                    "locations": ctx.get("locations") or [],
                 },
             )
             session.add(rec)

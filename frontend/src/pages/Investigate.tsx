@@ -14,6 +14,10 @@ interface Dossier {
   phones: string[];
   emails: string[];
   usernames: string[];
+  titles?: string[];
+  orgs?: string[];
+  locations?: string[];
+  social?: string[];
   counts: { faces: number; pages: number; phones: number; emails: number; usernames: number };
 }
 interface Investigation { id: string; status: string; names: string[]; approved: number; progress: number; started_at?: number }
@@ -47,6 +51,15 @@ function DossierView({ d }: { d: Dossier }) {
 
       {empty && <div className="border border-line bg-panel-2 px-3 py-6 text-center text-sm text-muted">Nothing indexed yet — discovery is still crawling. Re-open shortly.</div>}
 
+      {((d.titles?.length ?? 0) + (d.orgs?.length ?? 0) + (d.locations?.length ?? 0)) > 0 && (
+        <div className="space-y-1.5 border border-line bg-base p-3">
+          <div className="kai-metadata uppercase">Profile map</div>
+          {(d.titles?.length ?? 0) > 0 && <div className="text-sm"><span className="kai-metadata">role</span> {d.titles!.join(" · ")}</div>}
+          {(d.orgs?.length ?? 0) > 0 && <div className="text-sm"><span className="kai-metadata">org</span> {d.orgs!.join(" · ")}</div>}
+          {(d.locations?.length ?? 0) > 0 && <div className="text-sm"><span className="kai-metadata">location</span> <span className="text-accent">{d.locations!.join(" · ")}</span></div>}
+        </div>
+      )}
+
       {d.faces.length > 0 && (
         <div>
           <div className="kai-metadata mb-2 uppercase">Images ({d.faces.length})</div>
@@ -60,12 +73,21 @@ function DossierView({ d }: { d: Dossier }) {
         </div>
       )}
 
-      {(d.phones.length > 0 || d.emails.length > 0 || d.usernames.length > 0) && (
+      {(d.phones.length > 0 || d.emails.length > 0 || d.usernames.length > 0 || (d.social?.length ?? 0) > 0) && (
         <div className="space-y-2">
           <div className="kai-metadata uppercase">Linked identifiers</div>
           <Chips items={d.phones} color="var(--kai-verified)" />
           <Chips items={d.emails} color="var(--kai-warn)" />
           <Chips items={d.usernames} color="var(--kai-muted)" />
+          {(d.social?.length ?? 0) > 0 && (
+            <div className="flex flex-wrap gap-1 font-mono text-[10px]">
+              {d.social!.map((u) => (
+                <a key={u} href={u} target="_blank" rel="noreferrer" title={u} className="truncate border border-line px-1.5 py-0.5 text-accent hover:bg-accent/10" style={{ maxWidth: "100%" }}>
+                  {u.replace(/^https?:\/\/(www\.)?/, "")}
+                </a>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

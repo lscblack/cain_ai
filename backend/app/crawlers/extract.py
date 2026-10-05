@@ -1,6 +1,8 @@
 """HTML extraction: image URLs and same-scope links. Pure, no network."""
 from __future__ import annotations
 
+import html as _html
+import json
 import re
 from urllib.parse import urljoin, urlsplit
 
@@ -233,6 +235,157 @@ def extract_contacts(html: str, *, region: str | None = None) -> dict:
         pass
 
     return {"emails": emails[:50], "phones": phones[:50], "usernames": usernames[:50]}
+
+
+_LDJSON_RE = re.compile(
+    r'<script[^>]+type\s*=\s*["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.I | re.S
+)
+_META_RE = re.compile(
+    r'<meta\b[^>]*?(?:property|name)\s*=\s*["\']([^"\']+)["\'][^>]*?content\s*=\s*["\']([^"\']*)["\']', re.I
+)
+_PERSON_TYPES = {"person"}
+_ORG_TYPES = {"organization", "corporation", "ngo", "educationalorganization",
+              "newsmediaorganization", "localbusiness", "governmentorganization"}
+
+
+def _as_list(v):
+    if v is None:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def _addr_str(addr) -> str | None:
+    if isinstance(addr, str):
+        return _html.unescape(addr).strip() or None
+    if isinstance(addr, dict):
+        parts = [addr.get(k) for k in (
+            "streetAddress", "addressLocality", "addressRegion", "postalCode", "addressCountry")]
+        parts = [p if isinstance(p, str) else (p.get("name") if isinstance(p, dict) else None) for p in parts]
+        s = ", ".join(p.strip() for p in parts if p)
+        return s or None
+    return None
+
+
+def _walk_ldjson(node, out: dict) -> None:
+    """Pull people/org/contact/location fields out of a JSON-LD node (recursively)."""
+    if isinstance(node, list):
+        for n in node:
+            _walk_ldjson(n, out)
+        return
+    if not isinstance(node, dict):
+        return
+    for key in ("@graph", "mainEntity", "author", "creator", "publisher", "itemListElement"):
+        if key in node:
+            _walk_ldjson(node[key], out)
+
+    types = [t.lower() for t in _as_list(node.get("@type")) if isinstance(t, str)]
+    name = node.get("name")
+    if isinstance(name, str) and name.strip():
+        if any(t in _PERSON_TYPES for t in types):
+            out["names"].add(name.strip())
+        elif any(t in _ORG_TYPES for t in types):
+            out["orgs"].add(name.strip())
+
+    for t in _as_list(node.get("jobTitle")):
+        if isinstance(t, str) and t.strip():
+            out["titles"].add(t.strip())
+    for w in _as_list(node.get("worksFor")) + _as_list(node.get("affiliation")) + _as_list(node.get("memberOf")):
+        nm = w.get("name") if isinstance(w, dict) else (w if isinstance(w, str) else None)
+        if nm:
+            out["orgs"].add(nm.strip())
+    for e in _as_list(node.get("email")):
+        if isinstance(e, str):
+            out["emails"].add(e.replace("mailto:", "").strip().lower())
+    for p in _as_list(node.get("telephone")):
+        if isinstance(p, str) and p.strip():
+            out["phones_raw"].add(p.strip())
+    for s in _as_list(node.get("sameAs")):
+        if isinstance(s, str) and s.startswith("http"):
+            out["social"].add(s.strip())
+    for locked in ("address", "location", "homeLocation", "workLocation", "birthPlace", "areaServed"):
+        for loc in _as_list(node.get(locked)):
+            a = _addr_str(loc.get("address") if isinstance(loc, dict) and "address" in loc else loc)
+            if a:
+                out["locations"].add(a)
+
+
+def extract_structured(html: str) -> dict:
+    """schema.org JSON-LD + OpenGraph/meta → people, titles, orgs, locations, socials.
+
+    The richest 'map of a target': many sites embed a Person/Organization with
+    jobTitle, worksFor, address, telephone, email and sameAs social links.
+    """
+    html = html or ""
+    out = {k: set() for k in ("names", "titles", "orgs", "locations", "social",
+                              "emails", "phones_raw", "descriptions")}
+    for block in _LDJSON_RE.findall(html):
+        txt = block.strip()
+        try:
+            data = json.loads(txt)
+        except Exception:
+            continue
+        _walk_ldjson(data, out)
+
+    # OpenGraph / meta
+    og: dict[str, str] = {}
+    for prop, content in _META_RE.findall(html):
+        og[prop.lower()] = _html.unescape(content).strip()
+    if og.get("og:type") == "profile":
+        nm = " ".join(x for x in (og.get("profile:first_name"), og.get("profile:last_name")) if x).strip()
+        if nm:
+            out["names"].add(nm)
+    for k in ("og:description", "description"):
+        if og.get(k):
+            out["descriptions"].add(og[k])
+    if og.get("og:site_name"):
+        out["orgs"].add(og["og:site_name"])
+
+    return {k: sorted(v)[:20] for k, v in out.items()}
+
+
+def enrich_from_structured(
+    contacts: dict, names: list[str], structured: dict, *, region: str | None = None
+) -> tuple[dict, list[str], dict]:
+    """Fold schema.org/OG data into the page's contacts + names, and return the
+    structured 'map' (titles/orgs/locations/social/descriptions) for Page.meta."""
+    emails = list(contacts.get("emails") or [])
+    phones = list(contacts.get("phones") or [])
+    usernames = list(contacts.get("usernames") or [])
+    out_names = list(names or [])
+
+    for e in structured.get("emails", []):
+        e = e.lower()
+        if e not in emails:
+            emails.append(e)
+    # validate structured telephone strings
+    try:
+        import phonenumbers
+
+        for raw in structured.get("phones_raw", []):
+            for reg in (None, region):
+                try:
+                    for m in phonenumbers.PhoneNumberMatcher(raw, reg):
+                        if phonenumbers.is_valid_number(m.number):
+                            e164 = phonenumbers.format_number(m.number, phonenumbers.PhoneNumberFormat.E164)
+                            if e164 not in phones:
+                                phones.append(e164)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    # usernames from sameAs social profile URLs
+    for url in structured.get("social", []):
+        for u in _SOCIAL_RE.findall(url):
+            u = u.strip().lower()
+            if u and u not in usernames and u not in _USER_STOP:
+                usernames.append(u)
+    for n in structured.get("names", []):
+        if n not in out_names:
+            out_names.append(n)
+
+    meta = {k: structured.get(k, []) for k in ("titles", "orgs", "locations", "social", "descriptions")}
+    enriched = {"emails": emails[:50], "phones": phones[:50], "usernames": usernames[:50]}
+    return enriched, out_names[:20], meta
 
 
 def path_allowed(url: str, allowed: list[str], excluded: list[str]) -> bool:
