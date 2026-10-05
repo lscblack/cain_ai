@@ -137,12 +137,40 @@ async def _eng_mojeek(q: str) -> list[str]:
 _searx_rr = 0
 
 
+def _searx_instances() -> list[str]:
+    # A self-hosted instance (reliable, unlimited JSON) is tried first; public
+    # instances are a best-effort fallback.
+    conf = get_settings().searxng_url.strip().rstrip("/")
+    return ([conf] if conf else []) + _SEARX_INSTANCES
+
+
 async def _eng_searxng(q: str) -> list[str]:
+    """Open-source SearXNG metasearch JSON API (docs.searxng.org/dev/search_api).
+    Tries the configured self-hosted instance first, then public instances."""
     global _searx_rr
-    inst = _SEARX_INSTANCES[_searx_rr % len(_SEARX_INSTANCES)]
-    _searx_rr += 1
-    data = await _get_json(f"{inst}/search?q={quote(q)}&format=json")
-    return _searx_results(data)
+    instances = _searx_instances()
+    # one configured call, else rotate through a couple of public instances
+    tries = instances[:1] if get_settings().searxng_url.strip() else instances
+    for i in range(max(1, len(tries))):
+        inst = tries[(_searx_rr + i) % len(tries)]
+        _searx_rr += 1
+        try:
+            data = await _get_json(f"{inst}/search?q={quote(q)}&format=json&safesearch=0")
+            urls = _searx_results(data)
+            if urls:
+                return urls
+        except Exception:
+            continue
+    return []
+
+
+def _active_engines() -> list[tuple[str, Callable[[str], Awaitable[list[str]]]]]:
+    """The engine rotation. A self-hosted SearXNG (open-source, aggregates many
+    engines) is weighted highest when configured."""
+    engines = list(FREE_ENGINES)
+    if get_settings().searxng_url.strip():
+        engines = [("searxng", _eng_searxng), ("searxng", _eng_searxng)] + engines
+    return engines
 
 
 FREE_ENGINES: list[tuple[str, Callable[[str], Awaitable[list[str]]]]] = [
@@ -155,10 +183,12 @@ FREE_ENGINES: list[tuple[str, Callable[[str], Awaitable[list[str]]]]] = [
 async def search_candidates_free(queries: list[str], *, delay: float = 1.0) -> dict[str, str]:
     """Spread queries round-robin across the keyless engines (concurrently), so each
     engine handles ~1/N of them and no single one gets rate limited. Merge domains."""
-    buckets: dict[str, list[str]] = {name: [] for name, _ in FREE_ENGINES}
-    names = [n for n, _ in FREE_ENGINES]
+    engines = _active_engines()  # a self-hosted SearXNG is weighted higher here
+    rotation = [name for name, _ in engines]
+    fn_by_name = {name: fn for name, fn in engines}
+    buckets: dict[str, list[str]] = {name: [] for name in fn_by_name}
     for i, q in enumerate(queries):
-        buckets[names[i % len(names)]].append(q)
+        buckets[rotation[i % len(rotation)]].append(q)
 
     found: dict[str, str] = {}
     lock = asyncio.Lock()
@@ -193,7 +223,7 @@ async def search_candidates_free(queries: list[str], *, delay: float = 1.0) -> d
 
         await asyncio.gather(*[one(q) for q in qs])
 
-    await asyncio.gather(*[run(n, fn, buckets[n]) for n, fn in FREE_ENGINES if buckets[n]])
+    await asyncio.gather(*[run(n, fn_by_name[n], buckets[n]) for n in buckets if buckets[n]])
     return found
 
 

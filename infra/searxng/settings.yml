@@ -1,0 +1,16 @@
+# Minimal SearXNG config for KAI discovery.
+# Inherits SearXNG defaults; only enables the JSON API that KAI reads
+# (https://docs.searxng.org/dev/search_api.html) and sets a local secret key.
+use_default_settings: true
+
+server:
+  # local-only instance; change if you expose it beyond 127.0.0.1
+  secret_key: "kai-searxng-local-secret-change-me"
+  limiter: false            # no bot limiter for a private local instance
+  image_proxy: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json                  # required: KAI requests &format=json

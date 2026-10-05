@@ -19,6 +19,21 @@ services:
       - kai_redis:/data
     restart: unless-stopped
 
+  # --- SearXNG: open-source metasearch for keyless web discovery -----------
+  # After `docker compose up -d searxng`, set SEARXNG_URL=http://127.0.0.1:8888
+  # (dashboard settings or .env). JSON API is enabled via the settings below.
+  searxng:
+    image: searxng/searxng:latest
+    container_name: kai-searxng
+    ports:
+      - "127.0.0.1:8888:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8888/
+    volumes:
+      # our config enables the JSON API KAI reads (docs.searxng.org/dev/search_api)
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: unless-stopped
+
   # --- Optional: pgvector-enabled Postgres (uncomment for Phase 8) ---------
   # postgres:
   #   image: pgvector/pgvector:pg17

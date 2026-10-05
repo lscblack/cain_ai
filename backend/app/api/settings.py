@@ -19,6 +19,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 # setting-field (lowercase) -> (ENV name, label, secret?)
 MANAGED_KEYS: dict[str, tuple[str, str, bool]] = {
     "serpapi_api_key": ("SERPAPI_API_KEY", "SerpAPI (reverse image)", True),
+    "searxng_url": ("SEARXNG_URL", "SearXNG instance URL (open-source search)", False),
     "unavatar_api_key": ("UNAVATAR_API_KEY", "unavatar (avatar resolver)", True),
     "tineye_api_key": ("TINEYE_API_KEY", "TinEye", True),
     "openrouter_api_key": ("OPENROUTER_API_KEY", "OpenRouter (AI)", True),

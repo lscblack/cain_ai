@@ -66,6 +66,10 @@ class Settings(BaseSettings):
 
     # ── External provider keys (empty => provider reports UNAVAILABLE) ──
     serpapi_api_key: str = Field(default="")  # reverse-image only; web discovery is keyless
+    # Self-hosted SearXNG base URL (open-source metasearch, JSON API). When set it
+    # becomes the preferred discovery engine — reliable, unlimited, aggregates many
+    # engines. e.g. http://127.0.0.1:8888  (run `docker compose up -d searxng`).
+    searxng_url: str = Field(default="")
     bing_visual_key: str = Field(default="")
     tineye_api_key: str = Field(default="")
     unavatar_api_key: str = Field(default="")  # optional; raises unavatar free 25/day limit
