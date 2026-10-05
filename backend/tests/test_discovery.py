@@ -122,6 +122,8 @@ async def test_search_candidates_free_round_robin(monkeypatch):
         ("mojeek", mk("mojeek", "moj.test")),
         ("searxng", mk("searxng", "sx.test")),
     ])
+    # pin searxng_url empty so _active_engines() doesn't add weighting
+    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"searxng_url": ""})())
     out = await s.search_candidates_free(["q0", "q1", "q2", "q3"], delay=0)
     # round-robin: q0->ddg, q1->mojeek, q2->searx, q3->ddg
     assert seen["duckduckgo"] == ["q0", "q3"]
