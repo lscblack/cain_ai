@@ -116,6 +116,31 @@ async def test_search_candidates_empty_without_key(monkeypatch):
     assert out == {}
 
 
+@pytest.mark.anyio
+async def test_ddg_fallback_parses_results():
+    async def fake_text(url):
+        assert "duckduckgo.com" in url
+        return (
+            '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.rw%2Fteam">x</a>'
+            '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fportfolio.me%2Fjane">y</a>'
+        )
+
+    out = await s.search_candidates_ddg(["q1"], http_get_text=fake_text)
+    assert set(out) == {"example.rw", "portfolio.me"}
+
+
+def test_serpapi_error_response_stops_cleanly(monkeypatch):
+    import anyio
+
+    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"serpapi_api_key": "x"})())
+
+    async def err_get(url, params):
+        return {"error": "Your account has run out of searches."}
+
+    out = anyio.run(lambda: s.search_candidates(["q1", "q2"], http_get=err_get))
+    assert out == {}  # error -> no results, no crash
+
+
 def _html(body: str) -> str:
     return f"<html><body>{body}</body></html>"
 

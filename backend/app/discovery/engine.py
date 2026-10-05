@@ -19,7 +19,7 @@ from app.database.models.source import Source
 from app.database.session import async_session_maker
 from app.discovery.evaluate import evaluate_domain
 from app.discovery.queries import generate_queries_multi
-from app.discovery.search import search_candidates
+from app.discovery.search import discover_candidates
 
 logger = get_logger("kai.discovery")
 
@@ -178,7 +178,7 @@ async def _execute(
     max_domains: int,
     auto_crawl: bool,
 ) -> None:
-    candidates = await search_candidates(queries)
+    candidates = await discover_candidates(queries)
     state["candidates"] = len(candidates)
     state["status"] = "evaluating"
     await _save(redis, run_id, state)
