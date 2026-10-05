@@ -224,9 +224,18 @@ function NamesTab() {
           <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted">Select or start an investigation to see dossiers.</div>
         ) : (
           <>
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex items-center justify-between gap-2">
               <span className="kai-metadata uppercase">Dossiers</span>
-              <span className={`text-xs uppercase ${detail.status === "done" ? "text-verified" : "text-accent"}`}>{detail.status}</span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={(e) => reinvestigate(detail.names ?? [], e)}
+                  title="Run this investigation again with a fresh crawl"
+                  className="flex items-center gap-1.5 border border-accent px-2.5 py-1 text-[10px] uppercase tracking-wider text-accent transition hover:bg-accent/10"
+                >
+                  <RotateCw size={12} /> Re-investigate
+                </button>
+                <span className={`text-xs uppercase ${detail.status === "done" ? "text-verified" : "text-accent"}`}>{detail.status}</span>
+              </div>
             </div>
             <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted">
               <span>sources approved: <span className="text-ink">{detail.approved ?? 0}</span></span>

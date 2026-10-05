@@ -18,7 +18,9 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 # setting-field (lowercase) -> (ENV name, label, secret?)
 MANAGED_KEYS: dict[str, tuple[str, str, bool]] = {
-    "serpapi_api_key": ("SERPAPI_API_KEY", "SerpAPI (reverse image)", True),
+    "serpapi_api_key": ("SERPAPI_API_KEY", "SerpAPI (web discovery)", True),
+    "searchapi_api_key": ("SEARCHAPI_API_KEY", "SearchApi.io (web discovery, free tier)", True),
+    "brave_api_key": ("BRAVE_API_KEY", "Brave Search (web discovery, free tier)", True),
     "unavatar_api_key": ("UNAVATAR_API_KEY", "unavatar (avatar resolver)", True),
     "tineye_api_key": ("TINEYE_API_KEY", "TinEye", True),
     "openrouter_api_key": ("OPENROUTER_API_KEY", "OpenRouter (AI)", True),

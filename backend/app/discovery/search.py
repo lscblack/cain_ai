@@ -131,6 +131,74 @@ async def search_candidates(
     return found
 
 
+# ── SearchApi.io backend (Google SERP, free tier) ────────────────────────────
+
+async def search_candidates_searchapi(
+    queries: list[str], *, per_query: int = 10, http_get: JsonGet | None = None
+) -> dict[str, str]:
+    key = get_settings().searchapi_api_key
+    if not key:
+        return {}
+    getter = http_get or _default_get
+    found: dict[str, str] = {}
+    for q in queries:
+        try:
+            data = await getter(
+                "https://www.searchapi.io/api/v1/search",
+                {"engine": "google", "q": q, "num": per_query, "api_key": key},
+            )
+        except Exception:
+            continue
+        if isinstance(data, dict) and data.get("error"):
+            logger.warning("searchapi: %s", data.get("error"))
+            break
+        for item in (data.get("organic_results") or []):
+            dom = _domain(item.get("link") or item.get("url") or "")
+            if dom and dom not in found:
+                found[dom] = f"https://{dom}/"
+    return found
+
+
+# ── Brave Search backend (independent index, free tier; token in a header) ────
+
+async def _brave_default(url: str, params: dict) -> dict:
+    import httpx
+
+    key = get_settings().brave_api_key
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        r = await client.get(url, params=params, headers={
+            "Accept": "application/json", "Accept-Encoding": "gzip",
+            "X-Subscription-Token": key,
+        })
+        r.raise_for_status()
+        return r.json()
+
+
+async def search_candidates_brave(
+    queries: list[str], *, per_query: int = 10, http_get: JsonGet | None = None, delay: float = 1.1
+) -> dict[str, str]:
+    key = get_settings().brave_api_key
+    if not key:
+        return {}
+    getter = http_get or _brave_default
+    found: dict[str, str] = {}
+    for i, q in enumerate(queries):
+        try:
+            data = await getter(
+                "https://api.search.brave.com/res/v1/web/search",
+                {"q": q, "count": per_query},
+            )
+        except Exception:
+            continue
+        for item in ((data.get("web") or {}).get("results") or []):
+            dom = _domain(item.get("url") or "")
+            if dom and dom not in found:
+                found[dom] = f"https://{dom}/"
+        if http_get is None and i < len(queries) - 1:
+            await asyncio.sleep(delay)  # Brave free tier ~1 query/sec
+    return found
+
+
 # ── Keyless engine parsers (pure) ────────────────────────────────────────────
 
 def _ddg_links(html: str) -> list[str]:
@@ -259,12 +327,23 @@ async def search_candidates_ddg(
 
 
 async def discover_candidates(queries: list[str], *, per_query: int = 10) -> dict[str, str]:
-    """Try SerpAPI first; fall back to the keyless engine pool when it returns nothing."""
-    found: dict[str, str] = {}
-    if serpapi_available():
-        found = await search_candidates(queries, per_query=per_query)
-    if not found:
-        found = await search_candidates_free(queries)
+    """Provider chain: keyed APIs (SerpAPI → SearchApi → Brave) in order, each used
+    only when it has a key; the first that returns results wins. If none do (no key
+    or exhausted), fall back to the keyless Tor/engine pool."""
+    s = get_settings()
+    chain = [
+        ("serpapi", s.serpapi_api_key, lambda: search_candidates(queries, per_query=per_query)),
+        ("searchapi", s.searchapi_api_key, lambda: search_candidates_searchapi(queries, per_query=per_query)),
+        ("brave", s.brave_api_key, lambda: search_candidates_brave(queries, per_query=per_query)),
+    ]
+    for name, key, run in chain:
+        if not key:
+            continue
+        found = await run()
         if found:
-            logger.info("discovery: keyless engine pool found %d domains", len(found))
+            logger.info("discovery: %s found %d domains", name, len(found))
+            return found
+    found = await search_candidates_free(queries)
+    if found:
+        logger.info("discovery: keyless engine pool found %d domains", len(found))
     return found

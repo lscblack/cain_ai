@@ -66,6 +66,8 @@ class Settings(BaseSettings):
 
     # ── External provider keys (empty => provider reports UNAVAILABLE) ──
     serpapi_api_key: str = Field(default="")
+    searchapi_api_key: str = Field(default="")   # searchapi.io (Google SERP, free tier)
+    brave_api_key: str = Field(default="")        # api.search.brave.com (free tier)
     bing_visual_key: str = Field(default="")
     tineye_api_key: str = Field(default="")
     unavatar_api_key: str = Field(default="")  # optional; raises unavatar free 25/day limit

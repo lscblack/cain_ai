@@ -130,6 +130,30 @@ async def test_ddg_fallback_parses_results():
 
 
 @pytest.mark.anyio
+async def test_searchapi_backend(monkeypatch):
+    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"searchapi_api_key": "k"})())
+
+    async def fake(url, params):
+        assert "searchapi.io" in url
+        return {"organic_results": [{"link": "https://a.rw/x"}, {"link": "https://b.co/y"}]}
+
+    out = await s.search_candidates_searchapi(["q"], http_get=fake)
+    assert set(out) == {"a.rw", "b.co"}
+
+
+@pytest.mark.anyio
+async def test_brave_backend(monkeypatch):
+    monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"brave_api_key": "k"})())
+
+    async def fake(url, params):
+        assert "brave.com" in url
+        return {"web": {"results": [{"url": "https://x.rw/a"}, {"url": "https://y.co"}]}}
+
+    out = await s.search_candidates_brave(["q"], http_get=fake)
+    assert set(out) == {"x.rw", "y.co"}
+
+
+@pytest.mark.anyio
 async def test_search_candidates_free_round_robin(monkeypatch):
     seen = {"duckduckgo": [], "mojeek": [], "searxng": []}
 
