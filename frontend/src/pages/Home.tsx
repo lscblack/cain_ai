@@ -22,7 +22,7 @@ interface SearchMatch {
   usernames?: string[];
 }
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 const pub = (cropUrl?: string | null) =>
   cropUrl ? `${API_BASE}${cropUrl.replace("/intelligence/face/crop/", "/intelligence/face/public/crop/")}` : "";
 

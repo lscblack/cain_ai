@@ -97,7 +97,7 @@ export function Investigation() {
   }
 
   async function exportCase(fmt: "json" | "csv") {
-    const base = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+    const base = import.meta.env.VITE_API_URL ?? "/api";
     const token = localStorage.getItem("kai.token");
     const resp = await fetch(`${base}/investigations/${id}/export?format=${fmt}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},

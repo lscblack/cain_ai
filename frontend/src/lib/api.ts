@@ -1,6 +1,6 @@
 import { ApiError } from "@/types";
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const BASE = import.meta.env.VITE_API_URL ?? "/api";
 const TOKEN_KEY = "kai.token";
 
 export function getToken(): string | null {

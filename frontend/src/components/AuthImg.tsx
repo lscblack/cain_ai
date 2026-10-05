@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const BASE = import.meta.env.VITE_API_URL ?? "/api";
 const cache = new Map<string, string>();
 
 /** <img> for an authenticated backend image path (fetches with bearer -> blob URL). */
