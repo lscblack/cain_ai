@@ -321,17 +321,20 @@ async def _run_crawl_all(source_ids: list[uuid.UUID], concurrency: int = 2) -> N
 
 @router.get("/queue")
 async def queue_status(
+    limit: int = 30,
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
     redis: Redis = Depends(get_redis),
 ) -> dict:
-    """Crawl queue depth + the sources currently crawling and the next ones queued."""
+    """Crawl queue depth + the sources currently crawling and the next ones queued.
+    `limit` controls how many queued entries to resolve (the full-queue page asks more)."""
     from app.crawlers.queue import CRAWL_QUEUE, DISCOVERY_QUEUE
 
+    limit = max(1, min(limit, 2000))
     try:
         depth = int(await redis.llen(CRAWL_QUEUE))
         discovery_depth = int(await redis.llen(DISCOVERY_QUEUE))
-        raw_ids = await redis.lrange(CRAWL_QUEUE, 0, 29)  # peek next 30
+        raw_ids = await redis.lrange(CRAWL_QUEUE, 0, limit - 1)
     except Exception:
         depth, discovery_depth, raw_ids = 0, 0, []
 

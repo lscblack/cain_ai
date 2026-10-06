@@ -19,6 +19,7 @@ import {
   Radar,
   Contact,
   Crosshair,
+  ListOrdered,
   LogOut,
 } from "lucide-react";
 
@@ -37,6 +38,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: Contact, label: "Contacts", to: "/contacts" },
   { icon: Globe, label: "Domains" },
   { icon: Database, label: "Sources", to: "/sources" },
+  { icon: ListOrdered, label: "Crawl Queue", to: "/queue" },
   { icon: Radar, label: "Discover", to: "/discover" },
   { icon: Crosshair, label: "Investigate", to: "/investigate" },
   { icon: Share2, label: "Graph", to: "/graph" },
