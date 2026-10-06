@@ -5,6 +5,7 @@ as sources (deduped) and optionally queued for crawling.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -194,32 +195,43 @@ async def _execute(
 
     robots = RobotsGate()
     total = max(1, len(new_domains))
-    for i, domain in enumerate(new_domains):
-        state["current"] = domain
-        state["progress"] = round((i / total) * 100)
-        await _save(redis, run_id, state)
-        try:
-            ev = await evaluate_domain(domain, fetch=httpx_fetch, robots=robots.allowed)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("evaluate failed for %s: %s", domain, exc)
-            state["rejected"] += 1
-            state["evaluated"] += 1
-            continue
-        state["evaluated"] += 1
-        # Keep any reachable source that scores — an auth link on the page no longer
-        # hard-rejects it (many portfolios/socials show public profiles behind a soft
-        # login prompt). The score still carries a penalty for a real auth wall.
-        approved = ev.reachable and ev.score >= min_score
-        ev.approved = approved
-        if approved:
-            await _add_source(domain, ev.to_dict(), auto_crawl=auto_crawl, redis=redis)
-            state["approved"] += 1
-            state["approved_list"] = ([ev.to_dict()] + state["approved_list"])[:50]
-            known.add(domain)
-        else:
-            state["rejected"] += 1
-        state["last"] = ev.to_dict()
-        await _save(redis, run_id, state)
+    sem = asyncio.Semaphore(6)  # evaluate several candidates at once (all I/O-bound)
+    lock = asyncio.Lock()
+    done = {"n": 0}
+
+    async def evaluate_one(domain: str) -> None:
+        async with sem:
+            try:
+                ev = await evaluate_domain(domain, fetch=httpx_fetch, robots=robots.allowed)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("evaluate failed for %s: %s", domain, exc)
+                async with lock:
+                    state["rejected"] += 1
+                    state["evaluated"] += 1
+                    done["n"] += 1
+                return
+            # Keep any reachable source that scores — an auth link on the page no
+            # longer hard-rejects it (many portfolios/socials show public profiles
+            # behind a soft login prompt); the score still penalises a real wall.
+            approved = ev.reachable and ev.score >= min_score
+            ev.approved = approved
+            if approved:
+                await _add_source(domain, ev.to_dict(), auto_crawl=auto_crawl, redis=redis)
+            async with lock:
+                state["evaluated"] += 1
+                done["n"] += 1
+                state["current"] = domain
+                state["progress"] = round((done["n"] / total) * 100)
+                if approved:
+                    state["approved"] += 1
+                    state["approved_list"] = ([ev.to_dict()] + state["approved_list"])[:50]
+                    known.add(domain)
+                else:
+                    state["rejected"] += 1
+                state["last"] = ev.to_dict()
+            await _save(redis, run_id, state)
+
+    await asyncio.gather(*[evaluate_one(d) for d in new_domains])
 
     state["status"] = "done"
     state["current"] = None

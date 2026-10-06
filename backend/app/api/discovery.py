@@ -133,9 +133,12 @@ async def investigate_names(
     run_id = new_run_id()
     await mark_queued(redis, run_id, {"targets": names})
     # reflect investigation shape in the queued state
+    from app.discovery.onion import onion_available
+
     raw = await redis.get(_run_key(run_id))
     state = json.loads(raw) if raw else {}
-    state.update({"kind": "investigation", "names": names, "status": "queued"})
+    state.update({"kind": "investigation", "names": names, "status": "queued",
+                  "onion_enabled": onion_available(), "onion_sources": 0})
     await redis.set(_run_key(run_id), json.dumps(state), ex=60 * 60 * 24)
     await redis.lpush(INVESTIGATIONS_KEY, run_id)
     await redis.ltrim(INVESTIGATIONS_KEY, 0, 199)
