@@ -116,6 +116,7 @@ async def clear_terms(
 
 class InvestigateIn(BaseModel):
     names: list[str] = Field(min_length=1, max_length=500)
+    queries: list[str] = Field(default_factory=list, max_length=60)  # operator query tips
     auto_crawl: bool = True
 
 
@@ -142,7 +143,9 @@ async def investigate_names(
     await redis.set(_run_key(run_id), json.dumps(state), ex=60 * 60 * 24)
     await redis.lpush(INVESTIGATIONS_KEY, run_id)
     await redis.ltrim(INVESTIGATIONS_KEY, 0, 199)
-    await enqueue_discovery(redis, {"kind": "names", "run_id": run_id, "names": names, "auto_crawl": body.auto_crawl})
+    tips = [q.strip() for q in body.queries if q and q.strip()][:60]
+    await enqueue_discovery(redis, {"kind": "names", "run_id": run_id, "names": names,
+                                    "queries": tips, "auto_crawl": body.auto_crawl})
     logger.info("name investigation %s queued by %s (%d names)", run_id, operator.email, len(names))
     return DiscoveryRunStarted(id=run_id, available=search_available())
 

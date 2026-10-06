@@ -137,6 +137,7 @@ export function Investigate() {
 
 function NamesTab() {
   const [text, setText] = useState("");
+  const [tips, setTips] = useState("");
   const [autoCrawl, setAutoCrawl] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [runs, setRuns] = useState<Investigation[]>([]);
@@ -150,12 +151,16 @@ function NamesTab() {
   }
   useEffect(() => { load(); return () => { if (poll.current) clearInterval(poll.current); }; }, []);
 
+  function tipLines() {
+    return tips.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  }
+
   async function start() {
     const names = text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
     if (names.length === 0) { setMsg("Enter at least one name."); return; }
     setMsg(null);
     try {
-      const r = await api.post<{ id: string }>("/discovery/investigate", { names, auto_crawl: autoCrawl });
+      const r = await api.post<{ id: string }>("/discovery/investigate", { names, queries: tipLines(), auto_crawl: autoCrawl });
       setMsg(`Investigation started for ${names.length} name(s) — running in background.`);
       setText("");
       await load();
@@ -169,7 +174,7 @@ function NamesTab() {
     e.stopPropagation();
     if (names.length === 0) return;
     try {
-      const r = await api.post<{ id: string }>("/discovery/investigate", { names, auto_crawl: autoCrawl });
+      const r = await api.post<{ id: string }>("/discovery/investigate", { names, queries: tipLines(), auto_crawl: autoCrawl });
       setMsg(`Re-investigating ${names.length} name(s)…`);
       await load();
       open(r.id);
@@ -208,6 +213,20 @@ function NamesTab() {
             placeholder={"One name per line, e.g.\nPaul Kagame\nJane Doe\nJohn Smith"}
             className="w-full border border-line bg-base px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent"
           />
+          <div className="mt-3">
+            <div className="mb-1 kai-metadata uppercase">Query tips (optional)</div>
+            <textarea
+              value={tips}
+              onChange={(e) => setTips(e.target.value)}
+              rows={4}
+              placeholder={'One search per line. Use {name} as the target:\n"{name}" Rwandan journalist\nsite:linkedin.com/in {name}\n{name} Kigali portfolio'}
+              className="w-full border border-line bg-base px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent placeholder:text-muted/50"
+            />
+            <div className="mt-1 kai-metadata">
+              Searched exactly as written (run before the auto queries). {"{name}"} expands to each target; a line without it runs as-is.
+            </div>
+          </div>
+
           <label className="mt-2 flex items-center gap-2 text-xs text-muted">
             <input type="checkbox" checked={autoCrawl} onChange={(e) => setAutoCrawl(e.target.checked)} />
             Auto-crawl discovered sources (find more)

@@ -97,17 +97,45 @@ async def run_term_discovery(
 INVESTIGATIONS_KEY = "kai:discovery:investigations"  # recent investigation run ids
 
 
+def expand_query_tips(tips: list[str], names: list[str]) -> list[str]:
+    """Operator-supplied query tips. A tip with '{name}' is expanded per name; any
+    other tip is run as a literal query. Lets the operator steer discovery the way
+    they'd actually search ("{name}" Rwandan journalist, site:x.com "{name}", …)."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str) -> None:
+        q = " ".join(q.split())
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+
+    for tip in tips or []:
+        tip = (tip or "").strip()
+        if not tip:
+            continue
+        if "{name}" in tip:
+            for n in names:
+                add(tip.replace("{name}", n))
+        else:
+            add(tip)
+    return out
+
+
 async def run_name_investigation(
     run_id: str,
     *,
     redis: Redis,
     names: list[str],
+    queries: list[str] | None = None,
     auto_crawl: bool = True,
     max_domains: int = 150,
 ) -> None:
     """Batch investigation: discover + crawl sources for a list of names so KAI can
     surface the images/phones/emails/usernames that might belong to them. Per-name
-    dossiers are computed live from the corpus by the API as crawls land."""
+    dossiers are computed live from the corpus by the API as crawls land.
+
+    `queries` are optional operator query tips (see expand_query_tips)."""
     from app.discovery.onion import onion_available
     from app.discovery.queries import name_deep_queries
 
@@ -142,9 +170,13 @@ async def run_name_investigation(
     # 2) Clearnet: deep per-person queries across portfolios, Wikipedia, GitHub,
     #    socials, news — discover, qualify and crawl. Capped to bound SerpAPI cost
     #    on large name batches (each query is one search call).
-    queries = name_deep_queries(names)[:300]
+    # Operator tips run FIRST (they're the queries the operator knows return hits),
+    # then the auto deep queries; combined and capped.
+    tip_queries = expand_query_tips(queries or [], names)
+    auto = name_deep_queries(names)
+    final_queries = list(dict.fromkeys(tip_queries + auto))[:300]
     await _execute(
-        run_id, redis=redis, queries=queries, state=state,
+        run_id, redis=redis, queries=final_queries, state=state,
         min_score=45, max_domains=max_domains, auto_crawl=auto_crawl,
     )
 

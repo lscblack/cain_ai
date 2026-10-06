@@ -41,6 +41,20 @@ def test_discovery_run_in_resolved_countries():
     assert DiscoveryRunIn().resolved_countries() == ["rwanda"]  # default
 
 
+def test_expand_query_tips():
+    from app.discovery.engine import expand_query_tips
+
+    out = expand_query_tips(
+        ['"{name}" journalist', "site:x.com {name}", "literal query", "  "],
+        ["John Doe", "Jane Roe"],
+    )
+    assert '"John Doe" journalist' in out
+    assert '"Jane Roe" journalist' in out
+    assert "site:x.com John Doe" in out
+    assert "literal query" in out  # no {name} -> run as-is
+    assert out == list(dict.fromkeys(out))  # deduped, order preserved
+
+
 def test_name_deep_queries_covers_key_sources():
     from app.discovery.queries import name_deep_queries
 

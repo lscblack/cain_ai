@@ -56,6 +56,7 @@ async def _run_discovery_job(raw: str) -> None:
             job["run_id"],
             redis=redis,
             names=job.get("names", []),
+            queries=job.get("queries", []),
             auto_crawl=job.get("auto_crawl", True),
         )
         return
