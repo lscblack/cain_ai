@@ -7,7 +7,7 @@ richer as crawls land. Observations only, never asserted identity.
 """
 from __future__ import annotations
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models.face import Face
@@ -47,16 +47,21 @@ async def gather_dossier(
     # 1) Faces that name this person (names/free text are detected as UNKNOWN).
     #    Substring match against any name in extra.names (case-insensitive) so
     #    "Paul Kagame" also hits a stored "Perezida Paul Kagame".
-    if name_mode and len(term) >= 3:
+    words = [w for w in term.split() if len(w) >= 2]
+    if name_mode and words:
+        # Match a face whose extra.names contains ALL of the query words, in any
+        # order — so "alain muhirwa michael" also hits "Michael Alain Muhirwa".
+        wconds = " AND ".join(f"n ILIKE :w{i}" for i in range(len(words)))
+        params = {f"w{i}": f"%{w}%" for i, w in enumerate(words)}
+        params["lim"] = _MAX_FACES
         ids = (
             await session.execute(
                 text(
                     "SELECT id FROM faces f "
-                    "WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(f.extra->'names') n "
-                    "             WHERE n ILIKE :like) "
+                    f"WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(f.extra->'names') n WHERE {wconds}) "
                     "ORDER BY f.quality DESC LIMIT :lim"
                 ),
-                {"like": f"%{term}%", "lim": _MAX_FACES},
+                params,
             )
         ).scalars().all()
         face_rows = (
@@ -95,8 +100,12 @@ async def gather_dossier(
     elif not name_mode and det.type == QueryType.USERNAME:
         conds.append(Page.usernames.contains([needle.lstrip("@")]))
     else:
-        like = f"%{term}%"
-        conds = [Page.title.ilike(like), Page.description.ilike(like)]
+        # all query words present in the title, OR all in the description (any order)
+        w = words or [term]
+        conds = [
+            and_(*[Page.title.ilike(f"%{x}%") for x in w]),
+            and_(*[Page.description.ilike(f"%{x}%") for x in w]),
+        ]
     pages = (
         await session.execute(select(Page).where(or_(*conds)).limit(_MAX_PAGES))
     ).scalars().all()

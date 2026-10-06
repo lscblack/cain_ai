@@ -8,16 +8,19 @@ from __future__ import annotations
 # High-value OSINT source sites to target by name, with the `site:` operator.
 # Any publicly reachable platform that can host an individual's profile/portfolio.
 _NAME_SITES = [
+    # the highest-value first 10 (used by default) — where people most often appear
+    "en.wikipedia.org", "linkedin.com/in", "github.com", "x.com", "instagram.com",
+    "facebook.com", "medium.com", "youtube.com", "about.me", "github.io",
     # encyclopedic / knowledge
-    "en.wikipedia.org", "wikidata.org", "wikitree.com",
+    "wikidata.org", "wikitree.com",
     # code / dev
-    "github.com", "gitlab.com", "bitbucket.org", "huggingface.co", "kaggle.com",
+    "gitlab.com", "bitbucket.org", "huggingface.co", "kaggle.com",
     "stackoverflow.com", "dev.to", "replit.com", "codepen.io", "npmjs.com", "pypi.org",
     # professional / business
-    "linkedin.com/in", "crunchbase.com", "wellfound.com", "angel.co", "f6s.com",
+    "crunchbase.com", "wellfound.com", "angel.co", "f6s.com",
     "producthunt.com", "opencorporates.com", "zoominfo.com", "theorg.com",
     # social
-    "x.com", "twitter.com", "instagram.com", "facebook.com", "tiktok.com",
+    "twitter.com", "tiktok.com",
     "threads.net", "bsky.app", "mastodon.social", "reddit.com", "t.me", "vk.com",
     "pinterest.com", "tumblr.com", "snapchat.com",
     # media / creative portfolios
@@ -46,10 +49,13 @@ _NAME_ANGLES = [
 ]
 
 
-def name_deep_queries(names: list[str], *, per_name: int = 48) -> list[str]:
-    """Deep per-person queries across portfolios, Wikipedia, GitHub, socials, news.
+def name_deep_queries(names: list[str], *, site_budget: int = 10, angle_budget: int = 16) -> list[str]:
+    """Per-person queries for discovery.
 
-    No network — these are the public-search strings the discovery engine then runs.
+    Leads with the broad, productive queries (bare name, quoted name, name + a few
+    angles) that keyless engines actually return results for, then a *small* set of
+    `site:` queries (those mostly return nothing outside Google and just slow things
+    down). No network — these are the public-search strings the engine then runs.
     """
     out: list[str] = []
     seen: set[str] = set()
@@ -60,19 +66,17 @@ def name_deep_queries(names: list[str], *, per_name: int = 48) -> list[str]:
             seen.add(q)
             out.append(q)
 
-    # Split the per-name budget so both targeted sites AND free-text angles
-    # (personal website / portfolio / bio) always get queried.
-    angle_budget = min(len(_NAME_ANGLES), max(10, per_name // 4))
-    site_budget = max(1, per_name - angle_budget)
     for raw in names:
         n = (raw or "").strip()
         if not n:
             continue
         quoted = f'"{n}"'
+        add(n)        # broad
+        add(quoted)   # exact phrase
+        for angle in _NAME_ANGLES[:angle_budget]:
+            add(f"{n} {angle}")
         for site in _NAME_SITES[:site_budget]:
             add(f"{quoted} site:{site}")
-        for angle in _NAME_ANGLES[:angle_budget]:
-            add(f"{quoted} {angle}")
     return out
 
 # country -> (search label, ccTLD)

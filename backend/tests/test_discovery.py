@@ -122,28 +122,27 @@ async def test_ddg_fallback_parses_results():
 
 
 @pytest.mark.anyio
-async def test_search_candidates_free_round_robin(monkeypatch):
-    seen = {"duckduckgo": [], "mojeek": [], "searxng": []}
+async def test_search_candidates_free_per_query_fallback(monkeypatch):
+    calls = {"duckduckgo": [], "mojeek": []}
 
-    def mk(name, dom):
-        async def eng(q):
-            seen[name].append(q)
-            return [f"https://{dom}/{q}"]
-        return eng
+    async def ddg(q):
+        calls["duckduckgo"].append(q)
+        return [] if q == "miss" else [f"https://ddg.test/{q}"]  # "miss" returns nothing
 
-    monkeypatch.setattr(s, "FREE_ENGINES", [
-        ("duckduckgo", mk("duckduckgo", "ddg.test")),
-        ("mojeek", mk("mojeek", "moj.test")),
-        ("searxng", mk("searxng", "sx.test")),
-    ])
-    # pin searxng_url empty so _active_engines() doesn't add weighting
+    async def moj(q):
+        calls["mojeek"].append(q)
+        return [f"https://moj.test/{q}"]
+
+    # pin searxng off; override engine set
     monkeypatch.setattr(s, "get_settings", lambda: type("S", (), {"searxng_url": ""})())
-    out = await s.search_candidates_free(["q0", "q1", "q2", "q3"], delay=0)
-    # round-robin: q0->ddg, q1->mojeek, q2->searx, q3->ddg
-    assert seen["duckduckgo"] == ["q0", "q3"]
-    assert seen["mojeek"] == ["q1"]
-    assert seen["searxng"] == ["q2"]
-    assert {"ddg.test", "moj.test", "sx.test"} <= set(out)
+    monkeypatch.setattr(s, "FREE_ENGINES", [("duckduckgo", ddg), ("mojeek", moj)])
+
+    out = await s.search_candidates_free(["a", "miss", "b"], concurrency=1, delay=0)
+    # every query hits the reliable engine (ddg) first
+    assert set(calls["duckduckgo"]) == {"a", "miss", "b"}
+    # only the one that returned nothing falls through to mojeek
+    assert calls["mojeek"] == ["miss"]
+    assert "ddg.test" in set(out) and "moj.test" in set(out)
 
 
 

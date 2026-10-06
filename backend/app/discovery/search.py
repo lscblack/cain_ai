@@ -47,10 +47,10 @@ def _tor_proxy() -> str | None:
 _DDG_ONION = "https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/"
 
 
-async def _get_text(url: str) -> str:
+async def _get_text(url: str, *, timeout: float = 20.0) -> str:
     import httpx
 
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": _UA}) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers={"User-Agent": _UA}) as client:
         r = await client.get(url)
         r.raise_for_status()
         return r.text
@@ -68,10 +68,10 @@ async def _ddg_onion_post(query: str) -> str:
         return r.text
 
 
-async def _get_json(url: str) -> dict:
+async def _get_json(url: str, *, timeout: float = 20.0) -> dict:
     import httpx
 
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers={"User-Agent": _UA}) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers={"User-Agent": _UA}) as client:
         r = await client.get(url)
         r.raise_for_status()
         return r.json()
@@ -121,13 +121,20 @@ def _searx_results(data: dict) -> list[str]:
 # ── Keyless engines (async; use module getters, monkeypatched in tests) ──────
 
 async def _eng_duckduckgo(q: str) -> list[str]:
-    # Prefer the Tor onion (no IP rate-limit); fall back to the clearnet endpoint.
+    # Clearnet first (fast ~1s). If it's empty/blocked (rate-limited 202) and Tor is
+    # available, fall back to the DDG onion (slow but rotating exits dodge the block).
+    try:
+        links = _ddg_links(await _get_text(f"https://html.duckduckgo.com/html/?q={quote(q)}", timeout=3.0))
+        if links:
+            return links
+    except Exception:
+        pass  # clearnet blocked/unreachable — fall through to the onion quickly
     if _tor_proxy():
         try:
             return _ddg_links(await _ddg_onion_post(q))
         except Exception:
             pass
-    return _ddg_links(await _get_text(f"https://html.duckduckgo.com/html/?q={quote(q)}"))
+    return []
 
 
 async def _eng_mojeek(q: str) -> list[str]:
@@ -155,7 +162,7 @@ async def _eng_searxng(q: str) -> list[str]:
         inst = tries[(_searx_rr + i) % len(tries)]
         _searx_rr += 1
         try:
-            data = await _get_json(f"{inst}/search?q={quote(q)}&format=json&safesearch=0")
+            data = await _get_json(f"{inst}/search?q={quote(q)}&format=json&safesearch=0", timeout=9.0)
             urls = _searx_results(data)
             if urls:
                 return urls
@@ -164,66 +171,87 @@ async def _eng_searxng(q: str) -> list[str]:
     return []
 
 
-def _active_engines() -> list[tuple[str, Callable[[str], Awaitable[list[str]]]]]:
-    """The engine rotation. A self-hosted SearXNG (open-source, aggregates many
-    engines) is weighted highest when configured."""
-    engines = list(FREE_ENGINES)
-    if get_settings().searxng_url.strip():
-        engines = [("searxng", _eng_searxng), ("searxng", _eng_searxng)] + engines
-    return engines
+def _ordered_engines() -> list[tuple[str, Callable[[str], Awaitable[list[str]]]]]:
+    """Engines in priority order. DuckDuckGo-over-Tor is the reliable workhorse
+    (rotating Tor exits, no IP rate-limit); SearXNG is tried next *only* when a
+    query returns nothing (its upstreams get suspended under load), then Mojeek.
+    Reads FREE_ENGINES by name so tests can override the engine set."""
+    by_name = dict(FREE_ENGINES)
+    has_searx = bool(get_settings().searxng_url.strip())
+    out: list[tuple[str, Callable[[str], Awaitable[list[str]]]]] = []
+    seen: set[str] = set()
+
+    def add(n: str) -> None:
+        if n in by_name and n not in seen and not (n == "searxng" and not has_searx):
+            out.append((n, by_name[n]))
+            seen.add(n)
+
+    add("duckduckgo")
+    add("searxng")
+    add("mojeek")
+    for n, _ in FREE_ENGINES:
+        add(n)
+    return out
 
 
 FREE_ENGINES: list[tuple[str, Callable[[str], Awaitable[list[str]]]]] = [
     ("duckduckgo", _eng_duckduckgo),
-    ("mojeek", _eng_mojeek),
     ("searxng", _eng_searxng),
+    ("mojeek", _eng_mojeek),
 ]
 
 
-async def search_candidates_free(queries: list[str], *, delay: float = 1.0) -> dict[str, str]:
-    """Spread queries round-robin across the keyless engines (concurrently), so each
-    engine handles ~1/N of them and no single one gets rate limited. Merge domains."""
-    engines = _active_engines()  # a self-hosted SearXNG is weighted higher here
-    rotation = [name for name, _ in engines]
-    fn_by_name = {name: fn for name, fn in engines}
-    buckets: dict[str, list[str]] = {name: [] for name in fn_by_name}
-    for i, q in enumerate(queries):
-        buckets[rotation[i % len(rotation)]].append(q)
+async def search_candidates_free(queries: list[str], *, concurrency: int = 12, delay: float = 0.0) -> dict[str, str]:
+    """Per-query engine fallback: each query is tried on the reliable engine first,
+    then the next only if it returned nothing — so a dead/suspended engine never
+    starves a query of results. Workers run concurrently over a shared queue."""
+    engines = _ordered_engines()
+    work: asyncio.Queue = asyncio.Queue()
+    for q in queries:
+        work.put_nowait(q)
 
     found: dict[str, str] = {}
     lock = asyncio.Lock()
+    # circuit breaker: an engine with 0 hits and >=4 misses/errors is 'dead' for
+    # the rest of the run (e.g. SearXNG when all its upstreams are suspended).
+    hits: dict[str, int] = {}
+    miss: dict[str, int] = {}
+    dead: set[str] = set()
 
-    async def run(name: str, fn: Callable[[str], Awaitable[list[str]]], qs: list[str]) -> None:
-        # A few concurrent requests per engine — fine for the Tor onion (no IP
-        # rate-limit) and mild for the clearnet ones. Drop an engine that keeps failing.
-        sem = asyncio.Semaphore(3)
-        fails = {"n": 0}
-        stop = asyncio.Event()
+    def is_dead(name: str) -> bool:
+        return name in dead or (hits.get(name, 0) == 0 and miss.get(name, 0) >= 4)
 
-        async def one(q: str) -> None:
-            if stop.is_set():
+    async def worker() -> None:
+        while True:
+            try:
+                q = work.get_nowait()
+            except asyncio.QueueEmpty:
                 return
-            async with sem:
+            for name, fn in engines:
+                if is_dead(name):
+                    if name not in dead:
+                        dead.add(name)
+                        logger.info("discovery: dropping engine %s (no results)", name)
+                    continue
                 try:
                     urls = await fn(q)
-                except Exception as exc:  # noqa: BLE001
-                    fails["n"] += 1
-                    logger.debug("%s failed: %s", name, exc)
-                    if fails["n"] >= 4:
-                        stop.set()
-                        logger.info("discovery: dropping engine %s (repeated failures)", name)
-                    return
+                except Exception:
+                    miss[name] = miss.get(name, 0) + 1
+                    continue
+                if not urls:
+                    miss[name] = miss.get(name, 0) + 1
+                    continue
+                hits[name] = hits.get(name, 0) + 1
                 async with lock:
                     for u in urls:
                         dom = _domain(u or "")
-                        if dom and not dom.endswith(("duckduckgo.com", "mojeek.com")) and dom not in found:
+                        if dom and not dom.endswith(("duckduckgo.com", "mojeek.com", "google.com")) and dom not in found:
                             found[dom] = f"https://{dom}/"
-                if delay:
-                    await asyncio.sleep(delay)
+                break  # got results for this query — don't hit slower fallbacks
+            if delay:
+                await asyncio.sleep(delay)
 
-        await asyncio.gather(*[one(q) for q in qs])
-
-    await asyncio.gather(*[run(n, fn_by_name[n], buckets[n]) for n in buckets if buckets[n]])
+    await asyncio.gather(*[worker() for _ in range(max(1, concurrency))])
     return found
 
 
