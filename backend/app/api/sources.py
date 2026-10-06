@@ -322,15 +322,48 @@ async def _run_crawl_all(source_ids: list[uuid.UUID], concurrency: int = 2) -> N
 @router.get("/queue")
 async def queue_status(
     operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
     redis: Redis = Depends(get_redis),
 ) -> dict:
-    from app.crawlers.queue import CRAWL_QUEUE
+    """Crawl queue depth + the sources currently crawling and the next ones queued."""
+    from app.crawlers.queue import CRAWL_QUEUE, DISCOVERY_QUEUE
 
     try:
         depth = int(await redis.llen(CRAWL_QUEUE))
+        discovery_depth = int(await redis.llen(DISCOVERY_QUEUE))
+        raw_ids = await redis.lrange(CRAWL_QUEUE, 0, 29)  # peek next 30
     except Exception:
-        depth = 0
-    return {"queued": depth}
+        depth, discovery_depth, raw_ids = 0, 0, []
+
+    # resolve queued ids -> domains (preserve order, count duplicates)
+    order: list[str] = [r.decode() if isinstance(r, bytes) else r for r in raw_ids]
+    queued_next: list[dict] = []
+    if order:
+        try:
+            uniq = {uuid.UUID(x) for x in set(order)}
+            rows = (await session.execute(select(Source.id, Source.domain).where(Source.id.in_(uniq)))).all()
+            dom = {str(i): d for i, d in rows}
+            seen: set[str] = set()
+            for sid in order:
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                queued_next.append({"id": sid, "domain": dom.get(sid, sid)})
+        except Exception:
+            pass
+
+    crawling = (
+        await session.execute(
+            select(Source.id, Source.domain, Source.last_crawled_at)
+            .where(Source.status == "crawling").limit(20)
+        )
+    ).all()
+    return {
+        "queued": depth,
+        "discovery_queued": discovery_depth,
+        "crawling": [{"id": str(i), "domain": d, "since": ts} for i, d, ts in crawling],
+        "queued_next": queued_next,
+    }
 
 
 @router.post("/queue/clear")

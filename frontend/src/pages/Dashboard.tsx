@@ -13,6 +13,12 @@ interface Stats {
   services: Record<string, boolean>;
   counts: Record<string, number>;
 }
+interface QueueDetail {
+  queued: number;
+  discovery_queued: number;
+  crawling: { id: string; domain: string; since: string | null }[];
+  queued_next: { id: string; domain: string }[];
+}
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -20,6 +26,8 @@ export function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [cases, setCases] = useState<InvestigationDetail[]>([]);
   const [queued, setQueued] = useState<number | null>(null);
+  const [queueDetail, setQueueDetail] = useState<QueueDetail | null>(null);
+  const [showQueue, setShowQueue] = useState(false);
 
   async function clearQueue() {
     if (!confirm("Clear the crawl queue and reset stuck sources?")) return;
@@ -27,7 +35,7 @@ export function Dashboard() {
     if (r) { alert(`Cleared ${r.cleared} queued crawl job(s).`); loadQueue(); }
   }
   function loadQueue() {
-    api.get<{ queued: number }>("/sources/queue").then((r) => setQueued(r.queued)).catch(() => setQueued(null));
+    api.get<QueueDetail>("/sources/queue").then((r) => { setQueued(r.queued); setQueueDetail(r); }).catch(() => setQueued(null));
   }
 
   useEffect(() => {
@@ -91,20 +99,52 @@ export function Dashboard() {
       </div>
 
       {/* crawl queue control */}
-      <div className="mb-6 flex flex-wrap items-center gap-3 border border-line bg-panel/95 px-4 py-3 font-mono text-xs">
-        <span className="kai-metadata uppercase tracking-wider">Crawl queue</span>
-        <span className="text-lg font-semibold" style={{ color: queued ? "var(--kai-warn)" : "var(--kai-verified)" }}>
-          {queued ?? "—"}
-        </span>
-        <span className="text-muted">job(s) pending</span>
-        <div className="ml-auto flex gap-2">
-          <Link to="/sources" className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink">Manage sources</Link>
-          <Link to="/discover" className="border px-3 py-1.5 uppercase tracking-wider transition"
-            style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Discover new sources</Link>
-          <Link to="/investigate" className="border px-3 py-1.5 uppercase tracking-wider transition"
-            style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Investigate names</Link>
-          <button onClick={clearQueue} disabled={!queued} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink disabled:opacity-40">Clear queue</button>
+      <div className="mb-6 border border-line bg-panel/95 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+          <span className="kai-metadata uppercase tracking-wider">Crawl queue</span>
+          <span className="text-lg font-semibold" style={{ color: queued ? "var(--kai-warn)" : "var(--kai-verified)" }}>
+            {queued ?? "—"}
+          </span>
+          <span className="text-muted">pending{(queueDetail?.crawling.length ?? 0) > 0 ? ` · ${queueDetail!.crawling.length} crawling` : ""}{(queueDetail?.discovery_queued ?? 0) > 0 ? ` · ${queueDetail!.discovery_queued} discovery` : ""}</span>
+          <button onClick={() => setShowQueue((v) => !v)} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink">
+            {showQueue ? "Hide queue" : "View queue"}
+          </button>
+          <div className="ml-auto flex gap-2">
+            <Link to="/sources" className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink">Manage sources</Link>
+            <Link to="/discover" className="border px-3 py-1.5 uppercase tracking-wider transition"
+              style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Discover new sources</Link>
+            <Link to="/investigate" className="border px-3 py-1.5 uppercase tracking-wider transition"
+              style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Investigate names</Link>
+            <button onClick={clearQueue} disabled={!queued} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink disabled:opacity-40">Clear queue</button>
+          </div>
         </div>
+        {showQueue && (
+          <div className="grid gap-4 border-t border-line p-4 sm:grid-cols-2">
+            <div>
+              <div className="kai-metadata mb-2 uppercase">Currently crawling ({queueDetail?.crawling.length ?? 0})</div>
+              {(queueDetail?.crawling.length ?? 0) === 0 ? <div className="text-muted">— idle —</div> : (
+                <div className="space-y-1">
+                  {queueDetail!.crawling.map((s) => (
+                    <div key={s.id} className="flex items-center gap-2 truncate">
+                      <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" style={{ background: "var(--kai-warn)" }} />
+                      <span className="truncate text-ink">{s.domain}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="kai-metadata mb-2 uppercase">Next up ({queued ?? 0} queued, showing {queueDetail?.queued_next.length ?? 0})</div>
+              {(queueDetail?.queued_next.length ?? 0) === 0 ? <div className="text-muted">— empty —</div> : (
+                <div className="max-h-56 space-y-1 overflow-auto">
+                  {queueDetail!.queued_next.map((s, i) => (
+                    <div key={s.id + i} className="truncate text-muted">{i + 1}. {s.domain}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* map shortcut */}
