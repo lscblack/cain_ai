@@ -17,13 +17,17 @@ class DetectedFace:
     quality: float  # 0..1 composite of detection score and face size
     extra: dict = field(default_factory=dict)
 
-    def to_dict(self, *, include_embedding: bool = False) -> dict:
+    def to_dict(self, *, include_embedding: bool = False, include_extra: bool = False) -> dict:
         d = {
             "bbox": self.bbox,
             "det_score": round(self.det_score, 4),
             "quality": round(self.quality, 4),
             "embedding_dim": len(self.embedding),
         }
+        if include_extra:
+            # Only the known demographic attributes from the genderage model.
+            d["age"] = (self.extra or {}).get("age")
+            d["sex"] = (self.extra or {}).get("sex")
         if include_embedding:
             d["embedding"] = self.embedding
         return d

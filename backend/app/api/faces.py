@@ -60,6 +60,34 @@ async def _read_image(file: UploadFile) -> bytes:
     return data
 
 
+def _match_record(rec: Face, score: float) -> dict:
+    """Build the public match dict for one indexed face at a given similarity."""
+    band = band_for_similarity(score)
+    extra = rec.extra or {}
+    return {
+        "face_id": str(rec.id),
+        "investigation_id": str(rec.investigation_id) if rec.investigation_id else None,
+        "source_url": rec.source_url,
+        "image_hash": rec.image_hash,
+        "bbox": rec.bbox,
+        "quality": rec.quality,
+        "similarity": round(score, 4),
+        "similarity_pct": round(score * 100, 1),
+        "band": band.value if band else "no_match",
+        "crop_url": f"/intelligence/face/crop/{rec.id}" if has_crop(str(rec.id)) else None,
+        "page_title": extra.get("page_title"),
+        "caption": extra.get("caption"),
+        "names": extra.get("names") or [],
+        "emails": extra.get("emails") or [],
+        "phones": extra.get("phones") or [],
+        "usernames": extra.get("usernames") or [],
+        "image_url": extra.get("image_url"),
+        "age": extra.get("age"),
+        "sex": extra.get("sex"),
+        "description": describe_face(rec.extra, rec.source_url),
+    }
+
+
 @router.get("/status")
 async def face_status(
     operator: User = Depends(get_current_operator),
@@ -121,7 +149,7 @@ async def detect(
     return {
         "image_hash": image_hash,
         "faces_detected": len(faces),
-        "faces": [f.to_dict() for f in faces],
+        "faces": [f.to_dict(include_extra=True) for f in faces],
         "stored_face_ids": stored_ids,
     }
 
@@ -159,6 +187,7 @@ async def search(
     file: UploadFile = File(...),
     investigation_id: uuid.UUID | None = Form(default=None),
     top_k: int = Form(default=20),
+    face_index: int = Form(default=0),
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
     engine: FaceEngine = Depends(engine_dep),
@@ -167,49 +196,83 @@ async def search(
     faces = await detect_and_embed_async(engine, await _read_image(file))
     if not faces:
         return {"query_face": None, "matches": [], "detail": "no_face_detected_in_query"}
+    if face_index < 0 or face_index >= len(faces):
+        return {
+            "query_face": None,
+            "matches": [],
+            "faces_detected": len(faces),
+            "detail": "face_index_out_of_range",
+        }
 
-    query = faces[0].embedding
+    chosen = faces[face_index]
     corpus = await FaceRepository(session).list_with_embeddings(investigation_id=investigation_id)
     by_id = {str(rec.id): rec for rec in corpus}
 
     ranked = rank_by_cosine(
-        query, [(str(rec.id), rec.embedding) for rec in corpus], floor=POSSIBLE
+        chosen.embedding, [(str(rec.id), rec.embedding) for rec in corpus], floor=POSSIBLE
     )
-    scored = []
-    for face_id, score in ranked:
-        rec = by_id[face_id]
-        band = band_for_similarity(score)
-        scored.append(
-            {
-                "face_id": face_id,
-                "investigation_id": str(rec.investigation_id) if rec.investigation_id else None,
-                "source_url": rec.source_url,
-                "image_hash": rec.image_hash,
-                "bbox": rec.bbox,
-                "quality": rec.quality,
-                "similarity": round(score, 4),
-                "similarity_pct": round(score * 100, 1),
-                "band": band.value if band else "no_match",
-                "crop_url": f"/intelligence/face/crop/{face_id}" if has_crop(face_id) else None,
-                "page_title": (rec.extra or {}).get("page_title"),
-                "caption": (rec.extra or {}).get("caption"),
-                "names": (rec.extra or {}).get("names") or [],
-                "emails": (rec.extra or {}).get("emails") or [],
-                "phones": (rec.extra or {}).get("phones") or [],
-                "usernames": (rec.extra or {}).get("usernames") or [],
-                "image_url": (rec.extra or {}).get("image_url"),
-                "age": (rec.extra or {}).get("age"),
-                "sex": (rec.extra or {}).get("sex"),
-                "description": describe_face(rec.extra, rec.source_url),
-            }
-        )
+    scored = [_match_record(by_id[face_id], score) for face_id, score in ranked]
     return {
-        "query_face": faces[0].to_dict(),
+        "query_face": chosen.to_dict(include_extra=True),
+        "faces_detected": len(faces),
         "indexed_faces": len(corpus),
         "matches": scored[: max(1, min(top_k, 100))],
         "note": (
             "Ranked by facial similarity to the query. A high score is a potential match "
             "to observe, never a confirmed identity."
+        ),
+    }
+
+
+@router.post("/frame")
+async def frame(
+    file: UploadFile = File(...),
+    investigation_id: uuid.UUID | None = Form(default=None),
+    match: bool = Form(default=True),
+    top_k: int = Form(default=3),
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+    engine: FaceEngine = Depends(engine_dep),
+) -> dict:
+    """Live single-frame analysis for the webcam view.
+
+    Detects every face in the frame and returns per-face bbox/age/sex/quality.
+    When ``match`` is set, each face's best hedged gallery match is attached.
+    The frame itself is processed in memory and never persisted — only the
+    explicit capture flow (``/detect`` with an investigation_id) stores faces.
+    """
+    _require_engine(engine)
+    faces = await detect_and_embed_async(engine, await _read_image(file))
+
+    corpus: list[Face] = []
+    by_id: dict[str, Face] = {}
+    if match and faces:
+        corpus = await FaceRepository(session).list_with_embeddings(
+            investigation_id=investigation_id
+        )
+        by_id = {str(rec.id): rec for rec in corpus}
+
+    out = []
+    for f in faces:
+        entry = f.to_dict(include_extra=True)
+        best = None
+        if match and corpus:
+            ranked = rank_by_cosine(
+                f.embedding, [(str(rec.id), rec.embedding) for rec in corpus], floor=POSSIBLE
+            )
+            if ranked:
+                top_id, top_score = ranked[0]
+                best = _match_record(by_id[top_id], top_score)
+        entry["match"] = best
+        out.append(entry)
+
+    return {
+        "faces_detected": len(faces),
+        "indexed_faces": len(corpus),
+        "faces": out,
+        "note": (
+            "Live detection. Matches are potential, never confirmed identity. "
+            "Frames are not stored."
         ),
     }
 
@@ -224,6 +287,7 @@ async def _search_stream_response(
     session: AsyncSession,
     engine: FaceEngine,
     investigation_id: uuid.UUID | None = None,
+    face_index: int = 0,
 ) -> StreamingResponse:
     async def gen() -> AsyncGenerator[str, None]:
         yield _sse("stage", {"name": "image_received", "bytes": len(data)})
@@ -236,7 +300,14 @@ async def _search_stream_response(
         if not faces:
             yield _sse("result", {"query_face": None, "matches": [], "detail": "no_face_detected"})
             return
-        query = faces[0].embedding
+        if face_index < 0 or face_index >= len(faces):
+            yield _sse(
+                "result",
+                {"query_face": None, "matches": [], "detail": "face_index_out_of_range"},
+            )
+            return
+        chosen = faces[face_index]
+        query = chosen.embedding
         yield _sse("stage", {"name": "embedding_ready", "dim": len(query)})
 
         corpus = await FaceRepository(session).list_with_embeddings(
@@ -248,29 +319,7 @@ async def _search_stream_response(
         for i, rec in enumerate(corpus):
             score = cosine_similarity(query, rec.embedding)
             if is_match(score):
-                band = band_for_similarity(score)
-                scored.append(
-                    {
-                        "face_id": str(rec.id),
-                        "investigation_id": str(rec.investigation_id) if rec.investigation_id else None,
-                        "source_url": rec.source_url,
-                        "image_hash": rec.image_hash,
-                        "similarity": round(score, 4),
-                        "similarity_pct": round(score * 100, 1),
-                        "band": band.value if band else "no_match",
-                        "crop_url": f"/intelligence/face/crop/{rec.id}" if has_crop(str(rec.id)) else None,
-                        "page_title": (rec.extra or {}).get("page_title"),
-                        "caption": (rec.extra or {}).get("caption"),
-                        "names": (rec.extra or {}).get("names") or [],
-                        "emails": (rec.extra or {}).get("emails") or [],
-                        "phones": (rec.extra or {}).get("phones") or [],
-                        "usernames": (rec.extra or {}).get("usernames") or [],
-                        "image_url": (rec.extra or {}).get("image_url"),
-                        "age": (rec.extra or {}).get("age"),
-                        "sex": (rec.extra or {}).get("sex"),
-                        "description": describe_face(rec.extra, rec.source_url),
-                    }
-                )
+                scored.append(_match_record(rec, score))
             if corpus and i % 50 == 0:
                 yield _sse("progress", {"scanned": i + 1, "total": len(corpus)})
         yield _sse("stage", {"name": "ranking", "candidates": len(scored)})
@@ -278,7 +327,8 @@ async def _search_stream_response(
         yield _sse(
             "result",
             {
-                "query_face": faces[0].to_dict(),
+                "query_face": chosen.to_dict(include_extra=True),
+                "faces_detected": len(faces),
                 "indexed_faces": len(corpus),
                 "matches": scored[: max(1, min(top_k, 100))],
             },
@@ -292,6 +342,7 @@ async def search_stream(
     file: UploadFile = File(...),
     investigation_id: uuid.UUID | None = Form(default=None),
     top_k: int = Form(default=20),
+    face_index: int = Form(default=0),
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
     engine: FaceEngine = Depends(engine_dep),
@@ -300,7 +351,7 @@ async def search_stream(
     if not engine.available():
         raise HTTPException(status_code=503, detail="face_engine_unavailable")
     return await _search_stream_response(
-        await _read_image(file), top_k, session, engine, investigation_id
+        await _read_image(file), top_k, session, engine, investigation_id, face_index
     )
 
 

@@ -1,3 +1,4 @@
+import io
 import pathlib
 
 import pytest
@@ -11,6 +12,23 @@ FACE2 = FIXTURES / "face2.jpg"
 
 engine_available = get_face_engine().available()
 requires_engine = pytest.mark.skipif(not engine_available, reason="face engine/model unavailable")
+
+
+def _two_face_jpeg() -> bytes:
+    """Compose face1 and face2 side by side into a single image with two faces."""
+    from PIL import Image
+
+    a = Image.open(FACE1).convert("RGB")
+    b = Image.open(FACE2).convert("RGB")
+    h = max(a.height, b.height)
+    a = a.resize((int(a.width * h / a.height), h))
+    b = b.resize((int(b.width * h / b.height), h))
+    canvas = Image.new("RGB", (a.width + b.width, h), (255, 255, 255))
+    canvas.paste(a, (0, 0))
+    canvas.paste(b, (a.width, 0))
+    buf = io.BytesIO()
+    canvas.save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 @pytest_asyncio.fixture
@@ -46,6 +64,132 @@ async def test_detect_real_face(client, auth_headers):
     body = r.json()
     assert body["faces_detected"] >= 1
     assert body["faces"][0]["embedding_dim"] == 512
+
+
+def test_detected_face_to_dict_extra():
+    """to_dict surfaces age/sex only when include_extra is requested."""
+    from app.intelligence.face.engine import DetectedFace
+
+    f = DetectedFace(
+        bbox=[1, 2, 3, 4], det_score=0.9, embedding=[0.0] * 512, quality=0.8,
+        extra={"age": 42, "sex": "M", "ignored": "x"},
+    )
+    base = f.to_dict()
+    assert "age" not in base and "sex" not in base
+    full = f.to_dict(include_extra=True)
+    assert full["age"] == 42
+    assert full["sex"] == "M"
+    assert "ignored" not in full  # only known demographic fields are exposed
+
+
+@requires_engine
+async def test_detect_returns_age_sex(client, auth_headers):
+    with open(FACE1, "rb") as f:
+        r = await client.post(
+            "/intelligence/face/detect",
+            files={"file": ("face1.jpg", f, "image/jpeg")},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    face = r.json()["faces"][0]
+    assert "age" in face
+    assert "sex" in face
+
+
+@requires_engine
+async def test_detect_multiple_faces(client, auth_headers):
+    r = await client.post(
+        "/intelligence/face/detect",
+        files={"file": ("two.jpg", _two_face_jpeg(), "image/jpeg")},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["faces_detected"] >= 2
+
+
+@requires_engine
+async def test_search_face_index_selects_face(client, auth_headers):
+    case = (await client.post("/investigations", json={"name": "FI"}, headers=auth_headers)).json()
+    # index only face1 (Lincoln)
+    with open(FACE1, "rb") as f:
+        await client.post(
+            "/intelligence/face/detect",
+            files={"file": ("face1.jpg", f, "image/jpeg")},
+            data={"investigation_id": case["id"]},
+            headers=auth_headers,
+        )
+    two = _two_face_jpeg()
+
+    def best_sim(body):
+        m = body.get("matches") or []
+        return m[0]["similarity"] if m else 0.0
+
+    r0 = await client.post(
+        "/intelligence/face/search",
+        files={"file": ("q.jpg", two, "image/jpeg")},
+        data={"face_index": 0},
+        headers=auth_headers,
+    )
+    r1 = await client.post(
+        "/intelligence/face/search",
+        files={"file": ("q.jpg", two, "image/jpeg")},
+        data={"face_index": 1},
+        headers=auth_headers,
+    )
+    assert r0.status_code == 200 and r1.status_code == 200
+    # the two indices address different faces, exactly one of which is Lincoln
+    assert r0.json()["query_face"]["bbox"] != r1.json()["query_face"]["bbox"]
+    sims = [best_sim(r0.json()), best_sim(r1.json())]
+    assert max(sims) > 0.9  # Lincoln side strongly matches the indexed face
+    assert min(sims) < 0.5  # the other side does not
+
+
+@requires_engine
+async def test_search_face_index_out_of_range(client, auth_headers):
+    with open(FACE1, "rb") as f:
+        r = await client.post(
+            "/intelligence/face/search",
+            files={"file": ("q.jpg", f, "image/jpeg")},
+            data={"face_index": 9},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    assert r.json()["detail"] == "face_index_out_of_range"
+    assert r.json()["matches"] == []
+
+
+@requires_engine
+async def test_frame_returns_details_and_is_ephemeral(client, auth_headers):
+    case = (await client.post("/investigations", json={"name": "Live"}, headers=auth_headers)).json()
+    with open(FACE1, "rb") as f:
+        await client.post(
+            "/intelligence/face/detect",
+            files={"file": ("face1.jpg", f, "image/jpeg")},
+            data={"investigation_id": case["id"]},
+            headers=auth_headers,
+        )
+    before = (await client.get("/intelligence/face/index-list", headers=auth_headers)).json()["total"]
+
+    with open(FACE1, "rb") as f:
+        r = await client.post(
+            "/intelligence/face/frame",
+            files={"file": ("frame.jpg", f, "image/jpeg")},
+            data={"match": "true"},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["faces_detected"] >= 1
+    face = body["faces"][0]
+    for key in ("bbox", "age", "sex", "quality", "det_score"):
+        assert key in face
+    # match ran against the gallery and found the indexed Lincoln face
+    assert face["match"] is not None
+    assert face["match"]["similarity"] > 0.9
+
+    # frame processing persists nothing
+    after = (await client.get("/intelligence/face/index-list", headers=auth_headers)).json()["total"]
+    assert after == before
 
 
 @requires_engine
