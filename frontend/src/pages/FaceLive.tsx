@@ -3,6 +3,7 @@ import { Camera, CameraOff, FolderPlus, ScanSearch, Video, X } from "lucide-reac
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
+import { ScanningStrip } from "@/components/ScanningStrip";
 import { cropFace, frameToBlob, type Bbox } from "@/lib/faceCrop";
 import { getFaceDetector, detectBoxes, disposeFaceDetector, type LiveBox } from "@/lib/faceDetector";
 import { investigationsApi } from "@/lib/investigations";
@@ -81,6 +82,8 @@ export function FaceLive() {
   const [faceTrackIds, setFaceTrackIds] = useState<number[]>([]);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
   const [showResults, setShowResults] = useState(false);
+  const [scanCrops, setScanCrops] = useState<string[]>([]);
+  const [liveBoxCount, setLiveBoxCount] = useState(0);
   const [doMatch, setDoMatch] = useState(true);
   const [cases, setCases] = useState<InvestigationDetail[]>([]);
   const [caseId, setCaseId] = useState("");
@@ -105,6 +108,7 @@ export function FaceLive() {
   const lastFrameRef = useRef<{ canvas: HTMLCanvasElement; scale: number } | null>(null);
   const facesRef = useRef<FrameFace[]>([]);
   const runningRef = useRef(false);
+  const lastBoxCountRef = useRef(0);
   const tracksRef = useRef<Track[]>([]);
   const trackCounter = useRef(0);
   const autoSearchRef = useRef(true);
@@ -118,6 +122,11 @@ export function FaceLive() {
       .get<{ available: boolean }>("/intelligence/face/status")
       .then((s) => setEngineOnline(s.available))
       .catch(() => setEngineOnline(false));
+    // Indexed-face crops to animate the "scanning the index" strip.
+    api
+      .get<{ samples: { crop_url: string }[] }>("/intelligence/face/index-sample?limit=48")
+      .then((s) => setScanCrops(s.samples.map((x) => x.crop_url)))
+      .catch(() => setScanCrops([]));
   }, []);
 
   // Treat a detected face as an uploaded image and run the SAME full 1:N search
@@ -319,6 +328,11 @@ export function FaceLive() {
           }));
         }
 
+        if (boxes.length !== lastBoxCountRef.current) {
+          lastBoxCountRef.current = boxes.length;
+          setLiveBoxCount(boxes.length);
+        }
+
         const s = lastFrameRef.current?.scale ?? 1;
         for (const b of boxes) {
           // Attach the nearest backend match (if any) for a live on-box label.
@@ -380,6 +394,8 @@ export function FaceLive() {
     setFaces([]);
     setThumbs([]);
     setFaceCount(0);
+    lastBoxCountRef.current = 0;
+    setLiveBoxCount(0);
     tracksRef.current = [];
     setSearchMap({});
     setFaceTrackIds([]);
@@ -402,16 +418,16 @@ export function FaceLive() {
       await video.play();
       runningRef.current = true;
       setRunning(true);
-
-      // Warm up the in-browser detector; fall back to backend boxes if it fails.
       setDetectorMode("loading");
-      try {
-        await getFaceDetector();
-        setDetectorMode("browser");
-      } catch {
-        setDetectorMode("backend");
-      }
+
+      // Start the loop immediately so the backend scan (/frame) fires right away
+      // — don't wait for the in-browser model to finish downloading. Warm the
+      // detector up in parallel; until it's ready we draw boxes from /frame.
+      lastPostRef.current = 0;
       rafRef.current = requestAnimationFrame(() => void loop());
+      getFaceDetector()
+        .then(() => setDetectorMode("browser"))
+        .catch(() => setDetectorMode("backend"));
     } catch (e: any) {
       if (e?.name === "NotAllowedError") setError("Camera permission denied.");
       else if (e?.name === "NotFoundError") setError("No camera found on this device.");
@@ -624,9 +640,15 @@ export function FaceLive() {
             )}
           </div>
           {faces.length === 0 ? (
-            <div className="text-sm text-muted">
-              {running ? "No face detected yet." : "Start the camera to detect faces live."}
-            </div>
+            !running ? (
+              <div className="text-sm text-muted">Start the camera to detect faces live.</div>
+            ) : liveBoxCount > 0 || diag.analyzing ? (
+              <div className="rounded-lg border border-line bg-panel p-3">
+                <ScanningStrip crops={scanCrops} label="face detected — analyzing…" />
+              </div>
+            ) : (
+              <div className="text-sm text-muted">No face detected yet.</div>
+            )
           ) : (
             <div className="space-y-2">
               {faces.map((f, i) => {
@@ -694,8 +716,8 @@ export function FaceLive() {
 
                     {/* Full index-search results (treats the face as an upload) */}
                     {ss?.loading && (
-                      <div className="kai-metadata mt-2 border-t border-line pt-2">
-                        searching local index…
+                      <div className="mt-2 border-t border-line pt-2">
+                        <ScanningStrip crops={scanCrops} label="searching local index…" />
                       </div>
                     )}
                     {ss?.error && (
@@ -776,7 +798,9 @@ export function FaceLive() {
               </button>
             </div>
             {(() => {
-              const matches = searchMap[activeSearchId].matches ?? [];
+              const active = searchMap[activeSearchId];
+              if (active.loading) return <ScanningStrip crops={scanCrops} size={44} />;
+              const matches = active.matches ?? [];
               if (matches.length === 0)
                 return <div className="text-sm text-muted">No match found in the local index.</div>;
               return (
