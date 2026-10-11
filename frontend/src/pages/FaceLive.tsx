@@ -44,6 +44,8 @@ export function FaceLive() {
   const [error, setError] = useState<string | null>(null);
   const [detectorMode, setDetectorMode] = useState<"loading" | "browser" | "backend">("loading");
   const [faces, setFaces] = useState<FrameFace[]>([]);
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  const [indexedCount, setIndexedCount] = useState<number | null>(null);
   const [faceCount, setFaceCount] = useState(0);
   const [doMatch, setDoMatch] = useState(true);
   const [cases, setCases] = useState<InvestigationDetail[]>([]);
@@ -94,13 +96,37 @@ export function FaceLive() {
         fd.append("file", new File([grab.blob], "frame.jpg", { type: "image/jpeg" }));
         fd.append("match", String(doMatch));
         if (caseId) fd.append("investigation_id", caseId);
-        const r = await api.postForm<{ faces: FrameFace[]; faces_detected: number }>(
-          "/intelligence/face/frame",
-          fd,
-        );
-        facesRef.current = r.faces ?? [];
-        setFaces(r.faces ?? []);
+        const r = await api.postForm<{
+          faces: FrameFace[];
+          faces_detected: number;
+          indexed_faces: number;
+        }>("/intelligence/face/frame", fd);
+        const faces = r.faces ?? [];
+        facesRef.current = faces;
+        setFaces(faces);
         setFaceCount(r.faces_detected ?? 0);
+        setIndexedCount(r.indexed_faces ?? 0);
+        // Padded crops so the thumbnail shows the whole head, not InsightFace's
+        // tight landmark box.
+        const cv = lastFrameRef.current?.canvas;
+        if (cv) {
+          const made = await Promise.all(
+            faces.map(async (f) => {
+              try {
+                const c = await cropFace(cv, f.bbox, {
+                  pad: 0.45,
+                  maxSize: 160,
+                  naturalWidth: cv.width,
+                  naturalHeight: cv.height,
+                });
+                return c.dataUrl;
+              } catch {
+                return "";
+              }
+            }),
+          );
+          setThumbs(made);
+        }
         setDiag({
           analyzing: false,
           lastCount: r.faces_detected ?? 0,
@@ -215,6 +241,7 @@ export function FaceLive() {
     lastFrameRef.current = null;
     facesRef.current = [];
     setFaces([]);
+    setThumbs([]);
     setFaceCount(0);
   }, []);
 
@@ -271,6 +298,7 @@ export function FaceLive() {
     if (!caseId || !frame) return;
     try {
       const c = await cropFace(frame.canvas, face.bbox, {
+        pad: 0.5,
         naturalWidth: frame.canvas.width,
         naturalHeight: frame.canvas.height,
         maxSize: 512,
@@ -437,7 +465,14 @@ export function FaceLive() {
 
         {/* Live per-face results */}
         <div>
-          <div className="kai-metadata mb-2 uppercase">Faces in view</div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="kai-metadata uppercase">Faces in view</span>
+            {doMatch && indexedCount !== null && (
+              <span className="kai-metadata" title="Every detected face is compared against the local face index each scan">
+                {diag.analyzing ? "scanning…" : `scanning ${indexedCount} indexed`}
+              </span>
+            )}
+          </div>
           {faces.length === 0 ? (
             <div className="text-sm text-muted">
               {running ? "No face detected yet." : "Start the camera to detect faces live."}
@@ -445,26 +480,10 @@ export function FaceLive() {
           ) : (
             <div className="space-y-2">
               {faces.map((f, i) => {
-                const frame = lastFrameRef.current;
-                let thumb: string | null = null;
-                if (frame) {
-                  // crop is cheap and synchronous enough for a small list
-                  try {
-                    const canvas = document.createElement("canvas");
-                    const [x1, y1, x2, y2] = f.bbox;
-                    const w = Math.max(1, x2 - x1);
-                    const h = Math.max(1, y2 - y1);
-                    canvas.width = w;
-                    canvas.height = h;
-                    canvas.getContext("2d")?.drawImage(frame.canvas, x1, y1, w, h, 0, 0, w, h);
-                    thumb = canvas.toDataURL("image/jpeg", 0.85);
-                  } catch {
-                    thumb = null;
-                  }
-                }
+                const thumb = thumbs[i] || null;
                 return (
                   <div key={i} className="flex gap-3 rounded-lg border border-line bg-panel p-2">
-                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded border border-line">
+                    <div className="h-24 w-24 shrink-0 overflow-hidden rounded border border-line">
                       {thumb ? (
                         <img src={thumb} alt={`face ${i + 1}`} className="h-full w-full object-cover" />
                       ) : (
@@ -490,7 +509,12 @@ export function FaceLive() {
                           )}
                         </div>
                       ) : (
-                        doMatch && <div className="kai-metadata mt-1">no local match</div>
+                        doMatch && (
+                          <div className="kai-metadata mt-1">
+                            no match among {indexedCount ?? 0} indexed face
+                            {indexedCount === 1 ? "" : "s"}
+                          </div>
+                        )
                       )}
                       <button
                         onClick={() => captureFace(f)}
