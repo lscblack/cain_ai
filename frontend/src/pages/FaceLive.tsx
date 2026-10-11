@@ -50,6 +50,13 @@ export function FaceLive() {
   const [caseId, setCaseId] = useState("");
   const [captured, setCaptured] = useState<string | null>(null);
   const [engineOnline, setEngineOnline] = useState<boolean | null>(null);
+  // Diagnostics for the backend enrichment boundary (POST /frame).
+  const [diag, setDiag] = useState<{
+    analyzing: boolean;
+    lastCount: number | null;
+    lastMs: number | null;
+    lastError: string | null;
+  }>({ analyzing: false, lastCount: null, lastMs: null, lastError: null });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -74,9 +81,14 @@ export function FaceLive() {
   const postFrame = useCallback(
     async (video: HTMLVideoElement) => {
       inFlightRef.current = true;
+      setDiag((d) => ({ ...d, analyzing: true }));
+      const t0 = performance.now();
       try {
         const grab = await frameToBlob(video, 640, 0.8);
-        if (!grab) return;
+        if (!grab) {
+          setDiag((d) => ({ ...d, analyzing: false, lastError: "could not capture video frame" }));
+          return;
+        }
         lastFrameRef.current = { canvas: grab.canvas, scale: grab.scale };
         const fd = new FormData();
         fd.append("file", new File([grab.blob], "frame.jpg", { type: "image/jpeg" }));
@@ -89,8 +101,19 @@ export function FaceLive() {
         facesRef.current = r.faces ?? [];
         setFaces(r.faces ?? []);
         setFaceCount(r.faces_detected ?? 0);
-      } catch {
-        /* a dropped frame is fine; the next tick retries */
+        setDiag({
+          analyzing: false,
+          lastCount: r.faces_detected ?? 0,
+          lastMs: Math.round(performance.now() - t0),
+          lastError: null,
+        });
+      } catch (e: any) {
+        setDiag((d) => ({
+          ...d,
+          analyzing: false,
+          lastMs: Math.round(performance.now() - t0),
+          lastError: e?.detail ? String(e.detail) : e?.message ? String(e.message) : "frame request failed",
+        }));
       } finally {
         inFlightRef.current = false;
       }
@@ -336,10 +359,57 @@ export function FaceLive() {
               <input type="checkbox" checked={doMatch} onChange={(e) => setDoMatch(e.target.checked)} />
               Match against local index
             </label>
+            {running && (
+              <button
+                onClick={() => {
+                  const v = videoRef.current;
+                  if (v && !inFlightRef.current) {
+                    lastPostRef.current = performance.now();
+                    void postFrame(v);
+                  }
+                }}
+                className="rounded-md border border-line bg-panel px-3 py-2 text-sm hover:bg-panel-2"
+              >
+                Analyze now
+              </button>
+            )}
             {error && (
               <span className="text-xs" style={{ color: "var(--kai-accent)" }}>
                 {error}
               </span>
+            )}
+          </div>
+
+          {/* Diagnostics for the detect → embed → match pipeline */}
+          <div
+            className="rounded-md border px-3 py-2 font-mono text-[11px] leading-relaxed"
+            style={{ borderColor: "var(--kai-border)", color: "var(--kai-muted)" }}
+          >
+            <div>
+              engine:{" "}
+              <span style={{ color: engineOnline ? "var(--kai-verified)" : "var(--kai-accent)" }}>
+                {engineOnline === null ? "checking…" : engineOnline ? "online" : "OFFLINE"}
+              </span>
+              {"  ·  "}in-browser detector:{" "}
+              <span style={{ color: detectorMode === "browser" ? "var(--kai-verified)" : "var(--kai-warn)" }}>
+                {detectorMode}
+              </span>
+            </div>
+            <div>
+              last /frame:{" "}
+              {diag.analyzing
+                ? "analyzing…"
+                : diag.lastCount === null
+                  ? "— (not run yet)"
+                  : `${diag.lastCount} face(s) in ${diag.lastMs}ms`}
+            </div>
+            {diag.lastError && (
+              <div style={{ color: "var(--kai-accent)" }}>error: {diag.lastError}</div>
+            )}
+            {!engineOnline && engineOnline !== null && (
+              <div style={{ color: "var(--kai-accent)" }}>
+                Backend face engine is offline — age/sex/identity are disabled; only boxes are drawn.
+              </div>
             )}
           </div>
 
