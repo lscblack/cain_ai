@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, CameraOff, FolderPlus, Video } from "lucide-react";
+import { Camera, CameraOff, FolderPlus, ScanSearch, Video, X } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { AuthImg } from "@/components/AuthImg";
 import { cropFace, frameToBlob, type Bbox } from "@/lib/faceCrop";
 import { getFaceDetector, detectBoxes, disposeFaceDetector, type LiveBox } from "@/lib/faceDetector";
 import { investigationsApi } from "@/lib/investigations";
@@ -26,6 +27,34 @@ interface FrameFace {
   match: FrameMatch | null;
 }
 
+// Full ranked match from the same endpoint the upload search uses (/search).
+interface SearchMatchFull {
+  face_id: string;
+  similarity_pct: number;
+  band: string;
+  crop_url?: string | null;
+  names?: string[];
+  page_title?: string | null;
+  source_url?: string | null;
+  description?: string | null;
+  age?: number | null;
+  sex?: string | null;
+}
+interface FaceSearchState {
+  loading?: boolean;
+  matches?: SearchMatchFull[];
+  thumb?: string;
+  error?: string;
+}
+// A face tracked across frames so the full search runs once per new face.
+interface Track {
+  id: number;
+  cx: number;
+  cy: number;
+  frames: number;
+  searched: boolean;
+}
+
 const BAND_LABEL: Record<string, string> = {
   potential_match: "POTENTIAL MATCH",
   strong_similarity: "STRONG SIMILARITY",
@@ -47,6 +76,11 @@ export function FaceLive() {
   const [thumbs, setThumbs] = useState<string[]>([]);
   const [indexedCount, setIndexedCount] = useState<number | null>(null);
   const [faceCount, setFaceCount] = useState(0);
+  const [autoSearch, setAutoSearch] = useState(true);
+  const [searchMap, setSearchMap] = useState<Record<number, FaceSearchState>>({});
+  const [faceTrackIds, setFaceTrackIds] = useState<number[]>([]);
+  const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
+  const [showResults, setShowResults] = useState(false);
   const [doMatch, setDoMatch] = useState(true);
   const [cases, setCases] = useState<InvestigationDetail[]>([]);
   const [caseId, setCaseId] = useState("");
@@ -71,6 +105,12 @@ export function FaceLive() {
   const lastFrameRef = useRef<{ canvas: HTMLCanvasElement; scale: number } | null>(null);
   const facesRef = useRef<FrameFace[]>([]);
   const runningRef = useRef(false);
+  const tracksRef = useRef<Track[]>([]);
+  const trackCounter = useRef(0);
+  const autoSearchRef = useRef(true);
+  useEffect(() => {
+    autoSearchRef.current = autoSearch;
+  }, [autoSearch]);
 
   useEffect(() => {
     investigationsApi.list().then(setCases).catch(() => setCases([]));
@@ -79,6 +119,101 @@ export function FaceLive() {
       .then((s) => setEngineOnline(s.available))
       .catch(() => setEngineOnline(false));
   }, []);
+
+  // Treat a detected face as an uploaded image and run the SAME full 1:N search
+  // the upload page uses (/intelligence/face/search), returning ranked matches.
+  const runFullSearch = useCallback(
+    async (trackId: number, canvas: HTMLCanvasElement, bbox: Bbox) => {
+      setSearchMap((m) => ({ ...m, [trackId]: { ...m[trackId], loading: true, error: undefined } }));
+      try {
+        const c = await cropFace(canvas, bbox, {
+          pad: 0.35,
+          maxSize: 320,
+          naturalWidth: canvas.width,
+          naturalHeight: canvas.height,
+        });
+        const fd = new FormData();
+        fd.append("file", new File([c.blob], "live-face.jpg", { type: "image/jpeg" }));
+        fd.append("top_k", "12");
+        const r = await api.postForm<{ matches: SearchMatchFull[] }>(
+          "/intelligence/face/search",
+          fd,
+        );
+        setSearchMap((m) => ({
+          ...m,
+          [trackId]: { loading: false, matches: r.matches ?? [], thumb: c.dataUrl },
+        }));
+        setActiveSearchId(trackId);
+      } catch (e: any) {
+        setSearchMap((m) => ({
+          ...m,
+          [trackId]: { ...m[trackId], loading: false, error: e?.detail ?? "search failed" },
+        }));
+      }
+    },
+    [],
+  );
+
+  // Match this frame's faces to persistent tracks (by center proximity) so the
+  // full search fires once per NEW face, not every scan.
+  const updateTracks = useCallback(
+    (frameFaces: FrameFace[], canvas: HTMLCanvasElement | undefined) => {
+      const prev = tracksRef.current;
+      const used = new Set<number>();
+      const assigned: number[] = [];
+      const frameW = canvas?.width ?? 640;
+      const thresh = (frameW * 0.18) ** 2;
+
+      frameFaces.forEach((f, i) => {
+        const cx = (f.bbox[0] + f.bbox[2]) / 2;
+        const cy = (f.bbox[1] + f.bbox[3]) / 2;
+        let best: Track | null = null;
+        let bestD = Infinity;
+        for (const t of prev) {
+          if (used.has(t.id)) continue;
+          const d = (t.cx - cx) ** 2 + (t.cy - cy) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            best = t;
+          }
+        }
+        let track: Track;
+        if (best && bestD <= thresh) {
+          track = best;
+          track.cx = cx;
+          track.cy = cy;
+          track.frames += 1;
+        } else {
+          track = { id: ++trackCounter.current, cx, cy, frames: 1, searched: false };
+          prev.push(track);
+        }
+        used.add(track.id);
+        assigned[i] = track.id;
+      });
+
+      // Drop tracks that left the frame.
+      tracksRef.current = prev.filter((t) => used.has(t.id));
+      setFaceTrackIds(assigned);
+      // Prune search results for gone tracks.
+      setSearchMap((m) => {
+        const keep: Record<number, FaceSearchState> = {};
+        for (const t of tracksRef.current) if (m[t.id]) keep[t.id] = m[t.id];
+        return keep;
+      });
+
+      // Fire the full search once per new, decent-quality, stable face.
+      if (autoSearchRef.current && canvas) {
+        frameFaces.forEach((f, i) => {
+          const track = tracksRef.current.find((t) => t.id === assigned[i]);
+          if (track && !track.searched && track.frames >= 1 && f.quality >= 0.3) {
+            track.searched = true;
+            void runFullSearch(track.id, canvas, f.bbox);
+          }
+        });
+      }
+    },
+    [runFullSearch],
+  );
 
   const postFrame = useCallback(
     async (video: HTMLVideoElement) => {
@@ -127,6 +262,8 @@ export function FaceLive() {
           );
           setThumbs(made);
         }
+        // Track faces across frames and auto-search new ones against the index.
+        updateTracks(faces, cv);
         setDiag({
           analyzing: false,
           lastCount: r.faces_detected ?? 0,
@@ -144,7 +281,7 @@ export function FaceLive() {
         inFlightRef.current = false;
       }
     },
-    [doMatch, caseId],
+    [doMatch, caseId, updateTracks],
   );
 
   const loop = useCallback(async () => {
@@ -243,6 +380,11 @@ export function FaceLive() {
     setFaces([]);
     setThumbs([]);
     setFaceCount(0);
+    tracksRef.current = [];
+    setSearchMap({});
+    setFaceTrackIds([]);
+    setActiveSearchId(null);
+    setShowResults(false);
   }, []);
 
   const start = useCallback(async () => {
@@ -387,6 +529,14 @@ export function FaceLive() {
               <input type="checkbox" checked={doMatch} onChange={(e) => setDoMatch(e.target.checked)} />
               Match against local index
             </label>
+            <label className="flex items-center gap-2 text-sm text-muted">
+              <input
+                type="checkbox"
+                checked={autoSearch}
+                onChange={(e) => setAutoSearch(e.target.checked)}
+              />
+              Auto-search new faces
+            </label>
             {running && (
               <button
                 onClick={() => {
@@ -481,50 +631,119 @@ export function FaceLive() {
             <div className="space-y-2">
               {faces.map((f, i) => {
                 const thumb = thumbs[i] || null;
+                const sid = faceTrackIds[i];
+                const ss = sid != null ? searchMap[sid] : undefined;
+                const top = ss?.matches?.slice(0, 3) ?? [];
                 return (
-                  <div key={i} className="flex gap-3 rounded-lg border border-line bg-panel p-2">
-                    <div className="h-24 w-24 shrink-0 overflow-hidden rounded border border-line">
-                      {thumb ? (
-                        <img src={thumb} alt={`face ${i + 1}`} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="h-full w-full bg-panel-2" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm">
-                        {[f.sex, (f.age ?? 0) > 0 ? `~${f.age}y` : null].filter(Boolean).join(" · ") ||
-                          "age/sex n/a"}
+                  <div key={i} className="rounded-lg border border-line bg-panel p-2">
+                    <div className="flex gap-3">
+                      <div className="h-24 w-24 shrink-0 overflow-hidden rounded border border-line">
+                        {thumb ? (
+                          <img src={thumb} alt={`face ${i + 1}`} className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="h-full w-full bg-panel-2" />
+                        )}
                       </div>
-                      <div className="kai-metadata">q {Math.round(f.quality * 100)}%</div>
-                      {f.match ? (
-                        <div className="mt-1">
-                          <span className="font-mono text-sm">{f.match.similarity_pct}%</span>{" "}
-                          <span className="kai-metadata" style={{ color: BAND_COLOR[f.match.band] }}>
-                            {BAND_LABEL[f.match.band] ?? f.match.band}
-                          </span>
-                          {(f.match.names?.[0] || f.match.page_title) && (
-                            <div className="truncate text-xs">
-                              {f.match.names?.[0] ?? f.match.page_title}
-                            </div>
-                          )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm">
+                          {[f.sex, (f.age ?? 0) > 0 ? `~${f.age}y` : null].filter(Boolean).join(" · ") ||
+                            "age/sex n/a"}
                         </div>
-                      ) : (
-                        doMatch && (
-                          <div className="kai-metadata mt-1">
-                            no match among {indexedCount ?? 0} indexed face
-                            {indexedCount === 1 ? "" : "s"}
+                        <div className="kai-metadata">q {Math.round(f.quality * 100)}%</div>
+                        {f.match ? (
+                          <div className="mt-1">
+                            <span className="font-mono text-sm">{f.match.similarity_pct}%</span>{" "}
+                            <span className="kai-metadata" style={{ color: BAND_COLOR[f.match.band] }}>
+                              {BAND_LABEL[f.match.band] ?? f.match.band}
+                            </span>
+                            {(f.match.names?.[0] || f.match.page_title) && (
+                              <div className="truncate text-xs">
+                                {f.match.names?.[0] ?? f.match.page_title}
+                              </div>
+                            )}
                           </div>
-                        )
-                      )}
-                      <button
-                        onClick={() => captureFace(f)}
-                        disabled={!caseId}
-                        title={!caseId ? "Select an investigation first" : "Store this face"}
-                        className="mt-1 flex items-center gap-1 rounded border border-line px-2 py-0.5 text-xs hover:bg-panel-2 disabled:opacity-50"
-                      >
-                        <FolderPlus size={12} /> Capture
-                      </button>
+                        ) : (
+                          doMatch && (
+                            <div className="kai-metadata mt-1">
+                              no match among {indexedCount ?? 0} indexed face
+                              {indexedCount === 1 ? "" : "s"}
+                            </div>
+                          )
+                        )}
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          <button
+                            onClick={() => {
+                              const cv = lastFrameRef.current?.canvas;
+                              if (sid != null && cv) void runFullSearch(sid, cv, f.bbox);
+                            }}
+                            className="flex items-center gap-1 rounded border border-line px-2 py-0.5 text-xs hover:bg-panel-2"
+                          >
+                            <ScanSearch size={12} /> Search index
+                          </button>
+                          <button
+                            onClick={() => captureFace(f)}
+                            disabled={!caseId}
+                            title={!caseId ? "Select an investigation first" : "Store this face"}
+                            className="flex items-center gap-1 rounded border border-line px-2 py-0.5 text-xs hover:bg-panel-2 disabled:opacity-50"
+                          >
+                            <FolderPlus size={12} /> Capture
+                          </button>
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Full index-search results (treats the face as an upload) */}
+                    {ss?.loading && (
+                      <div className="kai-metadata mt-2 border-t border-line pt-2">
+                        searching local index…
+                      </div>
+                    )}
+                    {ss?.error && (
+                      <div className="kai-metadata mt-2 border-t border-line pt-2" style={{ color: "var(--kai-accent)" }}>
+                        {ss.error}
+                      </div>
+                    )}
+                    {ss?.matches && !ss.loading && (
+                      <div className="mt-2 border-t border-line pt-2">
+                        {ss.matches.length === 0 ? (
+                          <div className="kai-metadata">No match in full index search.</div>
+                        ) : (
+                          <>
+                            <div className="space-y-1.5">
+                              {top.map((m) => (
+                                <div key={m.face_id} className="flex items-center gap-2">
+                                  {m.crop_url && (
+                                    <AuthImg
+                                      path={m.crop_url}
+                                      className="h-8 w-8 shrink-0 rounded object-cover"
+                                    />
+                                  )}
+                                  <span className="min-w-0 flex-1 truncate text-xs">
+                                    {m.names?.[0] ?? m.page_title ?? m.source_url ?? m.face_id.slice(0, 8)}
+                                  </span>
+                                  <span className="font-mono text-xs">{m.similarity_pct}%</span>
+                                  <span className="kai-metadata" style={{ color: BAND_COLOR[m.band] }}>
+                                    {BAND_LABEL[m.band] ?? m.band}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (sid != null) {
+                                  setActiveSearchId(sid);
+                                  setShowResults(true);
+                                }
+                              }}
+                              className="mt-2 text-xs underline hover:text-ink"
+                              style={{ color: "var(--kai-accent)" }}
+                            >
+                              View all {ss.matches.length} match{ss.matches.length === 1 ? "" : "es"} →
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -532,6 +751,90 @@ export function FaceLive() {
           )}
         </div>
       </div>
+
+      {/* Slide-over: full ranked results for the selected face */}
+      {showResults && activeSearchId != null && searchMap[activeSearchId] && (
+        <div className="fixed inset-0 z-40 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowResults(false)}
+          />
+          <div className="relative z-10 h-full w-full max-w-md overflow-y-auto border-l border-line bg-panel p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {searchMap[activeSearchId].thumb && (
+                  <img
+                    src={searchMap[activeSearchId].thumb}
+                    alt="query face"
+                    className="h-10 w-10 rounded border border-line object-cover"
+                  />
+                )}
+                <span className="text-sm font-semibold">Index search results</span>
+              </div>
+              <button onClick={() => setShowResults(false)} className="text-muted hover:text-ink">
+                <X size={18} />
+              </button>
+            </div>
+            {(() => {
+              const matches = searchMap[activeSearchId].matches ?? [];
+              if (matches.length === 0)
+                return <div className="text-sm text-muted">No match found in the local index.</div>;
+              return (
+                <div className="space-y-3">
+                  <div className="kai-metadata uppercase" style={{ color: "var(--kai-verified)" }}>
+                    {matches.length} potential match{matches.length === 1 ? "" : "es"}
+                  </div>
+                  {matches.map((m) => (
+                    <div key={m.face_id} className="overflow-hidden rounded-lg border border-line">
+                      <div className="flex">
+                        {m.crop_url && (
+                          <AuthImg path={m.crop_url} className="h-24 w-24 shrink-0 object-cover" />
+                        )}
+                        <div className="min-w-0 flex-1 p-3">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-lg">{m.similarity_pct}%</span>
+                            <span className="kai-metadata" style={{ color: BAND_COLOR[m.band] }}>
+                              {BAND_LABEL[m.band] ?? m.band}
+                            </span>
+                          </div>
+                          {(m.names?.[0] || m.page_title) && (
+                            <div className="mt-1 truncate text-sm font-semibold">
+                              {m.names?.[0] ?? m.page_title}
+                            </div>
+                          )}
+                          {(m.sex || (m.age ?? 0) > 0) && (
+                            <div className="kai-metadata mt-0.5">
+                              {[m.sex, (m.age ?? 0) > 0 ? `~${m.age}y` : null].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                          {m.description && (
+                            <div
+                              className="mt-2 border-l-2 px-2 py-1 font-mono text-[11px] leading-relaxed"
+                              style={{ borderColor: "var(--kai-accent)", background: "var(--kai-panel-2)", color: "var(--kai-muted)" }}
+                            >
+                              {m.description}
+                            </div>
+                          )}
+                          {m.source_url && (
+                            <a
+                              href={m.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="kai-metadata mt-2 block truncate hover:text-ink"
+                            >
+                              found on: {m.source_url}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
