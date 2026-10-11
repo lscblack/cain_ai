@@ -1,0 +1,3 @@
+
+# MediaPipe assets are vendored at install time (scripts/vendor-mediapipe.mjs), not committed
+public/mediapipe/

@@ -4,6 +4,7 @@ import { ScanFace, Upload } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
+import { MultiFaceDetect } from "@/components/MultiFaceDetect";
 import { SourceFrame, type SourceContext } from "@/components/SourceFrame";
 import { usePasteImage } from "@/lib/usePasteImage";
 
@@ -12,7 +13,7 @@ function imageFromDrop(e: React.DragEvent): File | null {
   return f && f.type.startsWith("image/") ? f : null;
 }
 
-type Mode = "search" | "compare" | "discover";
+type Mode = "search" | "detect" | "compare" | "discover";
 
 interface FaceStatus {
   available: boolean;
@@ -233,18 +234,27 @@ export function Face() {
       )}
 
       <div className="mb-5 flex gap-2 border-b border-line">
-        {(["search", "compare", "discover"] as Mode[]).map((m) => (
+        {(["search", "detect", "compare", "discover"] as Mode[]).map((m) => (
           <button
             key={m}
             onClick={() => setMode(m)}
             className={`px-3 py-2 text-sm capitalize ${mode === m ? "border-b-2 text-ink" : "text-muted"}`}
             style={mode === m ? { borderColor: "var(--kai-accent)" } : undefined}
           >
-            {m === "search" ? "1:N Local Search" : m === "compare" ? "1:1 Compare" : "Global Discovery"}
+            {m === "search"
+              ? "1:N Local Search"
+              : m === "detect"
+                ? "Detect Faces"
+                : m === "compare"
+                  ? "1:1 Compare"
+                  : "Global Discovery"}
           </button>
         ))}
       </div>
 
+      {mode === "detect" && <MultiFaceDetect engineAvailable={status?.available ?? false} />}
+
+      {mode !== "detect" && (
       <div className="grid gap-5 md:grid-cols-[260px_1fr]">
         {/* Query face pinned on the left */}
         <div className="space-y-3">
@@ -483,6 +493,7 @@ export function Face() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
