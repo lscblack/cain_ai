@@ -589,6 +589,9 @@ async def _search_stream_response(
                 yield _sse("progress", {"scanned": i + 1, "total": len(corpus)})
         yield _sse("stage", {"name": "ranking", "candidates": len(scored)})
         scored.sort(key=lambda m: m["similarity"], reverse=True)
+        by_id = {str(r.id): r for r in corpus}
+        ranked = [(m["face_id"], m["similarity"]) for m in scored]
+        people = _group_people(ranked, by_id, top_k=max(1, min(top_k, 100)))
         yield _sse(
             "result",
             {
@@ -596,6 +599,7 @@ async def _search_stream_response(
                 "faces_detected": len(faces),
                 "indexed_faces": len(corpus),
                 "matches": scored[: max(1, min(top_k, 100))],
+                "people": people,
             },
         )
 

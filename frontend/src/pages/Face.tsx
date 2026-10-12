@@ -5,7 +5,7 @@ import { ScanFace, Upload } from "lucide-react";
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
 import { MultiFaceDetect } from "@/components/MultiFaceDetect";
-import { PersonReportCard } from "@/components/PersonReportCard";
+import { FaceResultsHUD, type Person } from "@/components/FaceResultsHUD";
 import { SourceFrame, type SourceContext } from "@/components/SourceFrame";
 import { usePasteImage } from "@/lib/usePasteImage";
 
@@ -92,6 +92,7 @@ export function Face() {
   usePasteImage(onPasteImage);
 
   const [matches, setMatches] = useState<SearchMatch[] | null>(null);
+  const [people, setPeople] = useState<Person[] | null>(null);
   const [compareResult, setCompareResult] = useState<any>(null);
   const [discoverResult, setDiscoverResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -127,6 +128,7 @@ export function Face() {
     setLoading(true);
     setError(null);
     setMatches(null);
+    setPeople(null);
     setStages([]);
     setProgressPct(0);
     // pull indexed crop thumbnails to animate the "scanning" strip
@@ -173,6 +175,7 @@ export function Face() {
           } else if (ev === "result") {
             setProgressPct(100);
             setMatches(payload.matches ?? []);
+            setPeople(payload.people ?? []);
           } else if (ev === "error") {
             setError(payload.detail ?? "Search failed.");
           }
@@ -365,39 +368,29 @@ export function Face() {
 
           {mode === "search" && matches && !loading && (
             <>
-              {matches.length === 0 ? (
+              {(people?.length ?? 0) === 0 ? (
                 <div className="rounded-lg border p-6 text-center" style={{ borderColor: "var(--kai-border)" }}>
                   <div className="text-lg font-semibold" style={{ color: "var(--kai-muted)" }}>NO MATCH FOUND</div>
                   <div className="kai-metadata mt-1">in the current local index</div>
                 </div>
               ) : (
                 <>
-                  <div className="kai-metadata mb-3 uppercase" style={{ color: "var(--kai-verified)" }}>
-                    {matches.length} potential match{matches.length > 1 ? "es" : ""} found
+                  <div className="hud-mono mb-3 text-xs uppercase hud-glow" style={{ color: "var(--kai-hud)" }}>
+                    ◢ {people!.length} subject{people!.length > 1 ? "s" : ""} identified · {matches.length} appearance{matches.length > 1 ? "s" : ""}
                   </div>
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    {matches.map((m, i) => (
-                      <motion.div
-                        key={m.face_id}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.05 }}
-                      >
-                        <PersonReportCard
-                          m={m}
-                          onOpenFrame={(mm) =>
-                            setFrameCtx({
-                              url: mm.source_url!,
-                              title: mm.page_title,
-                              caption: mm.caption,
-                              names: mm.names,
-                              imageUrl: mm.image_url,
-                            })
-                          }
-                        />
-                      </motion.div>
-                    ))}
-                  </div>
+                  <FaceResultsHUD
+                    people={people!}
+                    queryUrl={queryUrl}
+                    maxAppearances={Math.max(...people!.map((p) => p.appearance_count), 1)}
+                    onOpenFrame={(a) =>
+                      setFrameCtx({
+                        url: a.source_url!,
+                        title: a.page_title,
+                        caption: a.caption,
+                        imageUrl: a.image_url,
+                      })
+                    }
+                  />
                 </>
               )}
             </>

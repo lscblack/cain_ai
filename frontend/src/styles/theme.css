@@ -12,6 +12,8 @@
   --kai-warn: #f5a623; /* amber */
   --kai-text: #e6e9ef;
   --kai-muted: #8b93a7;
+  --kai-hud: #22d3ee; /* cyan HUD accent */
+  --kai-hud-dim: rgba(34, 211, 238, 0.28);
 }
 
 html,
@@ -51,4 +53,73 @@ body {
   font-size: 0.75rem;
   color: var(--kai-muted);
   letter-spacing: 0.02em;
+}
+
+/* ---- Sci-fi HUD utilities ---- */
+.hud-mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.06em;
+}
+.hud-glow {
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.55);
+}
+.hud-panel {
+  position: relative;
+  border: 1px solid var(--kai-hud-dim);
+  background:
+    linear-gradient(180deg, rgba(34, 211, 238, 0.05), rgba(34, 211, 238, 0) 40%),
+    var(--kai-panel-2);
+  box-shadow: inset 0 0 24px rgba(34, 211, 238, 0.05);
+}
+/* Corner brackets drawn with layered gradients */
+.hud-frame {
+  position: relative;
+}
+.hud-frame::before,
+.hud-frame::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--kai-hud);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.hud-frame::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+.hud-frame::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+.hud-scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(34, 211, 238, 0.04) 0px,
+    rgba(34, 211, 238, 0.04) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+@keyframes hud-sweep {
+  0% { transform: translateY(-100%); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+.hud-bar {
+  height: 6px;
+  background: var(--kai-panel);
+  border: 1px solid var(--kai-border);
+  overflow: hidden;
+}
+.hud-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--kai-hud), rgba(34, 211, 238, 0.4));
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
 }
