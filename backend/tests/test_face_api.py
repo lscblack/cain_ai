@@ -272,6 +272,44 @@ async def test_search_match_has_report_fields(client, auth_headers):
 
 
 @requires_engine
+async def test_connections_links_co_located_people(client, auth_headers):
+    """Two DIFFERENT people indexed from the same source page are connected."""
+    case = (await client.post("/investigations", json={"name": "Conn"}, headers=auth_headers)).json()
+    page = "https://example.com/group-photo"
+    ids = []
+    for fx in (FACE1, FACE2):  # Lincoln + Einstein = two different people
+        with open(fx, "rb") as f:
+            r = await client.post(
+                "/intelligence/face/detect",
+                files={"file": (fx.name, f, "image/jpeg")},
+                data={"investigation_id": case["id"], "source_url": page},
+                headers=auth_headers,
+            )
+        ids.extend(r.json()["stored_face_ids"])
+    assert len(ids) >= 2
+
+    r = await client.get(f"/intelligence/face/{ids[0]}/connections", headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    # the other person on the same page is surfaced as a connection, not self
+    conn_ids = [c["face_id"] for c in body["connections"]]
+    assert ids[0] not in conn_ids
+    assert any(fid != ids[0] for fid in conn_ids)
+    assert body["count"] >= 1
+    top = body["connections"][0]
+    assert "co_located" in top["reasons"]
+    assert top["source_url"] == page
+
+
+async def test_connections_404_for_unknown_face(client, auth_headers):
+    import uuid as _uuid
+    r = await client.get(
+        f"/intelligence/face/{_uuid.uuid4()}/connections", headers=auth_headers
+    )
+    assert r.status_code == 404
+
+
+@requires_engine
 async def test_search_stream_sse(client, auth_headers):
     case = (await client.post("/investigations", json={"name": "S"}, headers=auth_headers)).json()
     with open(FACE1, "rb") as f:

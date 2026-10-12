@@ -24,7 +24,9 @@ from app.intelligence.face.crops import crop_path, has_crop, save_crop
 from app.intelligence.face.describe import describe_face
 from app.intelligence.face.service import detect_and_embed_async, get_face_engine
 from app.intelligence.face.similarity import (
+    DEDUP_THRESHOLD,
     POSSIBLE,
+    POTENTIAL_MATCH,
     STRONG,
     band_for_similarity,
     cosine_similarity,
@@ -754,3 +756,124 @@ async def related_faces(
 @router.get("/public/{face_id}/related")
 async def public_related_faces(face_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     return await _related_faces(face_id, session)
+
+
+def _identifiers(extra: dict | None) -> set[str]:
+    """Lowercased public identifiers extracted for a face (for connection links)."""
+    ex = extra or {}
+    out: set[str] = set()
+    for key in ("names", "emails", "phones", "usernames"):
+        for v in ex.get(key) or []:
+            s = str(v).strip().lower()
+            if s:
+                out.add(s)
+    return out
+
+
+async def _connections(face_id: str, session: AsyncSession, *, limit: int = 24) -> dict:
+    """DIFFERENT people connected to this face — co-located on the same source
+    page, or sharing an extracted identifier (name/email/phone/username).
+
+    This is the "find one person, surface their associates" view. Connections
+    are public-data co-occurrences, not confirmed relationships.
+    """
+    from sqlalchemy import select as _select
+    from app.database.models.face import Face as _Face
+
+    target = (await session.execute(_select(_Face).where(_Face.id == face_id))).scalar_one_or_none()
+    if target is None or not target.embedding:
+        raise HTTPException(status_code=404, detail="face_not_found")
+
+    corpus = await FaceRepository(session).list_with_embeddings()
+    tgt_ids = _identifiers(target.extra)
+    tgt_src = (target.source_url or "").strip()
+
+    # Candidate people keyed by a representative face; dedup same-person faces.
+    picked: list[dict] = []
+    for rec in corpus:
+        rid = str(rec.id)
+        if rid == face_id or not rec.embedding:
+            continue
+        sim = cosine_similarity(list(target.embedding), rec.embedding)
+        if sim >= POTENTIAL_MATCH:
+            continue  # this is (likely) the target person again, not a connection
+
+        reasons: list[str] = []
+        if tgt_src and (rec.source_url or "").strip() == tgt_src:
+            reasons.append("co_located")
+        shared = tgt_ids & _identifiers(rec.extra)
+        reasons.extend(f"shares:{s}" for s in sorted(shared)[:5])
+        if not reasons:
+            continue
+
+        # Dedup against already-picked people (same face across pages).
+        dup = None
+        for p in picked:
+            if cosine_similarity(rec.embedding, p["_emb"]) >= DEDUP_THRESHOLD:
+                dup = p
+                break
+        if dup is not None:
+            dup["reasons"] = sorted(set(dup["reasons"]) | set(reasons))
+            if rec.quality > dup["_quality"]:
+                continue  # keep the higher-quality representative
+            continue
+
+        ex = rec.extra or {}
+        picked.append({
+            "face_id": rid,
+            "_emb": rec.embedding,
+            "_quality": rec.quality,
+            "reasons": reasons,
+            "connection": "co_location" if "co_located" in reasons else "shared_identifier",
+            "crop_url": f"/intelligence/face/crop/{rid}" if has_crop(rid) else None,
+            "source_url": rec.source_url,
+            "page_title": ex.get("page_title"),
+            "quality": rec.quality,
+            "names": ex.get("names") or [],
+            "emails": ex.get("emails") or [],
+            "phones": ex.get("phones") or [],
+            "usernames": ex.get("usernames") or [],
+            "titles": ex.get("titles") or [],
+            "orgs": ex.get("orgs") or [],
+            "locations": ex.get("locations") or [],
+            "age": ex.get("age"),
+            "sex": ex.get("sex"),
+            "description": describe_face(rec.extra, rec.source_url),
+        })
+
+    # Co-located first, then by quality.
+    picked.sort(key=lambda p: (0 if p["connection"] == "co_location" else 1, -p["_quality"]))
+    for p in picked:
+        p.pop("_emb", None)
+        p.pop("_quality", None)
+    out = picked[:limit]
+    return {
+        "face_id": face_id,
+        "connections": out,
+        "count": len(out),
+        "note": (
+            "People connected to this face via public co-occurrence (same page) or shared "
+            "identifiers. Associations to observe, not confirmed relationships."
+        ),
+    }
+
+
+@router.get("/{face_id}/connections")
+async def face_connections(
+    face_id: str,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await _connections(face_id, session)
+
+
+@router.get("/public/{face_id}/connections")
+async def public_face_connections(
+    face_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    res = await _connections(face_id, session)
+    # Public crops use the public crop route.
+    for c in res["connections"]:
+        if c.get("crop_url"):
+            c["crop_url"] = c["crop_url"].replace("/intelligence/face/crop/", "/intelligence/face/public/crop/")
+    return res

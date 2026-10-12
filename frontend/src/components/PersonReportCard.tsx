@@ -1,5 +1,7 @@
-import { AtSign, Briefcase, ExternalLink, MapPin, Phone, User2 } from "lucide-react";
+import { useState } from "react";
+import { AtSign, Briefcase, ExternalLink, MapPin, Phone, User2, Users } from "lucide-react";
 
+import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
 
 export interface ReportMatch {
@@ -66,6 +68,24 @@ function Field({
 /** A per-result "dossier" card: matched face image beside the person's
  *  known attributes (name, age, job, bio, contacts, socials, sources).
  *  Matches are potential leads — never a confirmed identity. */
+interface Connection {
+  face_id: string;
+  crop_url?: string | null;
+  source_url?: string | null;
+  page_title?: string | null;
+  names?: string[];
+  reasons?: string[];
+  connection?: string;
+  age?: number | null;
+  sex?: string | null;
+}
+
+function reasonLabel(r: string): string {
+  if (r === "co_located") return "same page";
+  if (r.startsWith("shares:")) return `shares ${r.slice(7)}`;
+  return r;
+}
+
 export function PersonReportCard({
   m,
   onOpenFrame,
@@ -73,6 +93,26 @@ export function PersonReportCard({
   m: ReportMatch;
   onOpenFrame?: (m: ReportMatch) => void;
 }) {
+  const [conns, setConns] = useState<Connection[] | null>(null);
+  const [connLoading, setConnLoading] = useState(false);
+  const [connOpen, setConnOpen] = useState(false);
+
+  async function loadConnections() {
+    setConnOpen(true);
+    if (conns || connLoading) return;
+    setConnLoading(true);
+    try {
+      const r = await api.get<{ connections: Connection[] }>(
+        `/intelligence/face/${m.face_id}/connections`,
+      );
+      setConns(r.connections ?? []);
+    } catch {
+      setConns([]);
+    } finally {
+      setConnLoading(false);
+    }
+  }
+
   const band = m.band ?? "no_match";
   const name = m.names?.[0] ?? m.page_title ?? "Unknown subject";
   const aliases = (m.names ?? []).slice(1, 6);
@@ -198,6 +238,52 @@ export function PersonReportCard({
             </div>
           )}
         </div>
+      </div>
+
+      {/* Connected people (relationship links via public co-occurrence) */}
+      <div className="border-t px-3 py-2" style={{ borderColor: "var(--kai-border)" }}>
+        {!connOpen ? (
+          <button
+            onClick={loadConnections}
+            className="flex items-center gap-1 text-xs"
+            style={{ color: "var(--kai-verified)" }}
+          >
+            <Users size={13} /> Connected people →
+          </button>
+        ) : connLoading ? (
+          <div className="kai-metadata">finding connections…</div>
+        ) : conns && conns.length > 0 ? (
+          <div>
+            <div className="kai-metadata mb-1 uppercase" style={{ color: "var(--kai-verified)" }}>
+              {conns.length} connected — associates to observe, not confirmed
+            </div>
+            <div className="space-y-1.5">
+              {conns.map((c) => (
+                <div key={c.face_id} className="flex items-center gap-2">
+                  {c.crop_url && (
+                    <AuthImg path={c.crop_url} className="h-8 w-8 shrink-0 rounded object-cover" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-xs">
+                    {c.names?.[0] ?? c.page_title ?? c.face_id.slice(0, 8)}
+                  </span>
+                  <span className="flex flex-wrap justify-end gap-1">
+                    {(c.reasons ?? []).slice(0, 2).map((r) => (
+                      <span
+                        key={r}
+                        className="rounded border px-1 text-[10px]"
+                        style={{ borderColor: "var(--kai-border)", color: "var(--kai-muted)" }}
+                      >
+                        {reasonLabel(r)}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="kai-metadata">No connections found.</div>
+        )}
       </div>
     </div>
   );
