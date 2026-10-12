@@ -3,6 +3,8 @@ import 'package:local_auth/local_auth.dart';
 
 import '../services/api_client.dart';
 import '../theme/hacker_theme.dart';
+import 'qr_login_screen.dart';
+import 'settings_screen.dart';
 
 /// Biometric gate: on launch, unlock with the device fingerprint/face and
 /// silently re-authenticate with stored credentials — no typing a login.
@@ -86,6 +88,18 @@ class _UnlockScreenState extends State<UnlockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings, color: KaiColors.muted),
+            tooltip: 'Change backend',
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          ),
+        ],
+      ),
+      extendBodyBehindAppBar: true,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -122,6 +136,14 @@ class _UnlockScreenState extends State<UnlockScreen> {
               onPressed: _usePassword,
               child: const Text('Use password instead',
                   style: TextStyle(color: KaiColors.muted)),
+            ),
+            TextButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => QrLoginScreen(onLoggedIn: widget.onUnlocked)),
+              ),
+              icon: const Icon(Icons.qr_code_scanner, size: 16, color: KaiColors.verified),
+              label: const Text('Scan QR from web', style: TextStyle(color: KaiColors.verified)),
             ),
           ],
         ),

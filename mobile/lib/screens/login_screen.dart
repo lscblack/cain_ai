@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../theme/hacker_theme.dart';
+import 'qr_login_screen.dart';
 import 'settings_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -98,10 +99,28 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => QrLoginScreen(onLoggedIn: widget.onLoggedIn),
+                              ),
+                            ),
+                    icon: const Icon(Icons.qr_code_scanner, size: 18),
+                    label: const Text('Scan QR from web'),
+                  ),
                   const SizedBox(height: 16),
                   Center(
-                    child: Text('server: ${ApiClient.instance.baseUrl}',
-                        style: const TextStyle(color: KaiColors.muted, fontSize: 10)),
+                    child: TextButton.icon(
+                      onPressed: () => Navigator.push(
+                          context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                      icon: const Icon(Icons.dns_outlined, size: 14, color: KaiColors.muted),
+                      label: Text('server: ${ApiClient.instance.baseUrl}',
+                          style: const TextStyle(color: KaiColors.muted, fontSize: 10)),
+                    ),
                   ),
                 ],
               ),

@@ -94,6 +94,25 @@ class ApiClient {
     }
   }
 
+  /// Apply a QR pairing payload scanned from the web app: {"u": backendUrl,
+  /// "t": token}. Sets the base URL + token and verifies the token works.
+  Future<bool> applyQrSession(String raw) async {
+    try {
+      final data = jsonDecode(raw);
+      if (data is! Map) return false;
+      final url = data['u']?.toString();
+      final tok = data['t']?.toString();
+      if (url == null || url.isEmpty || tok == null || tok.isEmpty) return false;
+      await setBaseUrl(url);
+      await setToken(tok);
+      // Verify: /status requires auth, so 200 => token valid & reachable.
+      final r = await getJson('/intelligence/face/status');
+      return r.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Re-authenticate silently using stored credentials (after biometric unlock).
   Future<bool> loginWithStoredCreds() async {
     try {

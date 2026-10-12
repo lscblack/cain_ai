@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -18,13 +18,12 @@ import {
   Database,
   Radar,
   Contact,
-  Crosshair,
-  ListOrdered,
-  Video,
+  Smartphone,
   LogOut,
 } from "lucide-react";
 
 import { StatusIndicator } from "@/components/StatusIndicator";
+import { PairMobile } from "@/components/PairMobile";
 import { useAuth } from "@/lib/auth";
 
 const NAV: { icon: typeof Search; label: string; to?: string }[] = [
@@ -32,7 +31,6 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: Search, label: "Search", to: "/search" },
   { icon: FolderSearch, label: "Investigations", to: "/investigations" },
   { icon: Users, label: "Faces", to: "/face" },
-  { icon: Video, label: "Live Camera", to: "/face/live" },
   { icon: Images, label: "Available Faces", to: "/faces" },
   { icon: Phone, label: "Phones", to: "/phone" },
   { icon: AtSign, label: "Emails", to: "/email" },
@@ -40,9 +38,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: Contact, label: "Contacts", to: "/contacts" },
   { icon: Globe, label: "Domains" },
   { icon: Database, label: "Sources", to: "/sources" },
-  { icon: ListOrdered, label: "Crawl Queue", to: "/queue" },
   { icon: Radar, label: "Discover", to: "/discover" },
-  { icon: Crosshair, label: "Investigate", to: "/investigate" },
   { icon: Share2, label: "Graph", to: "/graph" },
   { icon: Map, label: "Map", to: "/map" },
   { icon: Clock, label: "Timeline", to: "/timeline" },
@@ -52,9 +48,11 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { operator, logout } = useAuth();
+  const [pairOpen, setPairOpen] = useState(false);
 
   return (
     <div className="flex min-h-screen bg-base text-ink">
+      {pairOpen && <PairMobile onClose={() => setPairOpen(false)} />}
       {/* Sidebar */}
       <aside className="hidden w-56 shrink-0 flex-col border-r border-line bg-panel-2 md:flex">
         <div className="border-b border-line px-5 py-4">
@@ -103,7 +101,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-4 border-b border-line bg-panel-2 px-4 py-3 sm:px-6">
           <div className="min-w-0 truncate kai-metadata">OPERATOR / {operator?.email ?? "—"}</div>
-          <StatusIndicator />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPairOpen(true)}
+              title="Pair mobile device (QR login)"
+              className="flex items-center gap-1 rounded border border-line px-2 py-1 text-xs hover:bg-panel"
+            >
+              <Smartphone size={14} /> Pair mobile
+            </button>
+            <StatusIndicator />
+          </div>
         </header>
         <nav className="flex gap-1 overflow-x-auto border-b border-line bg-panel-2 px-3 py-2 md:hidden">
           {NAV.filter(({ to }) => to).map(({ icon: Icon, label, to }) => (
