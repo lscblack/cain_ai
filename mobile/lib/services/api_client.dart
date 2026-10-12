@@ -1,0 +1,85 @@
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// Single-operator API client. Base URL is user-configurable (Settings) so the
+/// same build works over a Cloudflare tunnel, LAN, or the Android emulator.
+class ApiClient {
+  ApiClient._();
+  static final ApiClient instance = ApiClient._();
+
+  // Default can be baked at build time (--dart-define=KAI_BASE_URL=...); otherwise
+  // 10.0.2.2 is the host loopback from the Android emulator. Always overridable
+  // in Settings (persisted).
+  String baseUrl = const String.fromEnvironment(
+    'KAI_BASE_URL',
+    defaultValue: 'http://10.0.2.2:8001',
+  );
+  String? token;
+
+  static const _storage = FlutterSecureStorage();
+
+  Future<void> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    baseUrl = prefs.getString('kai.baseUrl') ?? baseUrl;
+    try {
+      token = await _storage.read(key: 'kai.token');
+    } catch (_) {
+      token = null;
+    }
+  }
+
+  bool get isLoggedIn => token != null && token!.isNotEmpty;
+
+  Future<void> setBaseUrl(String url) async {
+    baseUrl = url.trim().replaceAll(RegExp(r'/+$'), '');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('kai.baseUrl', baseUrl);
+  }
+
+  Future<void> setToken(String? t) async {
+    token = t;
+    try {
+      if (t == null) {
+        await _storage.delete(key: 'kai.token');
+      } else {
+        await _storage.write(key: 'kai.token', value: t);
+      }
+    } catch (_) {}
+  }
+
+  Map<String, String> get _authHeaders =>
+      token != null ? {'Authorization': 'Bearer $token'} : {};
+
+  Uri _uri(String path) => Uri.parse('$baseUrl$path');
+
+  /// Full URL + auth headers for an authenticated image path (e.g. crop_url).
+  String imageUrl(String path) => '$baseUrl$path';
+  Map<String, String> get imageHeaders => _authHeaders;
+
+  Future<http.Response> getJson(String path) =>
+      http.get(_uri(path), headers: _authHeaders);
+
+  Future<http.Response> postJson(String path, Map<String, dynamic> body) =>
+      http.post(_uri(path),
+          headers: {'Content-Type': 'application/json', ..._authHeaders},
+          body: jsonEncode(body));
+
+  Future<http.Response> postImage(
+    String path,
+    List<int> bytes, {
+    String filename = 'image.jpg',
+    Map<String, String> fields = const {},
+  }) async {
+    final req = http.MultipartRequest('POST', _uri(path));
+    req.headers.addAll(_authHeaders);
+    req.fields.addAll(fields);
+    req.files.add(http.MultipartFile.fromBytes('file', bytes,
+        filename: filename, contentType: MediaType('image', 'jpeg')));
+    final streamed = await req.send();
+    return http.Response.fromStream(streamed);
+  }
+}
