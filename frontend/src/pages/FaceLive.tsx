@@ -3,6 +3,7 @@ import { Camera, CameraOff, FolderPlus, ScanSearch, Video, X } from "lucide-reac
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
+import { PersonReportCard, type ReportMatch } from "@/components/PersonReportCard";
 import { ScanningStrip } from "@/components/ScanningStrip";
 import { cropFace, frameToBlob, type Bbox } from "@/lib/faceCrop";
 import { getFaceDetector, detectBoxes, disposeFaceDetector, type LiveBox } from "@/lib/faceDetector";
@@ -29,18 +30,7 @@ interface FrameFace {
 }
 
 // Full ranked match from the same endpoint the upload search uses (/search).
-interface SearchMatchFull {
-  face_id: string;
-  similarity_pct: number;
-  band: string;
-  crop_url?: string | null;
-  names?: string[];
-  page_title?: string | null;
-  source_url?: string | null;
-  description?: string | null;
-  age?: number | null;
-  sex?: string | null;
-}
+type SearchMatchFull = ReportMatch;
 interface FaceSearchState {
   loading?: boolean;
   matches?: SearchMatchFull[];
@@ -744,8 +734,8 @@ export function FaceLive() {
                                     {m.names?.[0] ?? m.page_title ?? m.source_url ?? m.face_id.slice(0, 8)}
                                   </span>
                                   <span className="font-mono text-xs">{m.similarity_pct}%</span>
-                                  <span className="kai-metadata" style={{ color: BAND_COLOR[m.band] }}>
-                                    {BAND_LABEL[m.band] ?? m.band}
+                                  <span className="kai-metadata" style={{ color: BAND_COLOR[m.band ?? "no_match"] }}>
+                                    {BAND_LABEL[m.band ?? "no_match"] ?? m.band}
                                   </span>
                                 </div>
                               ))}
@@ -809,49 +799,7 @@ export function FaceLive() {
                     {matches.length} potential match{matches.length === 1 ? "" : "es"}
                   </div>
                   {matches.map((m) => (
-                    <div key={m.face_id} className="overflow-hidden rounded-lg border border-line">
-                      <div className="flex">
-                        {m.crop_url && (
-                          <AuthImg path={m.crop_url} className="h-24 w-24 shrink-0 object-cover" />
-                        )}
-                        <div className="min-w-0 flex-1 p-3">
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono text-lg">{m.similarity_pct}%</span>
-                            <span className="kai-metadata" style={{ color: BAND_COLOR[m.band] }}>
-                              {BAND_LABEL[m.band] ?? m.band}
-                            </span>
-                          </div>
-                          {(m.names?.[0] || m.page_title) && (
-                            <div className="mt-1 truncate text-sm font-semibold">
-                              {m.names?.[0] ?? m.page_title}
-                            </div>
-                          )}
-                          {(m.sex || (m.age ?? 0) > 0) && (
-                            <div className="kai-metadata mt-0.5">
-                              {[m.sex, (m.age ?? 0) > 0 ? `~${m.age}y` : null].filter(Boolean).join(" · ")}
-                            </div>
-                          )}
-                          {m.description && (
-                            <div
-                              className="mt-2 border-l-2 px-2 py-1 font-mono text-[11px] leading-relaxed"
-                              style={{ borderColor: "var(--kai-accent)", background: "var(--kai-panel-2)", color: "var(--kai-muted)" }}
-                            >
-                              {m.description}
-                            </div>
-                          )}
-                          {m.source_url && (
-                            <a
-                              href={m.source_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="kai-metadata mt-2 block truncate hover:text-ink"
-                            >
-                              found on: {m.source_url}
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                    <PersonReportCard key={m.face_id} m={m} />
                   ))}
                 </div>
               );

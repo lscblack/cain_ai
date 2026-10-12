@@ -249,6 +249,29 @@ async def test_search_1_to_n(client, auth_headers):
 
 
 @requires_engine
+async def test_search_match_has_report_fields(client, auth_headers):
+    case = (await client.post("/investigations", json={"name": "Rpt"}, headers=auth_headers)).json()
+    with open(FACE1, "rb") as f:
+        await client.post(
+            "/intelligence/face/detect",
+            files={"file": ("face1.jpg", f, "image/jpeg")},
+            data={"investigation_id": case["id"]},
+            headers=auth_headers,
+        )
+    with open(FACE1, "rb") as f:
+        r = await client.post(
+            "/intelligence/face/search",
+            files={"file": ("q.jpg", f, "image/jpeg")},
+            headers=auth_headers,
+        )
+    m = r.json()["matches"][0]
+    # Report-card fields the UI renders, present even when empty.
+    for key in ("names", "emails", "phones", "usernames", "titles", "orgs", "locations",
+                "age", "sex", "source_url", "description", "crop_url"):
+        assert key in m
+
+
+@requires_engine
 async def test_search_stream_sse(client, auth_headers):
     case = (await client.post("/investigations", json={"name": "S"}, headers=auth_headers)).json()
     with open(FACE1, "rb") as f:
