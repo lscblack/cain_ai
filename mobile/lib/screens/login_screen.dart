@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
@@ -25,23 +23,14 @@ class _LoginScreenState extends State<LoginScreen> {
       _busy = true;
       _error = null;
     });
-    try {
-      final r = await ApiClient.instance.postJson('/auth/login', {
-        'email': _email.text.trim(),
-        'password': _password.text,
-      });
-      if (r.statusCode == 200) {
-        final token = jsonDecode(r.body)['access_token'] as String?;
-        await ApiClient.instance.setToken(token);
-        if (mounted) widget.onLoggedIn();
-      } else {
-        setState(() => _error = 'Login failed (${r.statusCode}).');
-      }
-    } catch (e) {
-      setState(() => _error = 'Cannot reach backend. Check the server URL in settings.');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    final err = await ApiClient.instance.login(_email.text.trim(), _password.text);
+    if (!mounted) return;
+    if (err == null) {
+      widget.onLoggedIn();
+    } else {
+      setState(() => _error = err);
     }
+    setState(() => _busy = false);
   }
 
   @override

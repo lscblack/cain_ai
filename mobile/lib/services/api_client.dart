@@ -51,6 +51,61 @@ class ApiClient {
     } catch (_) {}
   }
 
+  // --- Credentials for biometric auto-login -------------------------------
+  // Stored in the OS keystore-backed secure storage; the app only re-reads them
+  // after a successful device biometric check (see UnlockScreen).
+
+  Future<bool> hasCredentials() async {
+    try {
+      return (await _storage.read(key: 'kai.email')) != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _saveCredentials(String email, String password) async {
+    try {
+      await _storage.write(key: 'kai.email', value: email);
+      await _storage.write(key: 'kai.password', value: password);
+    } catch (_) {}
+  }
+
+  Future<void> clearCredentials() async {
+    try {
+      await _storage.delete(key: 'kai.email');
+      await _storage.delete(key: 'kai.password');
+    } catch (_) {}
+  }
+
+  /// Log in, persist the token AND (for biometric unlock) the credentials.
+  /// Returns null on success, or an error message.
+  Future<String?> login(String email, String password) async {
+    try {
+      final r = await postJson('/auth/login', {'email': email, 'password': password});
+      if (r.statusCode == 200) {
+        final t = jsonDecode(r.body)['access_token'] as String?;
+        await setToken(t);
+        await _saveCredentials(email, password);
+        return null;
+      }
+      return 'Login failed (${r.statusCode}).';
+    } catch (_) {
+      return 'Cannot reach backend. Check the server URL in settings.';
+    }
+  }
+
+  /// Re-authenticate silently using stored credentials (after biometric unlock).
+  Future<bool> loginWithStoredCreds() async {
+    try {
+      final email = await _storage.read(key: 'kai.email');
+      final password = await _storage.read(key: 'kai.password');
+      if (email == null || password == null) return false;
+      return (await login(email, password)) == null;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Map<String, String> get _authHeaders =>
       token != null ? {'Authorization': 'Bearer $token'} : {};
 
