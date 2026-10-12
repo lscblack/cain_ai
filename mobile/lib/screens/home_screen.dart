@@ -8,6 +8,7 @@ import '../theme/hacker_theme.dart';
 import 'face_search_screen.dart';
 import 'live_camera_screen.dart';
 import 'settings_screen.dart';
+import 'video_search_screen.dart';
 import 'voice_command_screen.dart';
 import 'tools/universal_search_screen.dart';
 import 'tools/phone_search_screen.dart';
@@ -65,9 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _go(const LiveCameraScreen());
         break;
       case VoiceAction.videoSearch:
-        // C3 video search — folded in during integration; falls back if absent.
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Video search — open from the dashboard')));
+        _go(const VideoSearchScreen());
         break;
       case VoiceAction.universalSearch:
         _go(UniversalSearchScreen(initialQuery: arg));
@@ -120,8 +119,9 @@ class _HomeScreenState extends State<HomeScreen> {
           () => _go(const UsernameSearchScreen())),
       _Tile('Investigations', Icons.folder_open_outlined, KaiColors.warn,
           () => _go(const InvestigationsScreen())),
+      _Tile('Video Search', Icons.video_library_outlined, KaiColors.accent,
+          () => _go(const VideoSearchScreen())),
       _Tile('Voice (Jarvis)', Icons.mic, KaiColors.accent, _openVoice),
-      _Tile('Video Search', Icons.movie_outlined, KaiColors.warn, null, soon: true),
     ];
 
     return Scaffold(
@@ -172,8 +172,7 @@ class _Tile {
   final IconData icon;
   final Color color;
   final VoidCallback? onTap;
-  final bool soon;
-  _Tile(this.label, this.icon, this.color, this.onTap, {this.soon = false});
+  _Tile(this.label, this.icon, this.color, this.onTap);
 }
 
 class _TileCard extends StatelessWidget {
@@ -202,9 +201,6 @@ class _TileCard extends StatelessWidget {
             const Spacer(),
             Text(tile.label,
                 style: const TextStyle(color: KaiColors.ink, fontWeight: FontWeight.bold)),
-            if (tile.soon)
-              const Text('coming soon',
-                  style: TextStyle(color: KaiColors.muted, fontSize: 10)),
           ],
         ),
       ),

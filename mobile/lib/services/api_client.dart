@@ -72,13 +72,14 @@ class ApiClient {
     String path,
     List<int> bytes, {
     String filename = 'image.jpg',
+    String contentType = 'image/jpeg',
     Map<String, String> fields = const {},
   }) async {
     final req = http.MultipartRequest('POST', _uri(path));
     req.headers.addAll(_authHeaders);
     req.fields.addAll(fields);
     req.files.add(http.MultipartFile.fromBytes('file', bytes,
-        filename: filename, contentType: MediaType('image', 'jpeg')));
+        filename: filename, contentType: MediaType.parse(contentType)));
     final streamed = await req.send();
     return http.Response.fromStream(streamed);
   }

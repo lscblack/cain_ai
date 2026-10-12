@@ -324,6 +324,66 @@ async def test_dedupe_empty(client, auth_headers):
     assert r.json()["removed"] == 0
 
 
+def _tiny_video(path, *, frames: int = 4, fps: int = 1) -> None:
+    """Write a tiny video of the face1 fixture repeated a few times."""
+    import cv2
+
+    img = cv2.imread(str(FACE1))
+    assert img is not None
+    h, w = img.shape[:2]
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    try:
+        for _ in range(frames):
+            writer.write(img)
+    finally:
+        writer.release()
+
+
+@requires_engine
+async def test_search_video(client, auth_headers, tmp_path):
+    # index face1 so the sampled frames have something to match against
+    case = (await client.post("/investigations", json={"name": "Vid"}, headers=auth_headers)).json()
+    with open(FACE1, "rb") as f:
+        await client.post(
+            "/intelligence/face/detect",
+            files={"file": ("face1.jpg", f, "image/jpeg")},
+            data={"investigation_id": case["id"]},
+            headers=auth_headers,
+        )
+
+    vid = tmp_path / "clip.mp4"
+    _tiny_video(vid)
+    with open(vid, "rb") as vf:
+        r = await client.post(
+            "/intelligence/face/search/video",
+            files={"file": ("clip.mp4", vf, "video/mp4")},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["frames_sampled"] > 0
+    assert "faces_found" in body
+    assert isinstance(body["people"], list)
+    # the clip is the same face repeated -> dedup to one person
+    assert body["faces_found"] == 1
+    person = body["people"][0]
+    for key in ("age", "sex", "quality", "frames_seen", "matches"):
+        assert key in person
+    # the repeated Lincoln face strongly matches the indexed Lincoln face
+    assert person["matches"][0]["similarity"] > 0.9
+
+
+async def test_search_video_rejects_non_video(client, auth_headers):
+    with open(FACE1, "rb") as f:
+        r = await client.post(
+            "/intelligence/face/search/video",
+            files={"file": ("face1.jpg", f, "image/jpeg")},
+            headers=auth_headers,
+        )
+    # 415 when engine is up; 503 when it is down — both reject the bad upload
+    assert r.status_code in (415, 503)
+
+
 @requires_engine
 async def test_public_compare(client):
     with open(FACE1, "rb") as a, open(FACE1, "rb") as b:

@@ -227,6 +227,134 @@ async def search(
     }
 
 
+_VIDEO_ALLOWED = {"video/mp4", "video/webm", "video/quicktime"}
+_VIDEO_MAX_BYTES = 50 * 1024 * 1024  # 50 MB upload cap
+_VIDEO_FRAME_CAP = 30  # sample at most this many frames
+_VIDEO_SAME_PERSON = 0.92  # cosine >= this = same person across frames (dedup)
+
+
+@router.post("/search/video")
+async def search_video(
+    file: UploadFile = File(...),
+    top_k: int = Form(default=5),
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+    engine: FaceEngine = Depends(engine_dep),
+) -> dict:
+    """1:N face search over a short uploaded video.
+
+    Samples frames at ~1 fps (up to a cap), detects faces in each, dedupes the
+    same person across frames, then searches each distinct person against the
+    local index. Everything is ephemeral: the video is written to a temp file
+    that is deleted before returning. Matches are potential leads, never a
+    confirmed identity.
+    """
+    _require_engine(engine)
+    # Accept by declared content-type OR by a known video file extension — some
+    # mobile/multipart clients mislabel the part's content-type.
+    _ext = (file.filename or "").rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else ""
+    _video_ext = {"mp4", "webm", "mov", "qt", "m4v", "mkv"}
+    if file.content_type not in _VIDEO_ALLOWED and _ext not in _video_ext:
+        raise HTTPException(status_code=415, detail="unsupported_video_type")
+    data = await file.read()
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="empty_file")
+    if len(data) > _VIDEO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="video_too_large")
+
+    import os
+    import tempfile
+
+    import cv2
+
+    suffix = {
+        "video/mp4": ".mp4",
+        "video/webm": ".webm",
+        "video/quicktime": ".mov",
+    }.get(file.content_type, ".mp4")
+
+    tmp_path: str | None = None
+    detected = []  # all DetectedFace across sampled frames
+    frames_sampled = 0
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+
+        cap = cv2.VideoCapture(tmp_path)
+        try:
+            fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+            # sample ~1 frame per second; fall back to every frame if fps unknown
+            step = int(round(fps)) if fps and fps >= 1.0 else 1
+            frame_idx = 0
+            while frames_sampled < _VIDEO_FRAME_CAP:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                if frame_idx % step == 0:
+                    ok_enc, buf = cv2.imencode(".jpg", frame)
+                    if ok_enc:
+                        detected.extend(
+                            await detect_and_embed_async(engine, buf.tobytes())
+                        )
+                    frames_sampled += 1
+                frame_idx += 1
+        finally:
+            cap.release()
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    # Dedup faces across frames: one cluster per distinct person, keep the
+    # highest-quality instance as the cluster representative.
+    clusters: list[dict] = []
+    for f in detected:
+        placed = False
+        for c in clusters:
+            if cosine_similarity(f.embedding, c["rep"].embedding) >= _VIDEO_SAME_PERSON:
+                c["frames_seen"] += 1
+                if f.quality > c["rep"].quality:
+                    c["rep"] = f
+                placed = True
+                break
+        if not placed:
+            clusters.append({"rep": f, "frames_seen": 1})
+
+    corpus = await FaceRepository(session).list_with_embeddings(investigation_id=None)
+    by_id = {str(rec.id): rec for rec in corpus}
+    corpus_pairs = [(str(rec.id), rec.embedding) for rec in corpus]
+    cap_k = max(1, min(top_k, 50))
+
+    people = []
+    for c in sorted(clusters, key=lambda x: x["rep"].quality, reverse=True):
+        rep = c["rep"]
+        ranked = rank_by_cosine(rep.embedding, corpus_pairs, floor=POSSIBLE)
+        matches = [_match_record(by_id[fid], score) for fid, score in ranked[:cap_k]]
+        people.append(
+            {
+                "age": (rep.extra or {}).get("age"),
+                "sex": (rep.extra or {}).get("sex"),
+                "quality": round(rep.quality, 4),
+                "frames_seen": c["frames_seen"],
+                "matches": matches,
+            }
+        )
+
+    return {
+        "frames_sampled": frames_sampled,
+        "faces_found": len(people),
+        "indexed_faces": len(corpus),
+        "people": people,
+        "note": (
+            "Faces sampled from the video and ranked against the local index. A high "
+            "score is a potential match to observe, never a confirmed identity."
+        ),
+    }
+
+
 @router.post("/frame")
 async def frame(
     file: UploadFile = File(...),
