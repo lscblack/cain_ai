@@ -11,6 +11,7 @@ import uuid
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,6 +92,75 @@ def _match_record(rec: Face, score: float) -> dict:
         "sex": extra.get("sex"),
         "description": describe_face(rec.extra, rec.source_url),
     }
+
+
+# One person photographed in different places still scores high against each
+# other; group ranked matches whose embeddings are this close into one person.
+GROUP_SAME_PERSON = 0.50  # cosine (== 50% in the UI); tunable
+
+
+def _group_people(ranked: list, by_id: dict, *, top_k: int = 20) -> list[dict]:
+    """Collapse ranked matches into distinct people so the same person seen on
+    several pages shows once, with all their appearances (place/event) attached.
+    """
+    clusters: list[dict] = []
+    for face_id, score in ranked:
+        rec = by_id.get(face_id)
+        if rec is None or not rec.embedding:
+            continue
+        placed = False
+        for cl in clusters:
+            if cosine_similarity(rec.embedding, cl["emb"]) >= GROUP_SAME_PERSON:
+                cl["members"].append((rec, score))
+                placed = True
+                break
+        if not placed:
+            clusters.append({"emb": rec.embedding, "rep": rec, "rep_score": score,
+                             "members": [(rec, score)]})
+
+    fields = ("names", "emails", "phones", "usernames", "titles", "orgs", "locations")
+    people: list[dict] = []
+    for cl in clusters[:top_k]:
+        rep, rep_score = cl["rep"], cl["rep_score"]  # first member = highest score
+        agg: dict[str, list[str]] = {k: [] for k in fields}
+        seen: dict[str, set] = {k: set() for k in fields}
+        appearances = []
+        for rec, score in cl["members"]:
+            ex = rec.extra or {}
+            for k in fields:
+                for v in ex.get(k) or []:
+                    s = str(v).strip()
+                    if s and s.lower() not in seen[k]:
+                        seen[k].add(s.lower())
+                        agg[k].append(s)
+            rid = str(rec.id)
+            b = band_for_similarity(score)
+            appearances.append({
+                "face_id": rid,
+                "crop_url": f"/intelligence/face/crop/{rid}" if has_crop(rid) else None,
+                "image_url": ex.get("image_url"),
+                "source_url": rec.source_url,
+                "page_title": ex.get("page_title"),
+                "caption": ex.get("caption"),
+                "similarity_pct": round(score * 100, 1),
+                "band": b.value if b else "no_match",
+            })
+        rep_ex = rep.extra or {}
+        rb = band_for_similarity(rep_score)
+        people.append({
+            "person_id": str(rep.id),
+            "name": agg["names"][0] if agg["names"] else (rep_ex.get("page_title") or None),
+            **agg,
+            "age": rep_ex.get("age"),
+            "sex": rep_ex.get("sex"),
+            "similarity_pct": round(rep_score * 100, 1),
+            "band": rb.value if rb else "no_match",
+            "crop_url": f"/intelligence/face/crop/{rep.id}" if has_crop(str(rep.id)) else None,
+            "appearance_count": len(appearances),
+            "appearances": appearances,
+            "description": describe_face(rep.extra, rep.source_url),
+        })
+    return people
 
 
 @router.get("/status")
@@ -222,11 +292,73 @@ async def search(
         "faces_detected": len(faces),
         "indexed_faces": len(corpus),
         "matches": scored[: max(1, min(top_k, 100))],
+        # Grouped: same person across pages collapsed into one, with all their
+        # appearances (place/event) attached — avoids duplicate people in results.
+        "people": _group_people(ranked, by_id, top_k=max(1, min(top_k, 100))),
         "note": (
             "Ranked by facial similarity to the query. A high score is a potential match "
             "to observe, never a confirmed identity."
         ),
     }
+
+
+class _BioRequest(BaseModel):
+    name: str | None = None
+    names: list[str] = []
+    titles: list[str] = []
+    orgs: list[str] = []
+    locations: list[str] = []
+    captions: list[str] = []
+    sources: list[str] = []
+    age: int | None = None
+    sex: str | None = None
+
+
+def _compose_bio_fallback(b: "_BioRequest") -> str:
+    parts: list[str] = []
+    who = b.name or (b.names[0] if b.names else "This subject")
+    demo = " · ".join(x for x in [b.sex, f"~{b.age}y" if (b.age or 0) > 0 else None] if x)
+    parts.append(f"{who}{(' (' + demo + ')') if demo else ''} — potential match, not a confirmed identity.")
+    if b.titles or b.orgs:
+        parts.append("Role: " + " / ".join([*b.titles[:2], *b.orgs[:2]]) + ".")
+    if b.locations:
+        parts.append("Seen in: " + ", ".join(b.locations[:4]) + ".")
+    if len(b.sources) > 0:
+        parts.append(f"Observed across {len(b.sources)} public source(s).")
+    if b.captions:
+        parts.append("Context: " + " ".join(b.captions[:2]))
+    return " ".join(parts)
+
+
+@router.post("/bio")
+async def face_bio(body: _BioRequest, operator: User = Depends(get_current_operator)) -> dict:
+    """AI-summarized bio for a grouped person, from public OSINT context only.
+    Falls back to a composed summary when no AI provider is configured."""
+    from app.ai.router import AIMessage, get_ai_provider
+
+    provider = get_ai_provider()
+    if provider is None or not provider.available():
+        return {"available": False, "bio": _compose_bio_fallback(body), "model": None}
+
+    context = {
+        "name": body.name, "names": body.names, "titles": body.titles, "orgs": body.orgs,
+        "locations": body.locations, "captions": body.captions, "sources": body.sources,
+        "age": body.age, "sex": body.sex,
+    }
+    system = (
+        "You are an OSINT analyst. Write a concise (3-5 sentence) neutral bio of a person "
+        "from the PUBLIC data provided only. Do NOT invent facts not present. This is a "
+        "potential facial-recognition match, so hedge: say 'appears to be' / 'potential', "
+        "never assert a confirmed identity. No disclaimers beyond that hedging."
+    )
+    try:
+        summary = await provider.chat(
+            [AIMessage(role="system", content=system),
+             AIMessage(role="user", content=json.dumps(context))]
+        )
+        return {"available": True, "bio": summary.strip(), "model": provider.name}
+    except Exception:
+        return {"available": False, "bio": _compose_bio_fallback(body), "model": None}
 
 
 _VIDEO_ALLOWED = {"video/mp4", "video/webm", "video/quicktime"}

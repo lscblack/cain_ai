@@ -249,6 +249,47 @@ async def test_search_1_to_n(client, auth_headers):
 
 
 @requires_engine
+async def test_search_groups_same_person(client, auth_headers):
+    """Same person indexed from two pages collapses into one grouped person."""
+    case = (await client.post("/investigations", json={"name": "Grp"}, headers=auth_headers)).json()
+    for page in ("https://a.example/p1", "https://b.example/p2"):
+        with open(FACE1, "rb") as f:  # same person, different "places"
+            await client.post(
+                "/intelligence/face/detect",
+                files={"file": ("face1.jpg", f, "image/jpeg")},
+                data={"investigation_id": case["id"], "source_url": page},
+                headers=auth_headers,
+            )
+    with open(FACE1, "rb") as f:
+        r = await client.post(
+            "/intelligence/face/search",
+            files={"file": ("q.jpg", f, "image/jpeg")},
+            headers=auth_headers,
+        )
+    body = r.json()
+    assert "people" in body
+    # two matches, but ONE grouped person with two appearances
+    assert len(body["matches"]) >= 2
+    assert len(body["people"]) == 1
+    person = body["people"][0]
+    assert person["appearance_count"] == 2
+    srcs = {a["source_url"] for a in person["appearances"]}
+    assert srcs == {"https://a.example/p1", "https://b.example/p2"}
+
+
+async def test_bio_fallback_without_ai(client, auth_headers):
+    r = await client.post(
+        "/intelligence/face/bio",
+        json={"name": "Jane Doe", "titles": ["Engineer"], "locations": ["Kigali"], "sources": ["x", "y"]},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "Jane Doe" in body["bio"]
+    assert "potential" in body["bio"].lower()
+
+
+@requires_engine
 async def test_search_match_has_report_fields(client, auth_headers):
     case = (await client.post("/investigations", json={"name": "Rpt"}, headers=auth_headers)).json()
     with open(FACE1, "rb") as f:
