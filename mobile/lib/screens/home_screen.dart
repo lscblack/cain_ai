@@ -2,10 +2,18 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../models/voice_intent.dart';
 import '../services/api_client.dart';
 import '../theme/hacker_theme.dart';
 import 'face_search_screen.dart';
+import 'live_camera_screen.dart';
 import 'settings_screen.dart';
+import 'voice_command_screen.dart';
+import 'tools/universal_search_screen.dart';
+import 'tools/phone_search_screen.dart';
+import 'tools/email_search_screen.dart';
+import 'tools/username_search_screen.dart';
+import 'tools/investigations_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final VoidCallback onLoggedOut;
@@ -42,18 +50,78 @@ class _HomeScreenState extends State<HomeScreen> {
     widget.onLoggedOut();
   }
 
+  void _go(Widget screen) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
+
+  /// Route a parsed voice command to the right screen ("Jarvis").
+  void _routeIntent(VoiceIntent intent) {
+    final arg = intent.argument;
+    switch (intent.action) {
+      case VoiceAction.faceSearch:
+        _go(const FaceSearchScreen());
+        break;
+      case VoiceAction.liveCamera:
+        _go(const LiveCameraScreen());
+        break;
+      case VoiceAction.videoSearch:
+        // C3 video search — folded in during integration; falls back if absent.
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Video search — open from the dashboard')));
+        break;
+      case VoiceAction.universalSearch:
+        _go(UniversalSearchScreen(initialQuery: arg));
+        break;
+      case VoiceAction.phone:
+        _go(PhoneSearchScreen(initialQuery: arg));
+        break;
+      case VoiceAction.email:
+        _go(EmailSearchScreen(initialQuery: arg));
+        break;
+      case VoiceAction.username:
+        _go(UsernameSearchScreen(initialQuery: arg));
+        break;
+      case VoiceAction.investigations:
+        _go(const InvestigationsScreen());
+        break;
+      case VoiceAction.unknown:
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text("Didn't catch a command")));
+        break;
+    }
+  }
+
+  void _openVoice() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VoiceCommandScreen(onIntent: (intent) {
+          Navigator.pop(context); // close the voice screen first
+          _routeIntent(intent);
+        }),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tiles = <_Tile>[
       _Tile('Face Search', Icons.person_search, KaiColors.accent,
-          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FaceSearchScreen()))),
-      _Tile('Live Camera', Icons.videocam_outlined, KaiColors.verified, null, soon: true),
+          () => _go(const FaceSearchScreen())),
+      _Tile('Live Detection', Icons.videocam_outlined, KaiColors.accent,
+          () => _go(const LiveCameraScreen())),
+      _Tile('Universal Search', Icons.search, KaiColors.ink,
+          () => _go(const UniversalSearchScreen())),
+      _Tile('Phone', Icons.phone_outlined, KaiColors.verified,
+          () => _go(const PhoneSearchScreen())),
+      _Tile('Email', Icons.alternate_email, KaiColors.verified,
+          () => _go(const EmailSearchScreen())),
+      _Tile('Username', Icons.person_search_outlined, KaiColors.verified,
+          () => _go(const UsernameSearchScreen())),
+      _Tile('Investigations', Icons.folder_open_outlined, KaiColors.warn,
+          () => _go(const InvestigationsScreen())),
+      _Tile('Voice (Jarvis)', Icons.mic, KaiColors.accent, _openVoice),
       _Tile('Video Search', Icons.movie_outlined, KaiColors.warn, null, soon: true),
-      _Tile('Universal Search', Icons.search, KaiColors.ink, null, soon: true),
-      _Tile('Phone', Icons.phone_outlined, KaiColors.ink, null, soon: true),
-      _Tile('Email', Icons.alternate_email, KaiColors.ink, null, soon: true),
-      _Tile('Username', Icons.person_outline, KaiColors.ink, null, soon: true),
-      _Tile('Investigations', Icons.folder_outlined, KaiColors.ink, null, soon: true),
     ];
 
     return Scaffold(
@@ -79,6 +147,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _openVoice,
+        backgroundColor: KaiColors.accent,
+        foregroundColor: KaiColors.bg,
+        tooltip: 'Voice command',
+        child: const Icon(Icons.mic),
       ),
       body: GridView.count(
         padding: const EdgeInsets.all(16),
