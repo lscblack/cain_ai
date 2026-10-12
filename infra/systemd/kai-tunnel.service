@@ -1,0 +1,14 @@
+[Unit]
+Description=KAI Cloudflare named tunnel (stable HTTPS for mobile)
+After=network-online.target kai-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs the named tunnel defined by scripts/kai_named_tunnel.sh (reads ~/.cloudflared/kai-config.yml).
+ExecStart=/home/lscblack/.local/bin/cloudflared tunnel --no-autoupdate --config %h/.cloudflared/kai-config.yml run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -159,6 +161,7 @@ class ReportCard extends StatelessWidget {
                 ],
               ),
             ),
+          _ConnectionsSection(faceId: m.faceId),
         ],
       ),
     );
@@ -204,4 +207,134 @@ class _NoFace extends StatelessWidget {
         color: KaiColors.panel2,
         child: const Icon(Icons.person, color: KaiColors.muted, size: 28),
       );
+}
+
+/// Lazy-loaded "Connected people" — associates via public co-occurrence.
+class _ConnectionsSection extends StatefulWidget {
+  final String faceId;
+  const _ConnectionsSection({required this.faceId});
+
+  @override
+  State<_ConnectionsSection> createState() => _ConnectionsSectionState();
+}
+
+class _ConnectionsSectionState extends State<_ConnectionsSection> {
+  bool _open = false;
+  bool _loading = false;
+  List<Map<String, dynamic>>? _conns;
+
+  String _reasonLabel(String r) {
+    if (r == 'co_located') return 'same page';
+    if (r.startsWith('shares:')) return 'shares ${r.substring(7)}';
+    return r;
+  }
+
+  Future<void> _load() async {
+    setState(() => _open = true);
+    if (_conns != null || _loading) return;
+    setState(() => _loading = true);
+    try {
+      final r = await ApiClient.instance
+          .getJson('/intelligence/face/${widget.faceId}/connections');
+      if (r.statusCode == 200) {
+        final list = (jsonDecode(r.body)['connections'] as List? ?? [])
+            .map((e) => (e as Map).cast<String, dynamic>())
+            .toList();
+        setState(() => _conns = list);
+      } else {
+        setState(() => _conns = []);
+      }
+    } catch (_) {
+      setState(() => _conns = []);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: KaiColors.line)),
+      ),
+      child: !_open
+          ? InkWell(
+              onTap: _load,
+              child: const Row(children: [
+                Icon(Icons.groups_outlined, size: 15, color: KaiColors.verified),
+                SizedBox(width: 6),
+                Text('Connected people',
+                    style: TextStyle(color: KaiColors.verified, fontSize: 12)),
+              ]),
+            )
+          : _loading
+              ? const Text('finding connections…',
+                  style: TextStyle(color: KaiColors.muted, fontSize: 11))
+              : (_conns == null || _conns!.isEmpty)
+                  ? const Text('No connections found.',
+                      style: TextStyle(color: KaiColors.muted, fontSize: 11))
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${_conns!.length} connected — associates to observe, not confirmed',
+                          style: const TextStyle(
+                              color: KaiColors.verified, fontSize: 10, letterSpacing: 0.5),
+                        ),
+                        const SizedBox(height: 6),
+                        ..._conns!.map(_row),
+                      ],
+                    ),
+    );
+  }
+
+  Widget _row(Map<String, dynamic> c) {
+    final names = (c['names'] as List?)?.cast<dynamic>() ?? const [];
+    final title = names.isNotEmpty
+        ? names.first.toString()
+        : (c['page_title']?.toString() ?? (c['face_id']?.toString() ?? '').padRight(8).substring(0, 8));
+    final reasons = (c['reasons'] as List?)?.cast<dynamic>() ?? const [];
+    final crop = c['crop_url']?.toString();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          if (crop != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.network(
+                ApiClient.instance.imageUrl(crop),
+                headers: ApiClient.instance.imageHeaders,
+                width: 32,
+                height: 32,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    Container(width: 32, height: 32, color: KaiColors.panel2),
+              ),
+            ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: KaiColors.ink, fontSize: 12)),
+          ),
+          ...reasons.take(2).map((r) => Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: KaiColors.line),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(_reasonLabel(r.toString()),
+                      style: const TextStyle(color: KaiColors.muted, fontSize: 9)),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
 }
