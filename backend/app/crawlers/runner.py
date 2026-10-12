@@ -26,6 +26,7 @@ from app.crawlers.extract import (
     extract_links,
     extract_page_meta,
     extract_person_names,
+    extract_text_excerpt,
     path_allowed,
 )
 from app.database.models.face import Face
@@ -198,6 +199,7 @@ async def crawl_source(
 
             _img_cap = min(_MAX_IMAGES_PER_PAGE, get_settings().crawl_max_images_per_page)
             contexts = extract_images_with_context(html, url)[:_img_cap]
+            page_text = extract_text_excerpt(html)  # "what the page says"
             page_images = 0
             page_faces = 0
             for ctx in contexts:
@@ -208,7 +210,8 @@ async def crawl_source(
                                         "emails": contacts["emails"], "phones": contacts["phones"],
                                         "usernames": contacts["usernames"],
                                         "titles": page.meta.get("titles"), "orgs": page.meta.get("orgs"),
-                                        "locations": page.meta.get("locations")},
+                                        "locations": page.meta.get("locations"),
+                                        "context": page_text},
                     seen_embeddings=seen_embeddings,
                 )
                 if is_dup:
@@ -325,6 +328,7 @@ async def _process_image(
                     "titles": ctx.get("titles") or [],
                     "orgs": ctx.get("orgs") or [],
                     "locations": ctx.get("locations") or [],
+                    "context": ctx.get("context"),
                 },
             )
             session.add(rec)

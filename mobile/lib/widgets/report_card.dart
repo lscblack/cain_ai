@@ -161,6 +161,23 @@ class ReportCard extends StatelessWidget {
                 ],
               ),
             ),
+          if ((m.context ?? '').isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('WHAT SOURCES SAY',
+                      style: TextStyle(color: KaiColors.verified, fontSize: 10, letterSpacing: 1)),
+                  const SizedBox(height: 2),
+                  Text(m.context!,
+                      maxLines: 5,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: KaiColors.muted, fontSize: 11, height: 1.4)),
+                ],
+              ),
+            ),
           _ConnectionsSection(faceId: m.faceId),
         ],
       ),

@@ -11,6 +11,7 @@ export interface Appearance {
   source_url?: string | null;
   page_title?: string | null;
   caption?: string | null;
+  context?: string | null;
   similarity_pct: number;
   band: string;
 }
@@ -31,6 +32,7 @@ export interface Person {
   crop_url?: string | null;
   appearance_count: number;
   appearances: Appearance[];
+  contexts?: string[];
   description?: string | null;
 }
 
@@ -110,6 +112,7 @@ export function FaceResultsHUD({
         orgs: person.orgs,
         locations: person.locations,
         captions: person.appearances.map((a) => a.caption).filter(Boolean),
+        contexts: person.contexts ?? [],
         sources: person.appearances.map((a) => a.source_url).filter(Boolean),
         age: person.age,
         sex: person.sex,
@@ -204,6 +207,22 @@ export function FaceResultsHUD({
           <Attr icon={<User2 size={13} />} label="Social" values={person.usernames} />
         </div>
 
+        {/* WHAT SOURCES SAY */}
+        {(person.contexts?.length ?? 0) > 0 && (
+          <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--kai-border)" }}>
+            <div className="kai-metadata mb-1 uppercase" style={{ color: "var(--kai-hud)" }}>
+              What sources say
+            </div>
+            <div className="max-h-40 space-y-2 overflow-y-auto">
+              {person.contexts!.map((c, i) => (
+                <p key={i} className="text-xs leading-relaxed" style={{ color: "var(--kai-muted)" }}>
+                  {c}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* AI BIO */}
         <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--kai-border)" }}>
           {!bio ? (
@@ -281,6 +300,12 @@ export function FaceResultsHUD({
             <div className="kai-metadata">{domainOf(app?.source_url)} · {app?.similarity_pct}%</div>
           </div>
         </div>
+
+        {(app?.caption || app?.context) && (
+          <p className="mt-2 max-h-20 overflow-y-auto text-xs leading-relaxed" style={{ color: "var(--kai-muted)" }}>
+            {app?.caption || app?.context}
+          </p>
+        )}
 
         {/* filmstrip */}
         {person.appearances.length > 1 && (

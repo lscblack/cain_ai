@@ -150,6 +150,25 @@ def extract_images_with_context(html: str, base_url: str) -> list[dict]:
     return out
 
 
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1>", re.I | re.S)
+_ANY_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def extract_text_excerpt(html: str, max_len: int = 700) -> str | None:
+    """A clean plain-text excerpt of the page's visible text — 'what the page
+    says', stored alongside faces so a dossier has context, not just a caption."""
+    if not html:
+        return None
+    h = _SCRIPT_STYLE_RE.sub(" ", html)
+    text = _html.unescape(_ANY_TAG_RE.sub(" ", h))
+    text = " ".join(text.split())
+    if not text:
+        return None
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rsplit(" ", 1)[0] + "…"
+
+
 _EMAIL_RE = re.compile(r"\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b", re.I)
 _HANDLE_RE = re.compile(r"(?<![\w@])@([a-z0-9_]{3,30})\b", re.I)
 # explicit mailto: / tel: links — the most reliable contact signal

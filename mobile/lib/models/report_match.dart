@@ -15,6 +15,7 @@ class ReportMatch {
   final String? sex;
   final String? description;
   final String? caption;
+  final String? context;
   final String? pageTitle;
   final String? sourceUrl;
 
@@ -34,6 +35,7 @@ class ReportMatch {
     this.sex,
     this.description,
     this.caption,
+    this.context,
     this.pageTitle,
     this.sourceUrl,
   });
@@ -57,6 +59,7 @@ class ReportMatch {
         sex: j['sex'] as String?,
         description: j['description'] as String?,
         caption: j['caption'] as String?,
+        context: j['context'] as String?,
         pageTitle: j['page_title'] as String?,
         sourceUrl: j['source_url'] as String?,
       );

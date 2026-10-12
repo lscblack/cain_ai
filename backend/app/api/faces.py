@@ -80,6 +80,7 @@ def _match_record(rec: Face, score: float) -> dict:
         "crop_url": f"/intelligence/face/crop/{rec.id}" if has_crop(str(rec.id)) else None,
         "page_title": extra.get("page_title"),
         "caption": extra.get("caption"),
+        "context": extra.get("context"),
         "names": extra.get("names") or [],
         "emails": extra.get("emails") or [],
         "phones": extra.get("phones") or [],
@@ -142,6 +143,7 @@ def _group_people(ranked: list, by_id: dict, *, top_k: int = 20) -> list[dict]:
                 "source_url": rec.source_url,
                 "page_title": ex.get("page_title"),
                 "caption": ex.get("caption"),
+                "context": ex.get("context"),
                 "similarity_pct": round(score * 100, 1),
                 "band": b.value if b else "no_match",
             })
@@ -158,6 +160,9 @@ def _group_people(ranked: list, by_id: dict, *, top_k: int = 20) -> list[dict]:
             "crop_url": f"/intelligence/face/crop/{rep.id}" if has_crop(str(rep.id)) else None,
             "appearance_count": len(appearances),
             "appearances": appearances,
+            "contexts": list(dict.fromkeys(
+                a["context"] for a in appearances if a.get("context")
+            ))[:5],
             "description": describe_face(rep.extra, rep.source_url),
         })
     return people
@@ -309,6 +314,7 @@ class _BioRequest(BaseModel):
     orgs: list[str] = []
     locations: list[str] = []
     captions: list[str] = []
+    contexts: list[str] = []
     sources: list[str] = []
     age: int | None = None
     sex: str | None = None
@@ -342,7 +348,8 @@ async def face_bio(body: _BioRequest, operator: User = Depends(get_current_opera
 
     context = {
         "name": body.name, "names": body.names, "titles": body.titles, "orgs": body.orgs,
-        "locations": body.locations, "captions": body.captions, "sources": body.sources,
+        "locations": body.locations, "captions": body.captions,
+        "what_sources_say": body.contexts, "sources": body.sources,
         "age": body.age, "sex": body.sex,
     }
     system = (
