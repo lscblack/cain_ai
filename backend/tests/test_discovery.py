@@ -66,6 +66,17 @@ def test_name_deep_queries_covers_key_sources():
     assert len(out) == len(set(out))  # deduped
 
 
+def test_name_deep_queries_includes_life_events():
+    from app.discovery.queries import name_deep_queries
+
+    out = name_deep_queries(["Jane Doe"])
+    # Freshness / life-event angles keep records current (incl. death status).
+    assert '"Jane Doe" obituary' in out
+    assert '"Jane Doe" died' in out
+    assert '"Jane Doe" latest news' in out
+    assert '"Jane Doe" appointed' in out
+
+
 def test_onion_extraction_from_ahmia_html():
     from app.discovery.onion import _extract_onions
 

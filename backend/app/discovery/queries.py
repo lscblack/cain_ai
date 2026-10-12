@@ -48,8 +48,20 @@ _NAME_ANGLES = [
     "press", "news", "profile picture", "@gmail.com", "blog",
 ]
 
+# Life-event / freshness angles: always run (independent of angle_budget) so the
+# index keeps recent public status — appointments, awards, legal news, and, yes,
+# whether/when the person died. Public-record signals only.
+_LIFE_ANGLES = [
+    "obituary", "died", "death", "passed away", "funeral",
+    "date of birth", "born", "age",
+    "latest news", "recent news", "current role", "today",
+    "appointed", "award", "arrested", "sentenced", "statement",
+]
 
-def name_deep_queries(names: list[str], *, site_budget: int = 10, angle_budget: int = 16) -> list[str]:
+
+def name_deep_queries(
+    names: list[str], *, site_budget: int = 10, angle_budget: int = 16, life_budget: int = 16
+) -> list[str]:
     """Per-person queries for discovery.
 
     Leads with the broad, productive queries (bare name, quoted name, name + a few
@@ -75,6 +87,9 @@ def name_deep_queries(names: list[str], *, site_budget: int = 10, angle_budget: 
         add(quoted)   # exact phrase
         for angle in _NAME_ANGLES[:angle_budget]:
             add(f"{n} {angle}")
+        # Life-event / freshness angles use the exact-phrase name to stay on-subject.
+        for angle in _LIFE_ANGLES[:life_budget]:
+            add(f"{quoted} {angle}")
         for site in _NAME_SITES[:site_budget]:
             add(f"{quoted} site:{site}")
     return out
