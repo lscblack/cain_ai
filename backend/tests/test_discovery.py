@@ -77,6 +77,25 @@ def test_name_deep_queries_includes_life_events():
     assert '"Jane Doe" appointed' in out
 
 
+def test_name_deep_queries_includes_family():
+    from app.discovery.queries import name_deep_queries
+
+    out = name_deep_queries(["Jane Doe"])
+    assert '"Jane Doe" wife' in out
+    assert '"Jane Doe" children' in out
+    assert '"Jane Doe" family' in out
+
+
+async def test_resolve_subject_fallback_without_ai():
+    from app.api.discovery import _resolve_subject
+
+    subject, queries = await _resolve_subject("who is the president of Rwanda")
+    assert subject == "who is the president of Rwanda"
+    assert any("family" in q for q in queries)
+    assert any("photos" in q or "images" in q for q in queries)
+    assert any("age" in q for q in queries)
+
+
 def test_onion_extraction_from_ahmia_html():
     from app.discovery.onion import _extract_onions
 

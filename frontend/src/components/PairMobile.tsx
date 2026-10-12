@@ -7,15 +7,27 @@ import { getToken } from "@/lib/api";
 const PAIR_URL_KEY = "kai.pairUrl";
 
 function defaultUrl(): string {
+  // 1) explicit phone-facing backend URL from env (recommended)
+  const pub = import.meta.env.VITE_PUBLIC_API_URL as string | undefined;
+  if (pub && /^https?:\/\//.test(pub)) return pub.replace(/\/+$/, "");
+  // 2) a previously used value
   try {
     const saved = localStorage.getItem(PAIR_URL_KEY);
     if (saved) return saved;
   } catch {
     /* ignore */
   }
+  // 3) absolute VITE_API_URL if set
   const base = import.meta.env.VITE_API_URL as string | undefined;
-  // Only prefill an absolute URL (a relative "/api" isn't reachable from a phone).
-  return base && /^https?:\/\//.test(base) ? base : "";
+  if (base && /^https?:\/\//.test(base)) return base.replace(/\/+$/, "");
+  // 4) derive from how the dashboard is being viewed (LAN IP -> PC IP:8001)
+  try {
+    const h = window.location.hostname;
+    if (h && h !== "localhost" && h !== "127.0.0.1") return `http://${h}:8001`;
+  } catch {
+    /* ignore */
+  }
+  return "";
 }
 
 /** "Pair mobile" modal: shows a QR encoding {u: backendUrl, t: token} that the

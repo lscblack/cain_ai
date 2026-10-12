@@ -150,6 +150,78 @@ async def investigate_names(
     return DiscoveryRunStarted(id=run_id, available=search_available())
 
 
+class AskIn(BaseModel):
+    question: str
+    auto_crawl: bool = True
+
+
+async def _resolve_subject(question: str) -> tuple[str, list[str]]:
+    """Turn a natural-language question into a subject + web queries, covering
+    bio, age, family and photos. Uses the AI provider when configured; otherwise
+    composes queries directly. Public-OSINT only."""
+    q = question.strip()
+    fallback = (q, [
+        q, f"{q} biography", f"{q} age date of birth",
+        f"{q} wife husband children family", f"{q} photos images",
+    ])
+    try:
+        from app.ai.router import AIMessage, get_ai_provider
+
+        provider = get_ai_provider()
+        if provider is None or not provider.available():
+            return fallback
+        system = (
+            "Extract the primary PERSON a question is about. Return STRICT JSON only: "
+            '{"subject": "<full name or best guess>", "queries": ["<web search query>", ...]}. '
+            "Include queries covering biography, age/date of birth, family (spouse, children, "
+            "parents) and photos. Public OSINT only. If no specific person is implied, set "
+            "subject to the key phrase."
+        )
+        out = await provider.chat(
+            [AIMessage(role="system", content=system), AIMessage(role="user", content=q)]
+        )
+        data = json.loads(out[out.find("{"): out.rfind("}") + 1])
+        subject = (str(data.get("subject") or q)).strip()
+        queries = [str(x).strip() for x in (data.get("queries") or []) if str(x).strip()][:20]
+        if not queries:
+            queries = fallback[1]
+        return subject, queries
+    except Exception:
+        return fallback
+
+
+@router.post("/ask", response_model=DiscoveryRunStarted, status_code=status.HTTP_202_ACCEPTED)
+async def ask(
+    body: AskIn,
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+) -> DiscoveryRunStarted:
+    """Natural-language investigation: 'who is the president of Rwanda' → resolve
+    the subject, then discover + crawl public sources for their bio, age, family
+    and images. Potential leads from public data, never confirmed identity."""
+    if not body.question.strip():
+        raise HTTPException(status_code=422, detail="Empty question.")
+    subject, queries = await _resolve_subject(body.question)
+    names = [subject][:1]
+    run_id = new_run_id()
+    await mark_queued(redis, run_id, {"targets": names})
+    from app.discovery.onion import onion_available
+
+    raw = await redis.get(_run_key(run_id))
+    state = json.loads(raw) if raw else {}
+    state.update({"kind": "investigation", "names": names, "status": "queued",
+                  "question": body.question.strip(),
+                  "onion_enabled": onion_available(), "onion_sources": 0})
+    await redis.set(_run_key(run_id), json.dumps(state), ex=60 * 60 * 24)
+    await redis.lpush(INVESTIGATIONS_KEY, run_id)
+    await redis.ltrim(INVESTIGATIONS_KEY, 0, 199)
+    await enqueue_discovery(redis, {"kind": "names", "run_id": run_id, "names": names,
+                                    "queries": queries[:60], "auto_crawl": body.auto_crawl})
+    logger.info("ask investigation %s queued by %s: %r -> %r",
+                run_id, operator.email, body.question[:80], subject)
+    return DiscoveryRunStarted(id=run_id, available=search_available())
+
+
 @router.get("/investigations")
 async def list_investigations(
     operator: User = Depends(get_current_operator),

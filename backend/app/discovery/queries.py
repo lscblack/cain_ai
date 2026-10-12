@@ -58,6 +58,12 @@ _LIFE_ANGLES = [
     "appointed", "award", "arrested", "sentenced", "statement",
 ]
 
+# Family angles — public relations only (surfaces relatives for the graph).
+_FAMILY_ANGLES = [
+    "wife", "husband", "spouse", "children", "son", "daughter",
+    "family", "parents", "married", "siblings",
+]
+
 
 def name_deep_queries(
     names: list[str], *, site_budget: int = 10, angle_budget: int = 16, life_budget: int = 16
@@ -89,6 +95,8 @@ def name_deep_queries(
             add(f"{n} {angle}")
         # Life-event / freshness angles use the exact-phrase name to stay on-subject.
         for angle in _LIFE_ANGLES[:life_budget]:
+            add(f"{quoted} {angle}")
+        for angle in _FAMILY_ANGLES:
             add(f"{quoted} {angle}")
         for site in _NAME_SITES[:site_budget]:
             add(f"{quoted} site:{site}")

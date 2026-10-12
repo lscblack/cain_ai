@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Crosshair, Play, Users, Radar, Trash2, ChevronRight, RotateCw } from "lucide-react";
+import { Crosshair, Play, Users, Radar, Trash2, ChevronRight, RotateCw, Search } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
@@ -137,6 +137,8 @@ export function Investigate() {
 
 function NamesTab() {
   const [text, setText] = useState("");
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
   const [tips, setTips] = useState("");
   const [autoCrawl, setAutoCrawl] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
@@ -167,6 +169,24 @@ function NamesTab() {
       open(r.id);
     } catch (e: any) {
       setMsg(e?.detail || "Failed to start investigation.");
+    }
+  }
+
+  async function ask() {
+    const q = question.trim();
+    if (!q) { setMsg("Type a question first."); return; }
+    setMsg(null);
+    setAsking(true);
+    try {
+      const r = await api.post<{ id: string }>("/discovery/ask", { question: q, auto_crawl: autoCrawl });
+      setMsg("Discovery started — reaching across the web for bio, age, family & images.");
+      setQuestion("");
+      await load();
+      open(r.id);
+    } catch (e: any) {
+      setMsg(e?.detail || "Failed to start.");
+    } finally {
+      setAsking(false);
     }
   }
 
@@ -204,8 +224,35 @@ function NamesTab() {
   return (
     <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
       <div className="space-y-4">
+        <section className="hud-panel hud-frame p-4">
+          <div className="mb-2 hud-mono text-xs uppercase hud-glow" style={{ color: "var(--kai-hud)" }}>
+            ◢ Ask — natural language
+          </div>
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask(); }}
+            rows={3}
+            placeholder={"e.g. who is the president of Rwanda — and reach about his family, age and images"}
+            className="w-full border bg-base px-3 py-2 text-sm text-ink outline-none"
+            style={{ borderColor: "var(--kai-hud-dim)" }}
+          />
+          <button
+            onClick={ask}
+            disabled={asking}
+            className="mt-3 flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm uppercase tracking-wider transition disabled:opacity-50"
+            style={{ border: "1px solid var(--kai-hud)", color: "var(--kai-hud)", background: "rgba(34,211,238,0.08)" }}
+          >
+            <Search size={15} /> {asking ? "Reaching the web…" : "Investigate"}
+          </button>
+          <div className="mt-2 kai-metadata">
+            Resolves the subject, then discovers public sources for bio · age · family · images.
+            Potential leads from public data, never confirmed identity.
+          </div>
+        </section>
+
         <section className="border border-line bg-panel-2 p-4">
-          <div className="mb-2 kai-metadata uppercase">Upload names</div>
+          <div className="mb-2 kai-metadata uppercase">Or upload names</div>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
