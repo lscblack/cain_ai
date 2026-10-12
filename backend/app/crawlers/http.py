@@ -1,6 +1,15 @@
-"""Real HTTP fetcher + robots.txt gate for the crawler (SSRF-guarded)."""
+"""Real HTTP fetcher + robots.txt gate for the crawler (SSRF-guarded).
+
+Egress policy: .onion always via Tor; all other traffic via `crawl_proxy` when
+set (Tor SOCKS or an http proxy) so crawling can be anonymised. With a system
+VPN (e.g. ProtonVPN connected) leave `crawl_proxy` empty — OS egress is already
+VPN'd. `crawl_require_proxy` fails closed (no proxy -> no open-web crawl).
+Per-host rate limiting honours a politeness delay and robots Crawl-delay.
+"""
 from __future__ import annotations
 
+import asyncio
+import time
 import urllib.robotparser
 from urllib.parse import urljoin, urlsplit
 
@@ -12,13 +21,33 @@ from app.crawlers.runner import Fetched
 
 _UA = "KAI-OSINT/0.1 (+local research; public pages only; honours robots.txt)"
 
+# Per-host last-request timestamps for rate limiting (politeness).
+_last_hit: dict[str, float] = {}
+_host_locks: dict[str, asyncio.Lock] = {}
+_robots_delay: dict[str, float] = {}  # host -> robots Crawl-delay (seconds)
+
 
 def _proxy_for(url: str) -> str | None:
-    """Return the Tor SOCKS proxy for .onion URLs when configured, else None."""
-    host = urlsplit(url).hostname or ""
-    if host.lower().endswith(".onion"):
-        return get_settings().tor_socks_proxy or None
-    return None
+    """Tor SOCKS for .onion; otherwise the configured all-traffic crawl proxy."""
+    s = get_settings()
+    host = (urlsplit(url).hostname or "").lower()
+    if host.endswith(".onion"):
+        return s.tor_socks_proxy or None
+    return s.crawl_proxy or None
+
+
+async def _rate_limit(host: str, extra_delay: float = 0.0) -> None:
+    s = get_settings()
+    delay = max(s.crawl_rate_delay, extra_delay, _robots_delay.get(host, 0.0))
+    if delay <= 0:
+        return
+    lock = _host_locks.setdefault(host, asyncio.Lock())
+    async with lock:
+        now = time.monotonic()
+        wait = delay - (now - _last_hit.get(host, 0.0))
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_hit[host] = time.monotonic()
 
 
 async def httpx_fetch(url: str) -> Fetched:
@@ -26,9 +55,14 @@ async def httpx_fetch(url: str) -> Fetched:
         validate_public_url(url)
     except UnsafeUrlError:
         return Fetched(status=0)
+    host = (urlsplit(url).hostname or "").lower()
     proxy = _proxy_for(url)
-    if urlsplit(url).hostname.lower().endswith(".onion") and not proxy:
+    if host.endswith(".onion") and not proxy:
         return Fetched(status=0)  # onion requested but Tor not configured
+    # Fail closed: don't let open-web crawls leave without an anonymising proxy.
+    if (not host.endswith(".onion") and get_settings().crawl_require_proxy and not proxy):
+        return Fetched(status=0)
+    await _rate_limit(host)
     try:
         async with httpx.AsyncClient(
             timeout=30.0 if proxy else 15.0, follow_redirects=True,
@@ -58,6 +92,12 @@ class RobotsGate:
             return None  # no robots -> allow
         rp = urllib.robotparser.RobotFileParser()
         rp.parse(resp.body.decode("utf-8", "replace").splitlines())
+        try:
+            cd = rp.crawl_delay(_UA)
+            if cd:
+                _robots_delay[(urlsplit(base).hostname or "").lower()] = float(cd)
+        except Exception:
+            pass
         return rp
 
     async def allowed(self, url: str) -> bool:

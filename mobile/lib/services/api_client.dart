@@ -145,13 +145,19 @@ class ApiClient {
   String imageUrl(String path) => '$baseUrl$path';
   Map<String, String> get imageHeaders => _authHeaders;
 
+  // Hard timeouts so the app never hangs on a slow/unreachable backend.
+  static const _timeout = Duration(seconds: 15);
+  static const _uploadTimeout = Duration(seconds: 120); // video/images take longer
+
   Future<http.Response> getJson(String path) =>
-      http.get(_uri(path), headers: _authHeaders);
+      http.get(_uri(path), headers: _authHeaders).timeout(_timeout);
 
   Future<http.Response> postJson(String path, Map<String, dynamic> body) =>
-      http.post(_uri(path),
-          headers: {'Content-Type': 'application/json', ..._authHeaders},
-          body: jsonEncode(body));
+      http
+          .post(_uri(path),
+              headers: {'Content-Type': 'application/json', ..._authHeaders},
+              body: jsonEncode(body))
+          .timeout(_timeout);
 
   Future<http.Response> postImage(
     String path,
@@ -165,7 +171,7 @@ class ApiClient {
     req.fields.addAll(fields);
     req.files.add(http.MultipartFile.fromBytes('file', bytes,
         filename: filename, contentType: MediaType.parse(contentType)));
-    final streamed = await req.send();
-    return http.Response.fromStream(streamed);
+    final streamed = await req.send().timeout(_uploadTimeout);
+    return http.Response.fromStream(streamed).timeout(_uploadTimeout);
   }
 }

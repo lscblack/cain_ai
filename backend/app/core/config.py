@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     crawl_max_images_per_page: int = Field(default=12)
     # Tor SOCKS proxy for .onion crawling (empty = onion disabled)
     tor_socks_proxy: str = Field(default="")
+    # Route ALL crawler/discovery egress through this proxy (anonymity).
+    # e.g. socks5://127.0.0.1:9050 (Tor) or an http(s) proxy. Empty = direct
+    # (use this when ProtonVPN is connected system-wide — egress is already VPN'd).
+    crawl_proxy: str = Field(default="")
+    # Fail closed: when true, refuse to crawl the open web unless a proxy is set
+    # (so nothing leaves without Tor/VPN-proxy). Does NOT apply to system VPNs.
+    crawl_require_proxy: bool = Field(default=False)
+    # Politeness: minimum seconds between requests to the SAME host.
+    crawl_rate_delay: float = Field(default=1.0)
 
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://127.0.0.1:5173"]
