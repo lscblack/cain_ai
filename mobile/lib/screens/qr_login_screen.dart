@@ -17,6 +17,7 @@ class QrLoginScreen extends StatefulWidget {
 class _QrLoginScreenState extends State<QrLoginScreen> {
   final _controller = MobileScannerController(detectionSpeed: DetectionSpeed.noDuplicates);
   bool _handling = false;
+  bool _isError = false;
   String? _status;
 
   Future<void> _onDetect(BarcodeCapture capture) async {
@@ -26,14 +27,16 @@ class _QrLoginScreenState extends State<QrLoginScreen> {
     setState(() {
       _handling = true;
       _status = 'Pairing…';
+      _isError = false;
     });
-    final ok = await ApiClient.instance.applyQrSession(raw);
+    final err = await ApiClient.instance.applyQrSession(raw);
     if (!mounted) return;
-    if (ok) {
+    if (err == null) {
       widget.onLoggedIn();
     } else {
       setState(() {
-        _status = 'Invalid or expired QR. Try again.';
+        _status = err;
+        _isError = true;
         _handling = false;
       });
     }
@@ -72,9 +75,7 @@ class _QrLoginScreenState extends State<QrLoginScreen> {
                   _status ?? 'Open the web app → "Pair mobile" → scan the QR',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: _status != null && _status!.startsWith('Invalid')
-                        ? KaiColors.danger
-                        : KaiColors.ink,
+                    color: _isError ? KaiColors.danger : KaiColors.ink,
                     fontSize: 13,
                     backgroundColor: Colors.black54,
                   ),

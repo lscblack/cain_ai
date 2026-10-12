@@ -95,22 +95,33 @@ class ApiClient {
   }
 
   /// Apply a QR pairing payload scanned from the web app: {"u": backendUrl,
-  /// "t": token}. Sets the base URL + token and verifies the token works.
-  Future<bool> applyQrSession(String raw) async {
+  /// "t": token}. Returns null on success, or a specific error message so the
+  /// UI can distinguish "can't reach backend" from "bad/expired token".
+  Future<String?> applyQrSession(String raw) async {
+    Map data;
     try {
-      final data = jsonDecode(raw);
-      if (data is! Map) return false;
-      final url = data['u']?.toString();
-      final tok = data['t']?.toString();
-      if (url == null || url.isEmpty || tok == null || tok.isEmpty) return false;
-      await setBaseUrl(url);
-      await setToken(tok);
-      // Verify: /status requires auth, so 200 => token valid & reachable.
-      final r = await getJson('/intelligence/face/status');
-      return r.statusCode == 200;
+      final d = jsonDecode(raw);
+      if (d is! Map) return "That QR isn't a KAI pairing code.";
+      data = d;
     } catch (_) {
-      return false;
+      return "That QR isn't a KAI pairing code.";
     }
+    final url = data['u']?.toString();
+    final tok = data['t']?.toString();
+    if (url == null || url.isEmpty || tok == null || tok.isEmpty) {
+      return "Pairing code is missing the server URL or token.";
+    }
+    await setBaseUrl(url);
+    await setToken(tok);
+    http.Response r;
+    try {
+      r = await getJson('/intelligence/face/status').timeout(const Duration(seconds: 8));
+    } catch (_) {
+      return "Can't reach the backend at $url.\nMake sure your phone is on the same Wi-Fi and the server is listening on the network.";
+    }
+    if (r.statusCode == 200) return null;
+    if (r.statusCode == 401) return "Session expired — regenerate the QR on the web and scan again.";
+    return "Backend responded HTTP ${r.statusCode}.";
   }
 
   /// Re-authenticate silently using stored credentials (after biometric unlock).
