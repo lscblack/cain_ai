@@ -264,6 +264,7 @@ async def get_investigation(
         "names": st.get("names") or [], "approved": st.get("approved", 0),
         "new_domains": st.get("new_domains", 0), "evaluated": st.get("evaluated", 0),
         "onion_sources": st.get("onion_sources", 0), "onion_enabled": st.get("onion_enabled", False),
+        "approved_list": st.get("approved_list", []),  # the actual domains/sources
         "dossiers": dossiers,
     }
 

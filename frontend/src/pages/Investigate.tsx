@@ -146,6 +146,7 @@ function NamesTab() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
   const [activeName, setActiveName] = useState<string | null>(null);
+  const [showSources, setShowSources] = useState(false);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function load() {
@@ -326,12 +327,42 @@ function NamesTab() {
               </div>
             </div>
             <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted">
-              <span>sources approved: <span className="text-ink">{detail.approved ?? 0}</span></span>
+              <button
+                onClick={() => setShowSources((s) => !s)}
+                className="hover:text-ink"
+                title="Show the actual domains found"
+              >
+                sources approved: <span className="text-ink">{detail.approved ?? 0}</span>
+                {(detail.approved_list?.length ?? 0) > 0 && <span className="ml-1 text-accent">{showSources ? "▾" : "▸"}</span>}
+              </button>
               <span>new domains: <span className="text-ink">{detail.new_domains ?? 0}</span></span>
               <span className={detail.onion_enabled ? "" : "opacity-50"}>
                 🧅 dark web: {detail.onion_enabled ? <span className="text-accent">{detail.onion_sources ?? 0} onion source(s)</span> : "tor off"}
               </span>
             </div>
+            {showSources && (detail.approved_list?.length ?? 0) > 0 && (
+              <div className="mb-3 max-h-56 space-y-1 overflow-y-auto border border-line bg-base p-2">
+                {detail.approved_list.map((s: any, i: number) => (
+                  <div key={(s.base_url ?? s.domain ?? i) + i} className="flex items-center gap-2 text-xs">
+                    <span className="shrink-0 font-mono text-[10px]" style={{ color: (s.score ?? 0) >= 80 ? "var(--kai-verified)" : "var(--kai-warn)" }}>
+                      {s.score ?? "—"}
+                    </span>
+                    <a
+                      href={s.base_url ?? `https://${s.domain}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-w-0 flex-1 truncate text-ink hover:text-accent"
+                      title={s.base_url ?? s.domain}
+                    >
+                      {s.domain ?? s.base_url}
+                    </a>
+                    {Array.isArray(s.signals) && s.signals.length > 0 && (
+                      <span className="hidden shrink-0 kai-metadata sm:inline">{s.signals.slice(0, 2).join(" · ")}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="mb-3 flex flex-wrap gap-1">
               {(detail.names ?? []).map((n: string) => {
                 const dd = detail.dossiers?.find((x: Dossier) => x.term === n);
