@@ -248,7 +248,8 @@ function NamesTab() {
   const activeDossier: Dossier | undefined = detail?.dossiers?.find((x: Dossier) => x.term === activeName);
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
+    <div className={openId ? "" : "grid gap-5 lg:grid-cols-[360px_1fr]"}>
+      {!openId && (
       <div className="space-y-4">
         <section className="hud-panel hud-frame p-4">
           <div className="mb-2 hud-mono text-xs uppercase hud-glow" style={{ color: "var(--kai-hud)" }}>
@@ -332,25 +333,59 @@ function NamesTab() {
           )}
         </section>
       </div>
+      )}
 
-      <section className="border border-line bg-panel-2 p-4">
+      <section className={openId ? "hud-panel hud-frame p-4" : "border border-line bg-panel-2 p-4"}>
+        {openId && (
+          <button
+            onClick={() => {
+              setOpenId(null);
+              setDetail(null);
+              setSummary(null);
+              if (poll.current) { clearInterval(poll.current); poll.current = null; }
+            }}
+            className="mb-3 flex items-center gap-1 hud-mono text-xs uppercase"
+            style={{ color: "var(--kai-hud)" }}
+          >
+            ← Back to cases
+          </button>
+        )}
         {!detail ? (
-          <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted">Select or start an investigation to see dossiers.</div>
+          <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted">
+            {openId ? "Loading case…" : "Select or start an investigation to see dossiers."}
+          </div>
         ) : (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="kai-metadata uppercase">Dossiers</span>
-              <div className="flex items-center gap-3">
+              <div className="min-w-0">
+                <div className="hud-mono truncate text-base font-semibold hud-glow" style={{ color: "var(--kai-hud)" }}>
+                  {(detail.names ?? []).join(", ") || "Investigation"}
+                </div>
+                <div className="kai-metadata">case · {detail.id?.slice(0, 10)}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
                 <button
                   onClick={(e) => reinvestigate(detail.names ?? [], e)}
                   title="Run this investigation again with a fresh crawl"
-                  className="flex items-center gap-1.5 border border-accent px-2.5 py-1 text-[10px] uppercase tracking-wider text-accent transition hover:bg-accent/10"
+                  className="flex items-center gap-1.5 border px-2.5 py-1 text-[10px] uppercase tracking-wider transition"
+                  style={{ borderColor: "var(--kai-hud-dim)", color: "var(--kai-hud)" }}
                 >
                   <RotateCw size={12} /> Re-investigate
                 </button>
-                <span className={`text-xs uppercase ${detail.status === "done" ? "text-verified" : "text-accent"}`}>{detail.status}</span>
+                <span className="hud-mono text-xs uppercase" style={{ color: detail.status === "done" ? "var(--kai-verified)" : "var(--kai-hud)" }}>
+                  {detail.status === "done" ? "✓ READY" : detail.status}
+                </span>
               </div>
             </div>
+            {detail.status !== "done" && (
+              <div className="mb-3">
+                <div className="mb-1 flex justify-between kai-metadata">
+                  <span>crawling + organizing findings…</span>
+                  <span style={{ color: "var(--kai-hud)" }}>{detail.progress ?? 0}%</span>
+                </div>
+                <div className="hud-bar"><span style={{ width: `${Math.max(5, detail.progress ?? 0)}%` }} /></div>
+              </div>
+            )}
 
             {/* AI case summary — everything found, organised */}
             <div className="hud-panel hud-frame mb-3 p-3">
