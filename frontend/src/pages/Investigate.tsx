@@ -3,6 +3,7 @@ import { Crosshair, Play, Users, Radar, Trash2, ChevronRight, RotateCw, Search }
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
+import { FamilyGraph } from "@/components/FamilyGraph";
 
 interface Face { face_id: string; crop_url: string; source_url: string | null; description?: string | null }
 interface PageHit { url: string; title: string | null; emails: string[]; phones: string[]; usernames: string[] }
@@ -376,6 +377,9 @@ function NamesTab() {
               })}
             </div>
             {activeDossier ? <DossierView d={activeDossier} /> : <p className="text-sm text-muted">No data for this name yet.</p>}
+            {activeDossier && activeDossier.faces.length > 0 && (
+              <FamilyGraph term={activeDossier.term} faces={activeDossier.faces} />
+            )}
           </>
         )}
       </section>
