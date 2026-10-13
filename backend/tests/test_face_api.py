@@ -145,6 +145,38 @@ async def test_search_face_index_selects_face(client, auth_headers):
 
 
 @requires_engine
+async def test_search_all_faces(client, auth_headers):
+    """all_faces=true searches every detected face in one call."""
+    case = (await client.post("/investigations", json={"name": "All"}, headers=auth_headers)).json()
+    with open(FACE1, "rb") as f:
+        await client.post(
+            "/intelligence/face/detect",
+            files={"file": ("face1.jpg", f, "image/jpeg")},
+            data={"investigation_id": case["id"]},
+            headers=auth_headers,
+        )
+    r = await client.post(
+        "/intelligence/face/search",
+        files={"file": ("two.jpg", _two_face_jpeg(), "image/jpeg")},
+        data={"all_faces": "true"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["all_faces"] is True
+    assert body["faces_detected"] >= 2
+    assert len(body["faces"]) >= 2
+    for fr in body["faces"]:
+        assert "face_index" in fr and "bbox" in fr and "people" in fr
+    # the Lincoln face matches the indexed Lincoln strongly
+    best = max(
+        (p["similarity_pct"] for fr in body["faces"] for p in fr["people"]),
+        default=0,
+    )
+    assert best > 90
+
+
+@requires_engine
 async def test_search_face_index_out_of_range(client, auth_headers):
     with open(FACE1, "rb") as f:
         r = await client.post(

@@ -268,6 +268,7 @@ async def search(
     investigation_id: uuid.UUID | None = Form(default=None),
     top_k: int = Form(default=20),
     face_index: int = Form(default=0),
+    all_faces: bool = Form(default=False),
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
     engine: FaceEngine = Depends(engine_dep),
@@ -275,7 +276,37 @@ async def search(
     _require_engine(engine)
     faces = await detect_and_embed_async(engine, await _read_image(file))
     if not faces:
-        return {"query_face": None, "matches": [], "detail": "no_face_detected_in_query"}
+        return {"query_face": None, "matches": [], "faces": [], "faces_detected": 0,
+                "detail": "no_face_detected_in_query"}
+
+    if all_faces:
+        # Detect once, search EVERY face against the index — one call for the
+        # "Detect Faces" view so each face gets its own grouped results.
+        corpus = await FaceRepository(session).list_with_embeddings(investigation_id=investigation_id)
+        by_id = {str(rec.id): rec for rec in corpus}
+        faces_out = []
+        for idx, f in enumerate(faces):
+            ranked = rank_by_cosine(
+                f.embedding, [(str(rec.id), rec.embedding) for rec in corpus], floor=POSSIBLE
+            )
+            faces_out.append({
+                "face_index": idx,
+                "bbox": f.bbox,
+                "det_score": round(f.det_score, 4),
+                "quality": round(f.quality, 4),
+                "age": (f.extra or {}).get("age"),
+                "sex": (f.extra or {}).get("sex"),
+                "match_count": len(ranked),
+                "people": _group_people(ranked, by_id, top_k=max(1, min(top_k, 100))),
+            })
+        return {
+            "all_faces": True,
+            "faces_detected": len(faces),
+            "indexed_faces": len(corpus),
+            "faces": faces_out,
+            "note": "Each detected face searched against the local index. Potential matches only.",
+        }
+
     if face_index < 0 or face_index >= len(faces):
         return {
             "query_face": None,
