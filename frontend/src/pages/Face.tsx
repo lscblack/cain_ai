@@ -93,6 +93,9 @@ export function Face() {
 
   const [matches, setMatches] = useState<SearchMatch[] | null>(null);
   const [people, setPeople] = useState<Person[] | null>(null);
+  const [facesDetected, setFacesDetected] = useState(1);
+  const [activeFaceIndex, setActiveFaceIndex] = useState(0);
+  const [faceLoading, setFaceLoading] = useState(false);
   const [compareResult, setCompareResult] = useState<any>(null);
   const [discoverResult, setDiscoverResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -129,6 +132,8 @@ export function Face() {
     setError(null);
     setMatches(null);
     setPeople(null);
+    setFacesDetected(1);
+    setActiveFaceIndex(0);
     setStages([]);
     setProgressPct(0);
     // pull indexed crop thumbnails to animate the "scanning" strip
@@ -176,6 +181,8 @@ export function Face() {
             setProgressPct(100);
             setMatches(payload.matches ?? []);
             setPeople(payload.people ?? []);
+            setFacesDetected(payload.faces_detected ?? 1);
+            setActiveFaceIndex(0);
           } else if (ev === "error") {
             setError(payload.detail ?? "Search failed.");
           }
@@ -185,6 +192,28 @@ export function Face() {
       setError("Search failed.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Switch which detected face in the uploaded image we're showing results for.
+  async function searchFace(i: number) {
+    if (!queryFile || i === activeFaceIndex) return;
+    setFaceLoading(true);
+    setActiveFaceIndex(i);
+    try {
+      const fd = new FormData();
+      fd.append("file", queryFile);
+      fd.append("face_index", String(i));
+      const r = await api.postForm<{ matches: SearchMatch[]; people: Person[] }>(
+        "/intelligence/face/search",
+        fd,
+      );
+      setMatches(r.matches ?? []);
+      setPeople(r.people ?? []);
+    } catch {
+      setError("Search failed for that face.");
+    } finally {
+      setFaceLoading(false);
     }
   }
 
@@ -368,6 +397,29 @@ export function Face() {
 
           {mode === "search" && matches && !loading && (
             <>
+              {facesDetected > 1 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="hud-mono text-xs uppercase" style={{ color: "var(--kai-muted)" }}>
+                    ◢ {facesDetected} faces — per-face results:
+                  </span>
+                  {Array.from({ length: facesDetected }).map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => searchFace(i)}
+                      disabled={faceLoading}
+                      className="rounded border px-2.5 py-1 text-xs hud-mono disabled:opacity-50"
+                      style={{
+                        borderColor: i === activeFaceIndex ? "var(--kai-hud)" : "var(--kai-border)",
+                        color: i === activeFaceIndex ? "var(--kai-hud)" : "var(--kai-muted)",
+                        background: i === activeFaceIndex ? "rgba(34,211,238,0.08)" : "transparent",
+                      }}
+                    >
+                      Face {i + 1}
+                    </button>
+                  ))}
+                  {faceLoading && <span className="kai-metadata">searching…</span>}
+                </div>
+              )}
               {(people?.length ?? 0) === 0 ? (
                 <div className="rounded-lg border p-6 text-center" style={{ borderColor: "var(--kai-border)" }}>
                   <div className="text-lg font-semibold" style={{ color: "var(--kai-muted)" }}>NO MATCH FOUND</div>
