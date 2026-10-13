@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             fontSize: 32,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 4,
-                            color: KaiColors.accent)),
+                            color: KaiColors.hud)),
                     const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.settings, color: KaiColors.muted),
@@ -89,7 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     width: double.infinity,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: KaiColors.accent,
+                        backgroundColor: KaiColors.hud,
                         foregroundColor: Colors.black,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         padding: const EdgeInsets.symmetric(vertical: 16),

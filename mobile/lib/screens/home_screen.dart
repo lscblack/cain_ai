@@ -129,14 +129,17 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Row(children: [
           const Text('KAI',
               style: TextStyle(
-                  fontWeight: FontWeight.bold, letterSpacing: 3, color: KaiColors.accent)),
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 4,
+                  color: KaiColors.hud,
+                  shadows: [Shadow(color: Color(0x8822D3EE), blurRadius: 10)])),
           const SizedBox(width: 10),
           if (_engineOnline != null)
             Text(
               _engineOnline! ? '● ENGINE ONLINE' : '● ENGINE OFFLINE',
               style: TextStyle(
                   fontSize: 10,
-                  color: _engineOnline! ? KaiColors.accent : KaiColors.danger),
+                  color: _engineOnline! ? KaiColors.hud : KaiColors.danger),
             ),
         ]),
         actions: [
@@ -150,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _openVoice,
-        backgroundColor: KaiColors.accent,
+        backgroundColor: KaiColors.hud,
         foregroundColor: KaiColors.bg,
         tooltip: 'Voice command',
         child: const Icon(Icons.mic),
@@ -186,21 +189,24 @@ class _TileCard extends StatelessWidget {
           () => ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Coming soon')),
               ),
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        decoration: BoxDecoration(
-          color: KaiColors.panel,
-          border: Border.all(color: KaiColors.line),
-          borderRadius: BorderRadius.circular(10),
-        ),
+      borderRadius: BorderRadius.circular(6),
+      child: HudPanel(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(tile.icon, color: tile.color, size: 28),
+            Row(children: [
+              Icon(tile.icon, color: tile.color, size: 26),
+              const Spacer(),
+              const Text('›', style: TextStyle(color: KaiColors.hud, fontSize: 16)),
+            ]),
             const Spacer(),
-            Text(tile.label,
-                style: const TextStyle(color: KaiColors.ink, fontWeight: FontWeight.bold)),
+            Text(tile.label.toUpperCase(),
+                style: const TextStyle(
+                    color: KaiColors.ink,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                    fontSize: 13)),
           ],
         ),
       ),

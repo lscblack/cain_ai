@@ -109,7 +109,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
                     fontSize: 36,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 6,
-                    color: KaiColors.accent)),
+                    color: KaiColors.hud)),
             const SizedBox(height: 40),
             InkWell(
               onTap: _busy ? null : _authenticate,
@@ -118,10 +118,10 @@ class _UnlockScreenState extends State<UnlockScreen> {
                 padding: const EdgeInsets.all(28),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: KaiColors.accent, width: 2),
+                  border: Border.all(color: KaiColors.hud, width: 2),
                   color: KaiColors.panel,
                 ),
-                child: const Icon(Icons.fingerprint, size: 72, color: KaiColors.accent),
+                child: const Icon(Icons.fingerprint, size: 72, color: KaiColors.hud),
               ),
             ),
             const SizedBox(height: 24),
