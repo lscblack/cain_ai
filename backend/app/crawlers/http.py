@@ -9,6 +9,7 @@ Per-host rate limiting honours a politeness delay and robots Crawl-delay.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import urllib.robotparser
 from urllib.parse import urljoin, urlsplit
@@ -41,6 +42,20 @@ _BROWSER_HEADERS = {
 _last_hit: dict[str, float] = {}
 _host_locks: dict[str, asyncio.Lock] = {}
 _robots_delay: dict[str, float] = {}  # host -> robots Crawl-delay (seconds)
+
+# Wikipedia blocks scraping its /wiki/ pages but its REST API is open + keyless.
+_WIKI_RE = re.compile(r"^https?://([a-z-]+)\.wikipedia\.org/wiki/([^?#]+)", re.I)
+# Wikimedia's UA policy wants a descriptive agent (not a browser string).
+_WIKI_UA = "KAI-OSINT/1.0 (OSINT research tool; local, public pages only; contact tech@nexventures.net)"
+
+
+def _wikipedia_api(url: str) -> str | None:
+    """Rewrite a Wikipedia article URL to its keyless REST HTML API endpoint."""
+    m = _WIKI_RE.match(url)
+    if not m:
+        return None
+    lang, title = m.group(1), m.group(2)
+    return f"https://{lang}.wikipedia.org/api/rest_v1/page/html/{title}"
 
 
 def _proxy_for(url: str) -> str | None:
@@ -80,12 +95,17 @@ async def httpx_fetch(url: str) -> Fetched:
         return Fetched(status=0)
     await _rate_limit(host)
 
+    # Wikipedia → keyless REST API (the /wiki/ page itself blocks bots).
+    wiki_api = _wikipedia_api(url)
+    fetch_url = wiki_api or url
+    headers = {**_BROWSER_HEADERS, "User-Agent": _WIKI_UA} if wiki_api else _BROWSER_HEADERS
+
     async def _get(via: str | None) -> Fetched:
         async with httpx.AsyncClient(
             timeout=30.0 if via else 15.0, follow_redirects=True,
-            headers=_BROWSER_HEADERS, proxy=via,
+            headers=headers, proxy=via,
         ) as client:
-            resp = await client.get(url)
+            resp = await client.get(fetch_url)
             return Fetched(
                 status=resp.status_code,
                 content_type=resp.headers.get("content-type", "").split(";")[0].strip(),

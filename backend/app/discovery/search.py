@@ -21,6 +21,9 @@ logger = get_logger("kai.discovery.search")
 TextGet = Callable[[str], Awaitable[str]]
 
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+# Wikimedia's robot policy rejects browser UA strings from datacenter IPs; it
+# wants a descriptive agent with a contact. Used for the keyless Wikipedia API.
+_WIKI_UA = "KAI-OSINT/1.0 (OSINT research tool; local, public pages only; contact tech@nexventures.net)"
 
 # DuckDuckGo HTML result links wrap the target in ...?uddg=<urlencoded>
 _DDG_UDDG_RE = re.compile(r"uddg=([^&\"']+)")
@@ -171,6 +174,31 @@ async def _eng_searxng(q: str) -> list[str]:
     return []
 
 
+async def _eng_wikipedia(q: str) -> list[str]:
+    """Wikipedia's keyless opensearch API — a reliable PRIMARY source for named
+    subjects. Returns the matching article URL(s); the crawler fetches them via
+    Wikipedia's REST API (the /wiki/ page blocks bots, the API does not)."""
+    import httpx
+
+    try:
+        url = (
+            f"https://en.wikipedia.org/w/api.php?action=opensearch&limit=3"
+            f"&namespace=0&redirects=resolve&search={quote(q)}&format=json"
+        )
+        async with httpx.AsyncClient(
+            timeout=9.0, follow_redirects=True, headers={"User-Agent": _WIKI_UA}
+        ) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            data = r.json()
+        # opensearch returns [query, [titles], [descs], [urls]]
+        if isinstance(data, list) and len(data) >= 4 and isinstance(data[3], list):
+            return [u for u in data[3] if u]
+    except Exception:
+        pass
+    return []
+
+
 def _ordered_engines() -> list[tuple[str, Callable[[str], Awaitable[list[str]]]]]:
     """Engines in priority order. DuckDuckGo-over-Tor is the reliable workhorse
     (rotating Tor exits, no IP rate-limit); SearXNG is tried next *only* when a
@@ -192,6 +220,19 @@ def _ordered_engines() -> list[tuple[str, Callable[[str], Awaitable[list[str]]]]
     for n, _ in FREE_ENGINES:
         add(n)
     return out
+
+
+async def wikipedia_article(name: str) -> tuple[str, str] | None:
+    """Keyless lookup of a subject's Wikipedia article → (url, title). The crawler
+    fetches the article via Wikipedia's REST API (the /wiki/ page blocks bots)."""
+    urls = await _eng_wikipedia(name)
+    if not urls:
+        return None
+    url = urls[0]
+    title = url.rstrip("/").rsplit("/", 1)[-1].replace("_", " ")
+    from urllib.parse import unquote
+
+    return url, unquote(title)
 
 
 FREE_ENGINES: list[tuple[str, Callable[[str], Awaitable[list[str]]]]] = [

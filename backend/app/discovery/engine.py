@@ -155,6 +155,18 @@ async def run_name_investigation(
     except Exception:
         pass
 
+    # 0) Primary: seed each subject's Wikipedia article (keyless REST API) so the
+    #    most authoritative public summary is indexed first.
+    state["status"] = "seeding wikipedia"
+    await _save(redis, run_id, state)
+    try:
+        state["wikipedia_sources"] = await seed_wikipedia_for(
+            names, redis=redis, auto_crawl=auto_crawl
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("wikipedia phase failed: %s", exc)
+    await _save(redis, run_id, state)
+
     # 1) Dark web: find .onion sites for the names via Ahmia and queue Tor crawls.
     if onion_available():
         state["status"] = "searching dark web"
@@ -321,6 +333,57 @@ async def _add_onion_source(url: str, *, auto_crawl: bool, redis: Redis) -> bool
         except Exception:
             pass
     return True
+
+
+async def _add_wikipedia_source(name: str, *, auto_crawl: bool, redis: Redis) -> bool:
+    """Seed a subject's Wikipedia article as a direct single-page source.
+
+    Wikipedia is a PRIMARY source: for a named subject its article is usually the
+    most authoritative public summary. The /wiki/ page blocks bots, so the crawler
+    fetches it via Wikipedia's keyless REST API (see crawlers/http._wikipedia_api).
+    We dedup on the article URL (not the host) so each subject's article is its own
+    source — all articles share host en.wikipedia.org, which is the crawl's
+    base_host, keeping the single-page fetch on-site.
+    """
+    from app.discovery.search import wikipedia_article
+
+    art = await wikipedia_article(name)
+    if art is None:
+        return False
+    url, title = art
+    # Unique per-article dedup key (host alone would collide across subjects).
+    key = url.split("://", 1)[-1][:200]
+    async with async_session_maker() as session:
+        exists = (await session.execute(select(Source.id).where(Source.domain == key))).scalar_one_or_none()
+        if exists is not None:
+            return False
+        src = Source(
+            name=f"Wikipedia · {title}", base_url=url, domain=key,
+            allowed_paths=[], excluded_paths=[], max_depth=0, max_pages=2,
+            schedule="manual", category="wikipedia", priority="high",
+        )
+        session.add(src)
+        await session.flush()
+        sid = src.id
+        await session.commit()
+    if auto_crawl:
+        try:
+            await enqueue_crawls(redis, [sid])
+        except Exception:
+            pass
+    return True
+
+
+async def seed_wikipedia_for(names: list[str], *, redis: Redis, auto_crawl: bool) -> int:
+    """Seed each investigated name's Wikipedia article as a primary source."""
+    added = 0
+    for name in names:
+        try:
+            if await _add_wikipedia_source(name, auto_crawl=auto_crawl, redis=redis):
+                added += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("wikipedia seed failed for %r: %s", name, exc)
+    return added
 
 
 async def discover_onion_for(names: list[str], *, redis: Redis, auto_crawl: bool, per_name: int = 12) -> int:
