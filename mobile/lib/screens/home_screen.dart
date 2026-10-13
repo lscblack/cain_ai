@@ -10,6 +10,7 @@ import 'detect_faces_screen.dart';
 import 'face_search_screen.dart';
 import 'live_camera_screen.dart';
 import 'settings_screen.dart';
+import 'signals_screen.dart';
 import 'video_search_screen.dart';
 import 'voice_command_screen.dart';
 import 'tools/universal_search_screen.dart';
@@ -125,6 +126,8 @@ class _HomeScreenState extends State<HomeScreen> {
           () => _go(const InvestigationsScreen())),
       _Tile('Video Search', Icons.video_library_outlined, KaiColors.accent,
           () => _go(const VideoSearchScreen())),
+      _Tile('Signals', Icons.wifi_find_outlined, KaiColors.hud,
+          () => _go(const SignalsScreen())),
       _Tile('Voice (Jarvis)', Icons.mic, KaiColors.accent, _openVoice),
     ];
 

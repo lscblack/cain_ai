@@ -32,6 +32,9 @@ class _QrLoginScreenState extends State<QrLoginScreen> {
     final err = await ApiClient.instance.applyQrSession(raw);
     if (!mounted) return;
     if (err == null) {
+      // Pop this pushed scanner first, THEN switch to Home — otherwise the
+      // scanner stays on top and Home only shows after pressing back.
+      Navigator.of(context).pop();
       widget.onLoggedIn();
     } else {
       setState(() {
