@@ -164,8 +164,8 @@ export function Sources() {
   return (
     <div>
       <div className="mb-5 flex items-center gap-2">
-        <Database size={18} className="text-muted" />
-        <h1 className="text-lg font-semibold">Local Index — Sources</h1>
+        <Database size={18} style={{ color: "var(--kai-hud)" }} />
+        <h1 className="hud-mono hud-glow text-lg font-semibold" style={{ color: "var(--kai-hud)" }}>◢ Local Index — Sources</h1>
         <button onClick={crawlAll} className="ml-auto rounded-md border px-3 py-1.5 text-xs hover:bg-panel-2" style={{ borderColor: "var(--kai-verified)", color: "var(--kai-verified)" }}>
           ▶ Crawl all
         </button>
@@ -179,8 +179,8 @@ export function Sources() {
       <div className="mb-3 kai-metadata">{sources.length} source(s)</div>
 
       {/* Apply crawl settings to ALL sources at once */}
-      <div className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-3">
-        <span className="kai-metadata uppercase">Apply to all</span>
+      <div className="hud-panel hud-frame mb-6 flex flex-wrap items-center gap-2 p-3">
+        <span className="hud-mono uppercase text-xs" style={{ color: "var(--kai-hud)" }}>◢ Apply to all</span>
         <label className="kai-metadata flex items-center gap-1">
           depth
           <input type="number" min={0} max={20} value={allDepth} onChange={(e) => setAllDepth(Math.max(0, Math.min(20, +e.target.value)))} className="w-16 rounded border border-line bg-panel-2 px-2 py-1 text-sm" />
@@ -201,7 +201,7 @@ export function Sources() {
         {applyMsg && <span className="kai-metadata" style={{ color: "var(--kai-verified)" }}>{applyMsg}</span>}
       </div>
 
-      <form onSubmit={onCreate} className="mb-6 grid gap-2 rounded-lg border border-line bg-panel p-4 md:grid-cols-[1fr_1.5fr_auto_auto_auto]">
+      <form onSubmit={onCreate} className="hud-panel hud-frame mb-6 grid gap-2 p-4 md:grid-cols-[1fr_1.5fr_auto_auto_auto]">
         <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Name" className="rounded-md border border-line bg-panel-2 px-3 py-2 text-sm" />
         <input value={url} onChange={(e) => setUrl(e.target.value)} required placeholder="https://example.com/" className="rounded-md border border-line bg-panel-2 px-3 py-2 text-sm" />
         <input type="number" min={0} max={20} value={depth} onChange={(e) => setDepth(+e.target.value)} title="depth" className="w-20 rounded-md border border-line bg-panel-2 px-2 py-2 text-sm" />
@@ -215,7 +215,7 @@ export function Sources() {
           {showBulk ? "▾" : "▸"} Bulk add / paste (CSV)
         </button>
         {showBulk && (
-          <div className="mt-2 rounded-lg border border-line bg-panel p-4">
+          <div className="hud-panel hud-frame mt-2 p-4">
             <div className="kai-metadata mb-2">
               One per line: <span className="font-mono">name,base_url,max_depth,max_pages,schedule</span>
               {" "}— bare domains ok, header row optional.
@@ -243,11 +243,11 @@ export function Sources() {
           const st = stats[s.id];
           const color = s.status === "crawling" ? "var(--kai-warn)" : s.status === "error" ? "var(--kai-accent)" : "var(--kai-verified)";
           return (
-            <div key={s.id} className="rounded-lg border border-line bg-panel p-4">
+            <div key={s.id} className="hud-panel hud-frame p-4">
               <div className="flex items-center justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">{s.name}</span>
+                    <span className="font-medium" style={{ color: "var(--kai-hud)" }}>{s.name}</span>
                     {s.priority && (
                       <span className="kai-metadata uppercase" style={{ color: s.priority === "high" ? "var(--kai-accent)" : s.priority === "medium" ? "var(--kai-warn)" : "var(--kai-muted)" }}>
                         {s.priority}

@@ -55,11 +55,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       {pairOpen && <PairMobile onClose={() => setPairOpen(false)} />}
       {/* Sidebar */}
       <aside className="hidden w-56 shrink-0 flex-col border-r border-line bg-panel-2 md:flex">
-        <div className="border-b border-line px-5 py-4">
-          <div className="text-lg font-semibold tracking-wide">KAI</div>
+        <div className="hud-scanlines border-b px-5 py-4" style={{ borderColor: "var(--kai-hud-dim)" }}>
+          <div className="hud-mono hud-glow text-lg font-semibold tracking-[0.2em]" style={{ color: "var(--kai-hud)" }}>KAI</div>
           <div className="kai-metadata mt-0.5">Knowledge • Analysis • Intelligence</div>
         </div>
-        <nav className="flex-1 space-y-1 p-3">
+        <nav className="flex-1 space-y-0.5 p-3">
           {NAV.map(({ icon: Icon, label, to }) =>
             to ? (
               <NavLink
@@ -67,10 +67,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 to={to}
                 end={to === "/"}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                    isActive ? "bg-panel text-ink" : "text-muted hover:bg-panel hover:text-ink"
+                  `flex items-center gap-3 border-l-2 px-3 py-2 hud-mono text-[13px] transition-colors ${
+                    isActive ? "border-current bg-panel" : "border-transparent text-muted hover:bg-panel hover:text-ink"
                   }`
                 }
+                style={({ isActive }) => (isActive ? { color: "var(--kai-hud)" } : undefined)}
               >
                 <Icon size={16} />
                 {label}
@@ -79,7 +80,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div
                 key={label}
                 title="Available in a later phase"
-                className="flex cursor-default items-center gap-3 rounded-md px-3 py-2 text-sm text-muted/60"
+                className="flex cursor-default items-center gap-3 border-l-2 border-transparent px-3 py-2 hud-mono text-[13px] text-muted/60"
               >
                 <Icon size={16} />
                 {label}
@@ -90,7 +91,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="border-t border-line p-3">
           <button
             onClick={logout}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted hover:bg-panel hover:text-ink"
+            className="flex w-full items-center gap-2 px-3 py-2 hud-mono text-[13px] text-muted hover:bg-panel hover:text-ink"
           >
             <LogOut size={16} /> Sign out
           </button>
@@ -100,7 +101,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-4 border-b border-line bg-panel-2 px-4 py-3 sm:px-6">
-          <div className="min-w-0 truncate kai-metadata">OPERATOR / {operator?.email ?? "—"}</div>
+          <div className="min-w-0 truncate kai-metadata flex items-center gap-2">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: "var(--kai-hud)" }} />
+            <span style={{ color: "var(--kai-hud)" }}>OPERATOR</span> / {operator?.email ?? "—"}
+          </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setPairOpen(true)}
@@ -118,7 +122,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               key={label}
               to={to!}
               end={to === "/"}
-              className={({ isActive }) => `flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${isActive ? "bg-panel text-ink" : "text-muted"}`}
+              className={({ isActive }) => `flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 hud-mono text-xs ${isActive ? "bg-panel" : "border-transparent text-muted"}`}
+              style={({ isActive }) => (isActive ? { color: "var(--kai-hud)", borderColor: "var(--kai-hud)" } : undefined)}
             >
               <Icon size={14} /> {label}
             </NavLink>

@@ -42,10 +42,10 @@ function KeysEditor({ onSaved }: { onSaved: () => void }) {
   }
 
   return (
-    <div className="mb-8 rounded-lg border border-line bg-panel p-4">
+    <div className="hud-panel hud-frame mb-8 p-4">
       <div className="mb-3 flex items-center gap-2">
-        <KeyRound size={16} className="text-muted" />
-        <span className="kai-metadata uppercase">Provider keys</span>
+        <KeyRound size={16} style={{ color: "var(--kai-hud)" }} />
+        <span className="hud-mono uppercase text-xs" style={{ color: "var(--kai-hud)" }}>◢ Provider keys</span>
         <span className="kai-metadata text-muted">— saved to backend .env, never shown back</span>
         <button
           onClick={save}
@@ -110,8 +110,8 @@ export function PowerUp() {
   return (
     <div>
       <div className="mb-5 flex items-center gap-2">
-        <Zap size={18} className="text-muted" />
-        <h1 className="text-lg font-semibold">Power Up — Providers</h1>
+        <Zap size={18} style={{ color: "var(--kai-hud)" }} />
+        <h1 className="hud-mono hud-glow text-lg font-semibold" style={{ color: "var(--kai-hud)" }}>◢ Power Up — Providers</h1>
       </div>
       <p className="mb-5 max-w-2xl text-sm text-muted">
         Intelligence providers KAI can use. Local providers run offline. External
@@ -125,9 +125,9 @@ export function PowerUp() {
         {providers.map((p) => {
           const color = p.healthy ? "var(--kai-verified)" : "var(--kai-accent)";
           return (
-            <div key={p.name} className="rounded-lg border border-line bg-panel p-4">
+            <div key={p.name} className="hud-panel hud-frame p-4">
               <div className="flex items-center justify-between">
-                <span className="font-mono text-sm">{p.name}</span>
+                <span className="hud-mono text-sm" style={{ color: "var(--kai-hud)" }}>{p.name}</span>
                 <span className="kai-metadata uppercase" style={{ color }}>
                   ● {p.healthy ? "connected" : "unavailable"}
                 </span>

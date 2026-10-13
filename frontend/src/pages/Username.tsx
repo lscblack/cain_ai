@@ -70,8 +70,8 @@ export function Username() {
   return (
     <div>
       <div className="mb-5 flex items-center gap-2">
-        <AtSign size={18} className="text-muted" />
-        <h1 className="text-lg font-semibold">Username Intelligence</h1>
+        <AtSign size={18} style={{ color: "var(--kai-hud)" }} />
+        <h1 className="hud-mono hud-glow text-lg font-semibold" style={{ color: "var(--kai-hud)" }}>◢ Username Intelligence</h1>
       </div>
 
       <form onSubmit={onSubmit} className="mb-6 flex gap-2">
@@ -79,18 +79,18 @@ export function Username() {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="handle (e.g. osint_guy)"
-          className="flex-1 rounded-md border border-line bg-panel px-3 py-2 text-sm outline-none focus:border-muted"
+          className="flex-1 border border-line bg-panel px-3 py-2 text-sm outline-none focus:border-[color:var(--kai-hud)]"
         />
-        <button className="rounded-md border border-line bg-panel px-4 py-2 text-sm hover:bg-panel-2">
+        <button className="hud-mono border px-4 py-2 text-sm uppercase tracking-wider transition hover:brightness-125" style={{ borderColor: "var(--kai-hud-dim)", color: "var(--kai-hud)" }}>
           Check
         </button>
-        <button type="button" onClick={indexAvatars} disabled={indexing} className="rounded-md border border-line bg-panel px-4 py-2 text-sm hover:bg-panel-2 disabled:opacity-50">
+        <button type="button" onClick={indexAvatars} disabled={indexing} className="border border-line bg-panel px-4 py-2 text-sm text-muted transition hover:border-[color:var(--kai-hud)] hover:text-ink disabled:opacity-50">
           {indexing ? "Indexing…" : "Index avatars"}
         </button>
       </form>
       {avatarMsg && <div className="mb-4 kai-metadata" style={{ color: "var(--kai-verified)" }}>{avatarMsg}</div>}
 
-      {loading && <div className="kai-metadata">Checking public profiles…</div>}
+      {loading && <div className="kai-metadata" style={{ color: "var(--kai-hud)" }}>Checking public profiles…</div>}
 
       {result && !loading && (
         <>
@@ -105,7 +105,7 @@ export function Username() {
                 href={h.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2 hover:border-muted"
+                className="hud-panel flex items-center justify-between px-3 py-2 transition hover:brightness-125"
               >
                 <div className="flex items-center gap-2">
                   <span

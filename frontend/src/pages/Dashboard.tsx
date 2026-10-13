@@ -68,13 +68,13 @@ export function Dashboard() {
       <div className="home-grid pointer-events-none absolute -inset-6 -z-10 opacity-30" aria-hidden="true" />
 
       {/* console header */}
-      <div className="mb-5 flex items-center gap-2 font-mono text-xs tracking-[0.25em] text-accent">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> OPERATOR CONSOLE / 01
+      <div className="mb-5 flex items-center gap-2 hud-mono hud-glow text-xs tracking-[0.25em]" style={{ color: "var(--kai-hud)" }}>
+        <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--kai-hud)" }} /> ◢ OPERATOR CONSOLE / 01
       </div>
 
       {/* universal search */}
-      <form onSubmit={onSearch} className="mb-6 flex items-center gap-2 border border-line bg-panel/95 px-3 py-3 transition focus-within:border-accent sm:px-4">
-        <Search size={16} className="text-accent" />
+      <form onSubmit={onSearch} className="hud-panel hud-frame mb-6 flex items-center gap-2 px-3 py-3 transition focus-within:border-[color:var(--kai-hud)] sm:px-4">
+        <Search size={16} style={{ color: "var(--kai-hud)" }} />
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -84,38 +84,38 @@ export function Dashboard() {
       </form>
 
       {/* stat tiles */}
-      <div className="mb-6 grid grid-cols-2 gap-px border border-line bg-line/40 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         {tiles.map(({ icon: Icon, label, value, to }, i) => (
           <motion.div key={label} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-            <Link to={to} className="group flex h-full flex-col justify-between bg-panel p-4 transition hover:bg-panel-2">
+            <Link to={to} className="hud-panel hud-frame group flex h-full flex-col justify-between p-4 transition hover:brightness-125">
               <div className="flex items-center justify-between">
-                <span className="kai-metadata uppercase tracking-wider">{label}</span>
-                <Icon size={15} className="text-muted transition group-hover:text-accent" />
+                <span className="hud-mono uppercase tracking-wider text-xs" style={{ color: "var(--kai-hud)" }}>{label}</span>
+                <Icon size={15} className="text-muted transition group-hover:text-ink" />
               </div>
-              <div className="mt-3 font-mono text-2xl font-semibold sm:text-3xl">{value.toLocaleString()}</div>
+              <div className="mt-3 hud-mono hud-glow text-2xl font-semibold sm:text-3xl" style={{ color: "var(--kai-hud)" }}>{value.toLocaleString()}</div>
             </Link>
           </motion.div>
         ))}
       </div>
 
       {/* crawl queue control */}
-      <div className="mb-6 border border-line bg-panel/95 font-mono text-xs">
+      <div className="hud-panel hud-frame mb-6 font-mono text-xs">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <span className="kai-metadata uppercase tracking-wider">Crawl queue</span>
+          <span className="hud-mono uppercase tracking-wider" style={{ color: "var(--kai-hud)" }}>◢ Crawl queue</span>
           <span className="text-lg font-semibold" style={{ color: queued ? "var(--kai-warn)" : "var(--kai-verified)" }}>
             {queued ?? "—"}
           </span>
           <span className="text-muted">pending{(queueDetail?.crawling.length ?? 0) > 0 ? ` · ${queueDetail!.crawling.length} crawling` : ""}{(queueDetail?.discovery_queued ?? 0) > 0 ? ` · ${queueDetail!.discovery_queued} discovery` : ""}</span>
-          <button onClick={() => setShowQueue((v) => !v)} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink">
+          <button onClick={() => setShowQueue((v) => !v)} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-[color:var(--kai-hud)] hover:text-ink">
             {showQueue ? "Hide queue" : "View queue"}
           </button>
           <div className="ml-auto flex gap-2">
-            <Link to="/sources" className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink">Manage sources</Link>
-            <Link to="/discover" className="border px-3 py-1.5 uppercase tracking-wider transition"
-              style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Discover new sources</Link>
-            <Link to="/investigate" className="border px-3 py-1.5 uppercase tracking-wider transition"
-              style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}>Investigate names</Link>
-            <button onClick={clearQueue} disabled={!queued} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-accent hover:text-ink disabled:opacity-40">Clear queue</button>
+            <Link to="/sources" className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-[color:var(--kai-hud)] hover:text-ink">Manage sources</Link>
+            <Link to="/discover" className="border px-3 py-1.5 uppercase tracking-wider transition hover:brightness-125"
+              style={{ borderColor: "var(--kai-hud-dim)", color: "var(--kai-hud)" }}>Discover new sources</Link>
+            <Link to="/investigate" className="border px-3 py-1.5 uppercase tracking-wider transition hover:brightness-125"
+              style={{ borderColor: "var(--kai-hud-dim)", color: "var(--kai-hud)" }}>Investigate names</Link>
+            <button onClick={clearQueue} disabled={!queued} className="border border-line px-3 py-1.5 uppercase tracking-wider text-muted transition hover:border-[color:var(--kai-accent)] hover:text-ink disabled:opacity-40">Clear queue</button>
           </div>
         </div>
         {showQueue && (
@@ -148,28 +148,28 @@ export function Dashboard() {
       </div>
 
       {/* map shortcut */}
-      <Link to="/map" className="group relative mb-6 flex min-h-32 items-center justify-center overflow-hidden border border-line bg-panel-2 p-5 text-center transition hover:border-accent sm:h-40">
+      <Link to="/map" className="hud-panel hud-frame group relative mb-6 flex min-h-32 items-center justify-center overflow-hidden p-5 text-center transition hover:brightness-125 sm:h-40">
         <div className="home-grid pointer-events-none absolute inset-0 opacity-30" aria-hidden="true" />
-        <span className="relative flex flex-wrap items-center justify-center gap-2 font-mono text-xs uppercase tracking-wider text-muted group-hover:text-ink">
-          <Map size={16} className="text-accent" /> Open live intelligence map
+        <span className="relative flex flex-wrap items-center justify-center gap-2 hud-mono text-xs uppercase tracking-wider text-muted group-hover:text-ink">
+          <Map size={16} style={{ color: "var(--kai-hud)" }} /> Open live intelligence map
           <span className="text-muted">— aircraft · vessels · fires · webcams</span>
-          <ArrowUpRight size={14} className="text-accent" />
+          <ArrowUpRight size={14} style={{ color: "var(--kai-hud)" }} />
         </span>
       </Link>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* recent investigations */}
-        <div className="border border-line bg-panel/95 p-4">
-          <div className="mb-3 flex items-center justify-between border-b border-line pb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted">
-            <span>Recent Investigations</span>
-            <Link to="/investigations" className="text-accent hover:brightness-125">view all →</Link>
+        <div className="hud-panel hud-frame p-4">
+          <div className="mb-3 flex items-center justify-between border-b border-line pb-2 hud-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: "var(--kai-hud)" }}>
+            <span>◢ Recent Investigations</span>
+            <Link to="/investigations" className="hover:brightness-125" style={{ color: "var(--kai-hud)" }}>view all →</Link>
           </div>
           {cases.length === 0 ? (
-            <div className="py-6 text-center font-mono text-xs uppercase tracking-wider text-muted">No investigations yet</div>
+            <div className="py-6 text-center hud-mono text-xs uppercase tracking-wider text-muted">No investigations yet</div>
           ) : (
             <div className="space-y-2">
               {cases.map((ci) => (
-                <Link key={ci.id} to={`/investigations/${ci.id}`} className="flex min-w-0 flex-col gap-1 border border-line px-3 py-2 transition hover:border-accent sm:flex-row sm:items-center sm:justify-between">
+                <Link key={ci.id} to={`/investigations/${ci.id}`} className="flex min-w-0 flex-col gap-1 border border-line px-3 py-2 transition hover:border-[color:var(--kai-hud)] sm:flex-row sm:items-center sm:justify-between">
                   <span className="truncate text-sm">{ci.name}</span>
                   <span className="kai-metadata shrink-0">{ci.code} · ent {ci.entity_count} · evd {ci.evidence_count}</span>
                 </Link>
@@ -179,8 +179,8 @@ export function Dashboard() {
         </div>
 
         {/* index activity */}
-        <div className="border border-line bg-panel/95 p-4">
-          <div className="mb-3 border-b border-line pb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted">Index Activity</div>
+        <div className="hud-panel hud-frame p-4">
+          <div className="mb-3 border-b border-line pb-2 hud-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: "var(--kai-hud)" }}>◢ Index Activity</div>
           <div className="grid grid-cols-2 gap-px bg-line/40">
             <Stat label="Faces" value={c.faces} icon={<Users size={13} />} />
             <Stat label="Images" value={c.images} icon={<Images size={13} />} />

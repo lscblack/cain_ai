@@ -46,8 +46,8 @@ export function Search() {
 
   return (
     <div>
-      <form onSubmit={onSubmit} className="mb-6 flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3">
-        <SearchIcon size={16} className="text-muted" />
+      <form onSubmit={onSubmit} className="hud-panel hud-frame mb-6 flex items-center gap-2 px-4 py-3 focus-within:border-[color:var(--kai-hud)]">
+        <SearchIcon size={16} style={{ color: "var(--kai-hud)" }} />
         <input
           autoFocus
           value={q}
@@ -57,7 +57,7 @@ export function Search() {
         />
       </form>
 
-      {loading && <div className="kai-metadata">Searching local corpus…</div>}
+      {loading && <div className="kai-metadata" style={{ color: "var(--kai-hud)" }}>Searching local corpus…</div>}
 
       {result && !loading && (
         <div>
@@ -70,8 +70,8 @@ export function Search() {
           </div>
 
           <section className="mb-6">
-            <div className="kai-metadata mb-2 uppercase">
-              Entities ({result.entity_matches.length})
+            <div className="hud-mono mb-2 uppercase text-xs" style={{ color: "var(--kai-hud)" }}>
+              ◢ Entities ({result.entity_matches.length})
             </div>
             {result.entity_matches.length === 0 ? (
               <div className="text-sm text-muted">
@@ -80,7 +80,7 @@ export function Search() {
             ) : (
               <div className="space-y-2">
                 {result.entity_matches.map((e) => (
-                  <div key={e.id} className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2">
+                  <div key={e.id} className="hud-panel flex items-center justify-between px-3 py-2">
                     <span className="text-sm">{e.value}</span>
                     <span className="kai-metadata uppercase">{e.type}</span>
                   </div>
@@ -90,15 +90,15 @@ export function Search() {
           </section>
 
           <section>
-            <div className="kai-metadata mb-2 uppercase">
-              Evidence ({result.evidence_matches.length})
+            <div className="hud-mono mb-2 uppercase text-xs" style={{ color: "var(--kai-hud)" }}>
+              ◢ Evidence ({result.evidence_matches.length})
             </div>
             {result.evidence_matches.length === 0 ? (
               <div className="text-sm text-muted">No source evidence in index.</div>
             ) : (
               <div className="space-y-2">
                 {result.evidence_matches.map((ev) => (
-                  <div key={ev.id} className="rounded-md border border-line bg-panel px-3 py-2">
+                  <div key={ev.id} className="hud-panel px-3 py-2">
                     <a href={ev.source_url} target="_blank" rel="noreferrer" className="block truncate text-sm hover:underline">
                       {ev.source_url}
                     </a>
