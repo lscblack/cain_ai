@@ -92,11 +92,44 @@ ThemeData buildKaiTheme() {
   );
 }
 
-/// Sci-fi HUD panel: cyan glowing border with corner brackets.
-class HudPanel extends StatelessWidget {
+/// Sci-fi HUD panel: cyan glowing border with corner brackets and a quiet
+/// cyan scanline that sweeps across the top edge — a subtle "live" motif.
+class HudPanel extends StatefulWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
-  const HudPanel({super.key, required this.child, this.padding = const EdgeInsets.all(14)});
+
+  /// Set false to disable the top sweep (e.g. in dense lists).
+  final bool sweep;
+  const HudPanel({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(14),
+    this.sweep = true,
+  });
+
+  @override
+  State<HudPanel> createState() => _HudPanelState();
+}
+
+class _HudPanelState extends State<HudPanel> with SingleTickerProviderStateMixin {
+  AnimationController? _c;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.sweep) {
+      _c = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 3200),
+      )..repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,15 +137,44 @@ class HudPanel extends StatelessWidget {
       children: [
         Container(
           width: double.infinity,
-          padding: padding,
+          padding: widget.padding,
           decoration: BoxDecoration(
             color: KaiColors.panel2,
             border: Border.all(color: KaiColors.hudDim),
             borderRadius: BorderRadius.circular(6),
             boxShadow: const [BoxShadow(color: Color(0x1422D3EE), blurRadius: 18)],
           ),
-          child: child,
+          child: widget.child,
         ),
+        if (_c != null)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: ClipRRect(
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(6)),
+              child: SizedBox(
+                height: 1.5,
+                child: AnimatedBuilder(
+                  animation: _c!,
+                  builder: (context, _) => FractionallySizedBox(
+                    widthFactor: 0.4,
+                    alignment: Alignment(-1 + 2 * _c!.value, 0),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(colors: [
+                          Color(0x0022D3EE),
+                          Color(0xAA22D3EE),
+                          Color(0x0022D3EE),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         const Positioned(top: 0, left: 0, child: _Corner(topLeft: true)),
         const Positioned(bottom: 0, right: 0, child: _Corner(topLeft: false)),
       ],

@@ -74,23 +74,39 @@ class _PersonHudState extends State<PersonHud> {
         ),
         const SizedBox(height: 14),
 
-        // 2 — appearance viewer
-        _AppearanceViewer(
-          person: person,
-          index: _person.appearances.isEmpty
-              ? 0
-              : _appIdx.clamp(0, _person.appearances.length - 1),
-          onStep: _stepApp,
-          onJump: (i) => setState(() => _appIdx = i),
-        ),
-        const SizedBox(height: 14),
-
-        // 3 — dossier (keyed so lazy bio/connections reset per subject)
-        _Dossier(
-          key: ValueKey(person.personId),
-          person: person,
-          maxAppearances: _maxAppearances,
-          bandColor: color,
+        // 2 + 3 — appearance viewer + dossier, cross-fading on subject switch
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 320),
+          switchInCurve: Curves.easeOut,
+          transitionBuilder: (child, anim) => FadeTransition(
+            opacity: anim,
+            child: SizeTransition(
+              sizeFactor:
+                  CurvedAnimation(parent: anim, curve: Curves.easeOut),
+              axisAlignment: -1,
+              child: child,
+            ),
+          ),
+          child: Column(
+            key: ValueKey(person.personId),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AppearanceViewer(
+                person: person,
+                index: _person.appearances.isEmpty
+                    ? 0
+                    : _appIdx.clamp(0, _person.appearances.length - 1),
+                onStep: _stepApp,
+                onJump: (i) => setState(() => _appIdx = i),
+              ),
+              const SizedBox(height: 14),
+              _Dossier(
+                person: person,
+                maxAppearances: _maxAppearances,
+                bandColor: color,
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -155,13 +171,18 @@ class _SubjectSelector extends StatelessWidget {
           return InkWell(
             onTap: () => onSelect(i),
             borderRadius: BorderRadius.circular(8),
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOut,
               width: 128,
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 color: active ? _hud.withValues(alpha: 0.10) : KaiColors.panel,
                 border: Border.all(color: active ? _hud : KaiColors.line),
                 borderRadius: BorderRadius.circular(8),
+                boxShadow: active
+                    ? [BoxShadow(color: _hud.withValues(alpha: 0.35), blurRadius: 14)]
+                    : const [],
               ),
               child: Row(
                 children: [

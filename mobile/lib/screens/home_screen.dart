@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../models/voice_intent.dart';
 import '../services/api_client.dart';
 import '../theme/hacker_theme.dart';
+import '../widgets/kai_anim.dart';
+import 'detect_faces_screen.dart';
 import 'face_search_screen.dart';
 import 'live_camera_screen.dart';
 import 'settings_screen.dart';
@@ -107,6 +109,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final tiles = <_Tile>[
       _Tile('Face Search', Icons.person_search, KaiColors.accent,
           () => _go(const FaceSearchScreen())),
+      _Tile('Detect Faces', Icons.center_focus_strong, KaiColors.hud,
+          () => _go(const DetectFacesScreen())),
       _Tile('Live Detection', Icons.videocam_outlined, KaiColors.accent,
           () => _go(const LiveCameraScreen())),
       _Tile('Universal Search', Icons.search, KaiColors.ink,
@@ -135,12 +139,29 @@ class _HomeScreenState extends State<HomeScreen> {
                   shadows: [Shadow(color: Color(0x8822D3EE), blurRadius: 10)])),
           const SizedBox(width: 10),
           if (_engineOnline != null)
-            Text(
-              _engineOnline! ? '● ENGINE ONLINE' : '● ENGINE OFFLINE',
-              style: TextStyle(
-                  fontSize: 10,
-                  color: _engineOnline! ? KaiColors.hud : KaiColors.danger),
-            ),
+            Row(children: [
+              PulseGlow(
+                active: _engineOnline!,
+                color: KaiColors.hud,
+                minBlur: 2,
+                maxBlur: 10,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _engineOnline! ? KaiColors.hud : KaiColors.danger,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                _engineOnline! ? 'ENGINE ONLINE' : 'ENGINE OFFLINE',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: _engineOnline! ? KaiColors.hud : KaiColors.danger),
+              ),
+            ]),
         ]),
         actions: [
           IconButton(
@@ -151,12 +172,18 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openVoice,
-        backgroundColor: KaiColors.hud,
-        foregroundColor: KaiColors.bg,
-        tooltip: 'Voice command',
-        child: const Icon(Icons.mic),
+      floatingActionButton: PulseGlow(
+        color: KaiColors.hud,
+        minBlur: 6,
+        maxBlur: 22,
+        spread: 2,
+        child: FloatingActionButton(
+          onPressed: _openVoice,
+          backgroundColor: KaiColors.hud,
+          foregroundColor: KaiColors.bg,
+          tooltip: 'Voice command',
+          child: const Icon(Icons.mic),
+        ),
       ),
       body: GridView.count(
         padding: const EdgeInsets.all(16),
@@ -164,7 +191,10 @@ class _HomeScreenState extends State<HomeScreen> {
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
         childAspectRatio: 1.3,
-        children: tiles.map((t) => _TileCard(tile: t)).toList(),
+        children: [
+          for (var i = 0; i < tiles.length; i++)
+            RevealIn(index: i, child: _TileCard(tile: tiles[i])),
+        ],
       ),
     );
   }
