@@ -7,7 +7,7 @@ import { AuthImg } from "@/components/AuthImg";
 import { FamilyGraph } from "@/components/FamilyGraph";
 
 interface Face { face_id: string; crop_url: string; source_url: string | null; description?: string | null }
-interface PageHit { url: string; title: string | null; emails: string[]; phones: string[]; usernames: string[] }
+interface PageHit { url: string; title: string | null; description?: string | null; thumbnail?: string | null; source?: string | null; emails: string[]; phones: string[]; usernames: string[] }
 interface Dossier {
   term: string;
   detected_type: string;
@@ -40,8 +40,23 @@ function Chips({ items, color }: { items: string[]; color?: string }) {
 
 function DossierView({ d }: { d: Dossier }) {
   const empty = d.counts.faces + d.counts.pages + d.counts.phones + d.counts.emails + d.counts.usernames === 0;
+  // Structured profile from keyless knowledge APIs (Wikipedia + Wikidata).
+  const profile = d.pages.find((p) => p.source === "wikipedia+wikidata" && (p.description || p.thumbnail));
   return (
     <div className="space-y-4">
+      {profile && (
+        <div className="flex gap-3 border border-line bg-base p-3" style={{ borderColor: "var(--kai-hud-dim)" }}>
+          {profile.thumbnail && (
+            <img src={profile.thumbnail} alt={profile.title ?? ""} className="h-24 w-24 shrink-0 border border-line object-cover" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="hud-mono text-xs uppercase" style={{ color: "var(--kai-hud)" }}>◢ Profile · Wikipedia + Wikidata</div>
+            <div className="mt-0.5 text-sm font-semibold">{profile.title}</div>
+            {profile.description && <p className="mt-1 text-xs leading-relaxed text-muted">{profile.description}</p>}
+            <a href={profile.url} target="_blank" rel="noreferrer" className="mt-1 inline-block font-mono text-[10px] text-accent hover:underline">{profile.url}</a>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-5 gap-2 text-center">
         {(["faces", "phones", "emails", "usernames", "pages"] as const).map((k) => (
           <div key={k} className="border border-line bg-base px-1 py-2">

@@ -128,6 +128,9 @@ async def gather_dossier(
         pages_out.append({
             "url": p.url,
             "title": p.title,
+            "description": p.description,
+            "thumbnail": pm.get("thumbnail"),
+            "source": pm.get("source"),
             "emails": p.emails or [],
             "phones": p.phones or [],
             "usernames": p.usernames or [],

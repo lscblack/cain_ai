@@ -35,7 +35,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutErr
 from app.api.sources import _run_crawl
 from app.core.logging import get_logger
 from app.core.redis import get_redis_client
-from app.crawlers.queue import CRAWL_QUEUE, DISCOVERY_QUEUE
+from app.crawlers.queue import CRAWL_PRIORITY_QUEUE, CRAWL_QUEUE, DISCOVERY_QUEUE
 from app.crawlers.scheduler import dedupe_loop, learning_loop, scheduler_loop
 
 logger = get_logger("kai.crawl-worker")
@@ -83,16 +83,19 @@ async def _run_discovery_job(raw: str) -> None:
     )
 
 
-async def _consume_queue(queue: str, handler) -> None:
-    """Drain a single Redis list, one job at a time, forever.
+async def _consume_queue(queue, handler) -> None:
+    """Drain Redis list(s), one job at a time, forever.
 
     Each queue gets its own consumer so a long crawl backlog can never starve
-    operator-triggered discovery (and vice versa).
+    operator-triggered discovery (and vice versa). `queue` may be a single key or
+    a list of keys in priority order — blpop returns from the first non-empty one,
+    so a priority lane is drained before the background backlog.
     """
+    keys = [queue] if isinstance(queue, str) else list(queue)
     redis = get_redis_client()
     while True:
         try:
-            popped = await redis.blpop(queue, timeout=5)
+            popped = await redis.blpop(keys, timeout=5)
         except RedisTimeoutError:
             continue  # idle wait expired — expected
         except RedisConnectionError:
@@ -118,8 +121,11 @@ async def run() -> None:
     _pin_cpu()
     n_crawlers = max(1, get_settings().crawl_consumers)
     tasks = [
-        # Multiple crawl consumers so one huge source can't block all the others.
-        *[asyncio.create_task(_consume_queue(CRAWL_QUEUE, _handle_crawl)) for _ in range(n_crawlers)],
+        # A dedicated priority consumer: an operator's active-case crawls always
+        # have a free slot, never stuck behind the background self-learning backlog.
+        asyncio.create_task(_consume_queue(CRAWL_PRIORITY_QUEUE, _handle_crawl)),
+        # Background consumers prefer priority, then drain the backlog.
+        *[asyncio.create_task(_consume_queue([CRAWL_PRIORITY_QUEUE, CRAWL_QUEUE], _handle_crawl)) for _ in range(n_crawlers)],
         asyncio.create_task(_consume_queue(DISCOVERY_QUEUE, _run_discovery_job)),
         asyncio.create_task(scheduler_loop()),
         asyncio.create_task(learning_loop()),

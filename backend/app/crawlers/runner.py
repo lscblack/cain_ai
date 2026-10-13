@@ -137,9 +137,13 @@ async def crawl_source(
             stats.errors.append(f"{url}: {exc}")
             continue
 
+        # Tolerate historical duplicate (url, source_id) rows: reuse the first,
+        # never raise. scalar_one_or_none() blows up a whole crawl on a dup.
         existing = (
-            await session.execute(select(Page).where(Page.url == url, Page.source_id == source.id))
-        ).scalar_one_or_none()
+            await session.execute(
+                select(Page).where(Page.url == url, Page.source_id == source.id).limit(1)
+            )
+        ).scalars().first()
 
         if resp.status != 200 or "html" not in (resp.content_type or ""):
             if existing is None:

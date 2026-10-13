@@ -9,6 +9,11 @@ import asyncio
 import json
 import time
 import uuid
+from datetime import datetime, timezone
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 from redis.asyncio import Redis
 from sqlalchemy import select
@@ -302,7 +307,7 @@ async def _add_source(domain: str, ev: dict, *, auto_crawl: bool, redis: Redis) 
         await session.commit()
     if auto_crawl:
         try:
-            await enqueue_crawls(redis, [sid])
+            await enqueue_crawls(redis, [sid], priority=True)
         except Exception:
             pass
 
@@ -329,7 +334,7 @@ async def _add_onion_source(url: str, *, auto_crawl: bool, redis: Redis) -> bool
         await session.commit()
     if auto_crawl:
         try:
-            await enqueue_crawls(redis, [sid])
+            await enqueue_crawls(redis, [sid], priority=True)
         except Exception:
             pass
     return True
@@ -345,12 +350,15 @@ async def _add_wikipedia_source(name: str, *, auto_crawl: bool, redis: Redis) ->
     source — all articles share host en.wikipedia.org, which is the crawl's
     base_host, keeping the single-page fetch on-site.
     """
-    from app.discovery.search import wikipedia_article
+    from app.database.models.source import Page
+    from app.discovery.enrich import enrich_subject
 
-    art = await wikipedia_article(name)
-    if art is None:
+    # Full keyless profile (Wikipedia summary + Wikidata facts) resolves the
+    # article AND gives structured data we can show immediately.
+    profile = await enrich_subject(name)
+    if profile is None:
         return False
-    url, title = art
+    url, title = profile["url"], profile["title"]
     # Unique per-article dedup key (host alone would collide across subjects).
     key = url.split("://", 1)[-1][:200]
     async with async_session_maker() as session:
@@ -365,10 +373,35 @@ async def _add_wikipedia_source(name: str, *, auto_crawl: bool, redis: Redis) ->
         session.add(src)
         await session.flush()
         sid = src.id
+        # Write the structured profile as a ready Page so the case shows data
+        # instantly — no dependence on the crawl backlog. The dossier matches on
+        # title (the subject's name) and surfaces meta.titles/orgs/locations.
+        # Use a DISTINCT url (Wikidata entity, else the summary API) so the later
+        # crawl of the article doesn't overwrite these structured facts.
+        qid = profile.get("qid")
+        profile_url = (
+            f"https://www.wikidata.org/wiki/{qid}" if qid
+            else f"{url}#kai-profile"
+        )
+        meta = {
+            "titles": profile.get("titles", []),
+            "orgs": profile.get("orgs", []),
+            "locations": profile.get("locations", []),
+            "social": [],
+            "descriptions": [d for d in [profile.get("extract")] if d],
+            "thumbnail": profile.get("thumbnail"),
+            "source": "wikipedia+wikidata",
+        }
+        session.add(Page(
+            source_id=sid, url=profile_url, http_status=200, crawl_status="ok",
+            last_crawled_at=_now_iso(), title=title,
+            description=(profile.get("extract") or profile.get("description") or "")[:2000],
+            emails=[], phones=[], usernames=[], meta=meta,
+        ))
         await session.commit()
     if auto_crawl:
         try:
-            await enqueue_crawls(redis, [sid])
+            await enqueue_crawls(redis, [sid], priority=True)
         except Exception:
             pass
     return True
