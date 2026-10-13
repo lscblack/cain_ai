@@ -269,6 +269,24 @@ async def get_investigation(
     }
 
 
+@router.delete("/investigations/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_investigation(
+    run_id: str,
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+) -> None:
+    """Remove a discovery case (the run record + its list entry).
+
+    Only drops the case folder from the dashboard — discovered Sources/Pages stay
+    in the corpus (they may be shared across cases and feed future searches).
+    """
+    try:
+        await redis.delete(_run_key(run_id))
+        await redis.lrem(INVESTIGATIONS_KEY, 0, run_id)
+    except Exception:
+        pass
+
+
 def _compose_case_summary(names: list[str], dossiers: list[dict]) -> str:
     lines = [f"Investigation of {', '.join(names) or 'subject(s)'} — potential public-OSINT findings, not confirmed."]
     for d in dossiers:

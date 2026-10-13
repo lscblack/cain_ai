@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Folder } from "lucide-react";
+import { Folder, Trash2 } from "lucide-react";
 
 /** A manila-folder-style case card (HUD cyan). Links to the case. */
 export function FolderCard({
@@ -9,6 +9,7 @@ export function FolderCard({
   status,
   statusColor,
   meta,
+  onDelete,
 }: {
   to: string;
   code: string;
@@ -16,9 +17,25 @@ export function FolderCard({
   status: string;
   statusColor: string;
   meta: { label: string; value: string | number }[];
+  onDelete?: () => void;
 }) {
   return (
-    <Link to={to} className="group block transition hover:brightness-125">
+    <Link to={to} className="group relative block transition hover:brightness-125">
+      {onDelete && (
+        <button
+          type="button"
+          title="Delete case"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="absolute right-1.5 top-6 z-10 rounded border border-line bg-panel p-1 opacity-0 transition hover:border-[color:var(--kai-accent)] group-hover:opacity-100"
+          style={{ color: "var(--kai-accent)" }}
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
       {/* folder tab */}
       <div
         className="flex h-5 w-28 items-center gap-1 rounded-t-md border border-b-0 px-2"

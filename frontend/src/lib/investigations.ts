@@ -15,6 +15,8 @@ export const investigationsApi = {
   get: (id: string) => api.get<InvestigationDetail>(`/investigations/${id}`),
   create: (name: string, description?: string) =>
     api.post<Investigation>("/investigations", { name, description }),
+  remove: (id: string) => api.del<void>(`/investigations/${id}`),
+  removeDiscovery: (runId: string) => api.del<void>(`/discovery/investigations/${runId}`),
 
   entities: (id: string) => api.get<EntityNode[]>(`/investigations/${id}/entities`),
   addEntity: (id: string, body: { type: EntityType; value: string; label?: string }) =>

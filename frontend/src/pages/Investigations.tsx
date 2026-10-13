@@ -61,6 +61,28 @@ export function Investigations() {
   const runColor = (s: string) =>
     s === "done" ? "var(--kai-verified)" : s === "queued" ? "var(--kai-warn)" : "var(--kai-hud)";
 
+  async function deleteDiscovery(id: string, label: string) {
+    if (!window.confirm(`Delete discovery case “${label}”?\n\nThis removes the case folder. Collected sources/pages stay in the corpus.`)) return;
+    setRuns((cur) => cur.filter((r) => r.id !== id)); // optimistic
+    try {
+      await investigationsApi.removeDiscovery(id);
+    } catch {
+      setError("Failed to delete case.");
+      await load();
+    }
+  }
+
+  async function deleteManual(id: string, label: string) {
+    if (!window.confirm(`Delete case “${label}”?\n\nThis permanently removes the case and its entities, evidence and relationships.`)) return;
+    setCases((cur) => cur.filter((c) => c.id !== id)); // optimistic
+    try {
+      await investigationsApi.remove(id);
+    } catch {
+      setError("Failed to delete case.");
+      await load();
+    }
+  }
+
   return (
     <div>
       <div className="mb-5 flex items-center gap-2">
@@ -109,6 +131,7 @@ export function Investigations() {
                     { label: "sources", value: r.approved },
                     ...(r.status !== "done" ? [{ label: "progress", value: `${r.progress}%` }] : []),
                   ]}
+                  onDelete={() => deleteDiscovery(r.id, r.names.join(", ") || "subject")}
                 />
               </motion.div>
             ))}
@@ -139,6 +162,7 @@ export function Investigations() {
                   { label: "evd", value: c.evidence_count },
                   { label: "rel", value: c.relationship_count },
                 ]}
+                onDelete={() => deleteManual(c.id, c.name)}
               />
             </motion.div>
           ))}
