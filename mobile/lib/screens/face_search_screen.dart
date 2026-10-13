@@ -4,10 +4,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../models/report_match.dart';
+import '../models/person_group.dart';
 import '../services/api_client.dart';
 import '../theme/hacker_theme.dart';
-import '../widgets/report_card.dart';
+import '../widgets/person_hud.dart';
 import '../widgets/scanning_strip.dart';
 
 class FaceSearchScreen extends StatefulWidget {
@@ -22,7 +22,7 @@ class _FaceSearchScreenState extends State<FaceSearchScreen> {
   Uint8List? _queryBytes;
   bool _loading = false;
   String? _error;
-  List<ReportMatch>? _matches;
+  List<Person>? _people;
 
   Future<void> _pick(ImageSource source) async {
     try {
@@ -31,7 +31,7 @@ class _FaceSearchScreenState extends State<FaceSearchScreen> {
       final bytes = await x.readAsBytes();
       setState(() {
         _queryBytes = bytes;
-        _matches = null;
+        _people = null;
         _error = null;
       });
       await _search();
@@ -45,7 +45,7 @@ class _FaceSearchScreenState extends State<FaceSearchScreen> {
     setState(() {
       _loading = true;
       _error = null;
-      _matches = null;
+      _people = null;
     });
     try {
       final r = await ApiClient.instance.postImage(
@@ -60,10 +60,7 @@ class _FaceSearchScreenState extends State<FaceSearchScreen> {
         setState(() => _error = 'Search failed (HTTP ${r.statusCode}).');
       } else {
         final data = jsonDecode(r.body);
-        final list = (data['matches'] as List? ?? [])
-            .map((m) => ReportMatch.fromJson(m as Map<String, dynamic>))
-            .toList();
-        setState(() => _matches = list);
+        setState(() => _people = Person.listFromJson(data['people']));
       }
     } catch (e) {
       setState(() => _error = 'Cannot reach backend. Check settings.');
@@ -146,8 +143,8 @@ class _FaceSearchScreenState extends State<FaceSearchScreen> {
               padding: EdgeInsets.symmetric(vertical: 12),
               child: ScanningStrip(),
             ),
-          if (_matches != null && !_loading) ...[
-            if (_matches!.isEmpty)
+          if (_people != null && !_loading) ...[
+            if (_people!.isEmpty)
               Container(
                 padding: const EdgeInsets.all(24),
                 alignment: Alignment.center,
@@ -155,16 +152,8 @@ class _FaceSearchScreenState extends State<FaceSearchScreen> {
                 child: const Text('NO MATCH FOUND',
                     style: TextStyle(color: KaiColors.muted, fontWeight: FontWeight.bold)),
               )
-            else ...[
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Text(
-                  '${_matches!.length} POTENTIAL MATCH${_matches!.length == 1 ? '' : 'ES'} — leads to observe, not confirmed identity',
-                  style: const TextStyle(color: KaiColors.verified, fontSize: 11),
-                ),
-              ),
-              ..._matches!.map((m) => ReportCard(m: m)),
-            ],
+            else
+              PersonHud(people: _people!),
           ],
         ],
       ),
