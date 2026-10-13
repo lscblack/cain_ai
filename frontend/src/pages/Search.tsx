@@ -20,22 +20,34 @@ export function Search() {
   const [q, setQ] = useState(initial);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [discovering, setDiscovering] = useState<string | null>(null); // the term being discovered
+  // Background discovery job tied to the current search.
+  const [disc, setDisc] = useState<{ term: string; id: string; status: string; progress: number } | null>(null);
   const triggered = useRef<Set<string>>(new Set()); // dedup: never discover a term twice
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // When a name/phrase has no local match, kick a web discovery (deduped).
+  // When a name/phrase has no local match, kick a web discovery (deduped) and
+  // track it to completion so the operator sees when the case is done.
   async function autoDiscover(term: string) {
     const key = term.trim().toLowerCase();
     if (!key || triggered.current.has(key)) return;
     triggered.current.add(key);
-    setDiscovering(term.trim());
     try {
-      await api.post("/discovery/ask", { question: term.trim(), auto_crawl: true });
+      const r = await api.post<{ id: string }>("/discovery/ask", { question: term.trim(), auto_crawl: true });
+      setDisc({ term: term.trim(), id: r.id, status: "queued", progress: 0 });
+      if (poll.current) clearInterval(poll.current);
+      poll.current = setInterval(async () => {
+        try {
+          const d = await api.get<{ status: string; progress: number }>(`/discovery/investigations/${r.id}`);
+          setDisc((cur) => (cur && cur.id === r.id ? { ...cur, status: d.status, progress: d.progress ?? 0 } : cur));
+          if (d.status === "done" && poll.current) { clearInterval(poll.current); poll.current = null; }
+        } catch { /* keep polling */ }
+      }, 4000);
     } catch {
       triggered.current.delete(key); // allow retry if it failed to start
-      setDiscovering(null);
     }
   }
+
+  useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
 
   async function run(query: string) {
     if (!query.trim()) return;
@@ -94,21 +106,33 @@ export function Search() {
             · normalized {result.normalized}
           </div>
 
-          {discovering && (
+          {disc && (
             <Link
               to="/investigate"
-              className="hud-panel hud-frame mb-6 flex items-center gap-3 px-4 py-3 transition hover:brightness-125"
+              className="hud-panel hud-frame mb-6 block px-4 py-3 transition hover:brightness-125"
             >
-              <Radar size={16} className="animate-spin" style={{ color: "var(--kai-hud)", animationDuration: "3s" }} />
-              <div>
-                <div className="hud-mono text-xs uppercase" style={{ color: "var(--kai-hud)" }}>
-                  ◢ Discovering “{discovering}” across the web
-                </div>
-                <div className="kai-metadata mt-0.5">
-                  Crawling + scraping public sources — building an investigation case. Open{" "}
-                  <span style={{ color: "var(--kai-hud)" }}>Investigate</span> to watch it fill.
+              <div className="flex items-center gap-3">
+                {disc.status === "done" ? (
+                  <span style={{ color: "var(--kai-verified)" }}>✓</span>
+                ) : (
+                  <Radar size={16} className="animate-spin" style={{ color: "var(--kai-hud)", animationDuration: "3s" }} />
+                )}
+                <div className="flex-1">
+                  <div className="hud-mono text-xs uppercase" style={{ color: disc.status === "done" ? "var(--kai-verified)" : "var(--kai-hud)" }}>
+                    ◢ {disc.status === "done" ? `Case ready for “${disc.term}”` : `Discovering “${disc.term}” across the web`}
+                  </div>
+                  <div className="kai-metadata mt-0.5">
+                    {disc.status === "done"
+                      ? "Crawl complete — organized case with summary. Open Investigate to view."
+                      : `Crawling + scraping public sources in the background · ${disc.status}${disc.progress ? ` ${disc.progress}%` : ""} — open Investigate to watch it fill.`}
+                  </div>
                 </div>
               </div>
+              {disc.status !== "done" && (
+                <div className="mt-2 h-1 w-full overflow-hidden rounded bg-panel">
+                  <div className="h-full" style={{ width: `${Math.max(5, disc.progress)}%`, background: "var(--kai-hud)", transition: "width .3s" }} />
+                </div>
+              )}
             </Link>
           )}
 
