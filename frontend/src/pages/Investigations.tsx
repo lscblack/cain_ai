@@ -1,13 +1,23 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Plus, FolderSearch } from "lucide-react";
 
+import { api } from "@/lib/api";
 import { investigationsApi } from "@/lib/investigations";
+import { FolderCard } from "@/components/FolderCard";
 import type { InvestigationDetail } from "@/types";
+
+interface DiscoveryRun {
+  id: string;
+  status: string;
+  names: string[];
+  approved: number;
+  progress: number;
+}
 
 export function Investigations() {
   const [cases, setCases] = useState<InvestigationDetail[]>([]);
+  const [runs, setRuns] = useState<DiscoveryRun[]>([]);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,10 +28,18 @@ export function Investigations() {
     } catch {
       setError("Failed to load investigations.");
     }
+    try {
+      const r = await api.get<{ investigations: DiscoveryRun[] }>("/discovery/investigations");
+      setRuns(r.investigations ?? []);
+    } catch {
+      /* discovery optional */
+    }
   }
 
   useEffect(() => {
     load();
+    const t = setInterval(load, 5000); // keep discovery-case status fresh
+    return () => clearInterval(t);
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -40,24 +58,30 @@ export function Investigations() {
     }
   }
 
+  const runColor = (s: string) =>
+    s === "done" ? "var(--kai-verified)" : s === "queued" ? "var(--kai-warn)" : "var(--kai-hud)";
+
   return (
     <div>
       <div className="mb-5 flex items-center gap-2">
-        <FolderSearch size={18} className="text-muted" />
-        <h1 className="text-lg font-semibold">Investigations</h1>
+        <FolderSearch size={18} style={{ color: "var(--kai-hud)" }} />
+        <h1 className="hud-mono text-lg font-semibold hud-glow" style={{ color: "var(--kai-hud)" }}>
+          Investigations
+        </h1>
       </div>
 
-      <form onSubmit={onCreate} className="mb-6 flex gap-2">
+      <form onSubmit={onCreate} className="hud-panel hud-frame mb-6 flex gap-2 p-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="New investigation name (e.g. Subject Investigation 001)"
-          className="flex-1 rounded-md border border-line bg-panel px-3 py-2 text-sm outline-none focus:border-muted"
+          placeholder="New case name (e.g. Subject Investigation 001)"
+          className="flex-1 rounded-md border border-line bg-panel px-3 py-2 text-sm outline-none focus:border-[color:var(--kai-hud)]"
         />
         <button
           type="submit"
           disabled={creating}
-          className="flex items-center gap-2 rounded-md border border-line bg-panel px-4 py-2 text-sm hover:bg-panel-2 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm disabled:opacity-50"
+          style={{ borderColor: "var(--kai-hud-dim)", color: "var(--kai-hud)", background: "rgba(34,211,238,0.06)" }}
         >
           <Plus size={15} /> Create
         </button>
@@ -65,39 +89,57 @@ export function Investigations() {
 
       {error && <div className="mb-4 text-sm" style={{ color: "var(--kai-accent)" }}>{error}</div>}
 
+      {/* Discovery cases (started from a name search / Ask) */}
+      {runs.length > 0 && (
+        <section className="mb-8">
+          <div className="hud-mono mb-3 text-xs uppercase hud-glow" style={{ color: "var(--kai-hud)" }}>
+            ◢ Discovery cases · {runs.length}
+          </div>
+          <div className="grid gap-x-3 gap-y-5 md:grid-cols-2 lg:grid-cols-3">
+            {runs.map((r, i) => (
+              <motion.div key={r.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
+                <FolderCard
+                  to={`/investigate?run=${r.id}`}
+                  code={r.id.slice(0, 10)}
+                  title={r.names.join(", ") || "subject"}
+                  status={r.status === "done" ? "READY" : r.status.toUpperCase()}
+                  statusColor={runColor(r.status)}
+                  meta={[
+                    { label: "subjects", value: r.names.length },
+                    { label: "sources", value: r.approved },
+                    ...(r.status !== "done" ? [{ label: "progress", value: `${r.progress}%` }] : []),
+                  ]}
+                />
+              </motion.div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Manual cases */}
+      <div className="hud-mono mb-3 text-xs uppercase" style={{ color: "var(--kai-muted)" }}>
+        ◢ Manual cases · {cases.length}
+      </div>
       {cases.length === 0 ? (
         <div className="rounded-lg border border-line bg-panel p-6 text-sm text-muted">
-          No investigations yet. Create one above to begin.
+          No manual cases yet. Create one above, or search a name to start a discovery case.
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-x-3 gap-y-5 md:grid-cols-2 lg:grid-cols-3">
           {cases.map((c, i) => (
-            <motion.div
-              key={c.id}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.03 }}
-            >
-              <Link
+            <motion.div key={c.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
+              <FolderCard
                 to={`/investigations/${c.id}`}
-                className="block rounded-lg border border-line bg-panel p-4 hover:border-muted"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="kai-metadata">{c.code}</span>
-                  <span
-                    className="kai-metadata uppercase"
-                    style={{ color: c.status === "open" ? "var(--kai-verified)" : "var(--kai-muted)" }}
-                  >
-                    {c.status}
-                  </span>
-                </div>
-                <div className="mt-2 truncate text-sm font-medium">{c.name}</div>
-                <div className="kai-metadata mt-3 flex gap-3">
-                  <span>ent {c.entity_count}</span>
-                  <span>evd {c.evidence_count}</span>
-                  <span>rel {c.relationship_count}</span>
-                </div>
-              </Link>
+                code={c.code}
+                title={c.name}
+                status={c.status.toUpperCase()}
+                statusColor={c.status === "open" ? "var(--kai-verified)" : "var(--kai-muted)"}
+                meta={[
+                  { label: "ent", value: c.entity_count },
+                  { label: "evd", value: c.evidence_count },
+                  { label: "rel", value: c.relationship_count },
+                ]}
+              />
             </motion.div>
           ))}
         </div>

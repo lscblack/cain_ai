@@ -108,7 +108,7 @@ export function Search() {
 
           {disc && (
             <Link
-              to="/investigate"
+              to={`/investigate?run=${disc.id}`}
               className="hud-panel hud-frame mb-6 block px-4 py-3 transition hover:brightness-125"
             >
               <div className="flex items-center gap-3">

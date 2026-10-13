@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Crosshair, Play, Users, Radar, Trash2, ChevronRight, RotateCw, Search } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -168,7 +169,14 @@ function NamesTab() {
   async function load() {
     try { setRuns((await api.get<{ investigations: Investigation[] }>("/discovery/investigations")).investigations); } catch { /* */ }
   }
+  const [params] = useSearchParams();
   useEffect(() => { load(); return () => { if (poll.current) clearInterval(poll.current); }; }, []);
+  // Open a specific case when linked from the Investigations folder (?run=<id>).
+  useEffect(() => {
+    const runId = params.get("run");
+    if (runId) open(runId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   function tipLines() {
     return tips.split(/\n+/).map((s) => s.trim()).filter(Boolean);
