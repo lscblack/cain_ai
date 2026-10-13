@@ -19,7 +19,23 @@ from app.core.config import get_settings
 from app.core.net import UnsafeUrlError, validate_public_url
 from app.crawlers.runner import Fetched
 
-_UA = "KAI-OSINT/0.1 (+local research; public pages only; honours robots.txt)"
+# A realistic desktop browser UA so public pages don't 403 a bot string. We
+# still honour robots.txt and only fetch public pages — this just lets us see
+# what a normal browser would. No auth, no paywalls.
+_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+# Browser-like headers improve open-web access on sites that sniff them.
+_BROWSER_HEADERS = {
+    "User-Agent": _UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 # Per-host last-request timestamps for rate limiting (politeness).
 _last_hit: dict[str, float] = {}
@@ -63,10 +79,11 @@ async def httpx_fetch(url: str) -> Fetched:
     if (not host.endswith(".onion") and get_settings().crawl_require_proxy and not proxy):
         return Fetched(status=0)
     await _rate_limit(host)
-    try:
+
+    async def _get(via: str | None) -> Fetched:
         async with httpx.AsyncClient(
-            timeout=30.0 if proxy else 15.0, follow_redirects=True,
-            headers={"User-Agent": _UA}, proxy=proxy,
+            timeout=30.0 if via else 15.0, follow_redirects=True,
+            headers=_BROWSER_HEADERS, proxy=via,
         ) as client:
             resp = await client.get(url)
             return Fetched(
@@ -75,8 +92,26 @@ async def httpx_fetch(url: str) -> Fetched:
                 body=resp.content,
                 etag=resp.headers.get("etag"),
             )
+
+    try:
+        res = await _get(proxy)
     except Exception:
-        return Fetched(status=0)
+        res = Fetched(status=0)
+    # If an open-web page blocked us (datacenter/VPN IP reputation), retry once
+    # over Tor — its exit IP differs and often isn't blocked.
+    if (
+        res.status in (0, 403, 429, 451, 503)
+        and not host.endswith(".onion")
+        and not proxy
+        and get_settings().tor_socks_proxy
+    ):
+        try:
+            alt = await _get(get_settings().tor_socks_proxy)
+            if alt.status == 200:
+                return alt
+        except Exception:
+            pass
+    return res
 
 
 class RobotsGate:
