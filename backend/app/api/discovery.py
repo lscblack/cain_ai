@@ -269,6 +269,72 @@ async def get_investigation(
     }
 
 
+def _compose_case_summary(names: list[str], dossiers: list[dict]) -> str:
+    lines = [f"Investigation of {', '.join(names) or 'subject(s)'} — potential public-OSINT findings, not confirmed."]
+    for d in dossiers:
+        c = d.get("counts") or {}
+        bits = []
+        if d.get("titles"):
+            bits.append("role " + " / ".join(d["titles"][:2]))
+        if d.get("orgs"):
+            bits.append("org " + " / ".join(d["orgs"][:2]))
+        if d.get("locations"):
+            bits.append("in " + ", ".join(d["locations"][:3]))
+        lines.append(
+            f"• {d.get('term')}: {c.get('faces',0)} image(s), {c.get('phones',0)} phone(s), "
+            f"{c.get('emails',0)} email(s), {c.get('pages',0)} page(s)"
+            + (" — " + "; ".join(bits) if bits else "")
+        )
+    return "\n".join(lines)
+
+
+@router.post("/investigations/{run_id}/summary")
+async def investigation_summary(
+    run_id: str,
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """AI case summary of an investigation from the public data gathered so far.
+    Composed fallback when no AI provider is configured."""
+    raw = await redis.get(_run_key(run_id))
+    if raw is None:
+        raise HTTPException(status_code=404, detail="Investigation not found or expired.")
+    st = json.loads(raw)
+    names = st.get("names") or []
+    dossiers = [await gather_dossier(session, n, as_name=True) for n in names]
+
+    from app.ai.router import AIMessage, get_ai_provider
+
+    provider = get_ai_provider()
+    if provider is None or not provider.available():
+        return {"available": False, "summary": _compose_case_summary(names, dossiers), "model": None}
+
+    # Compact context for the model (counts + extracted attributes + a few sources).
+    ctx = {"names": names, "subjects": []}
+    for d in dossiers:
+        ctx["subjects"].append({
+            "name": d.get("term"), "counts": d.get("counts"),
+            "titles": d.get("titles"), "orgs": d.get("orgs"), "locations": d.get("locations"),
+            "emails": (d.get("emails") or [])[:5], "phones": (d.get("phones") or [])[:5],
+            "usernames": (d.get("usernames") or [])[:5],
+            "pages": [p.get("title") or p.get("url") for p in (d.get("pages") or [])[:8]],
+        })
+    system = (
+        "You are an OSINT analyst. Write a clear, well-organised CASE SUMMARY of the subject(s) "
+        "from the PUBLIC data provided only — who they appear to be, roles/affiliations, locations, "
+        "contactable identifiers found, and notable sources. Use short sections / bullet points. "
+        "Do NOT invent facts. Hedge: 'appears to be' / 'potential', never a confirmed identity."
+    )
+    try:
+        summary = await provider.chat(
+            [AIMessage(role="system", content=system), AIMessage(role="user", content=json.dumps(ctx))]
+        )
+        return {"available": True, "summary": summary.strip(), "model": provider.name}
+    except Exception:
+        return {"available": False, "summary": _compose_case_summary(names, dossiers), "model": None}
+
+
 @router.get("/public-searches")
 async def public_searches(
     operator: User = Depends(get_current_operator),

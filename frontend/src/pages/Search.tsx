@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Search as SearchIcon } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Search as SearchIcon, Radar } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { SearchResponse } from "@/types";
@@ -20,12 +20,37 @@ export function Search() {
   const [q, setQ] = useState(initial);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [discovering, setDiscovering] = useState<string | null>(null); // the term being discovered
+  const triggered = useRef<Set<string>>(new Set()); // dedup: never discover a term twice
+
+  // When a name/phrase has no local match, kick a web discovery (deduped).
+  async function autoDiscover(term: string) {
+    const key = term.trim().toLowerCase();
+    if (!key || triggered.current.has(key)) return;
+    triggered.current.add(key);
+    setDiscovering(term.trim());
+    try {
+      await api.post("/discovery/ask", { question: term.trim(), auto_crawl: true });
+    } catch {
+      triggered.current.delete(key); // allow retry if it failed to start
+      setDiscovering(null);
+    }
+  }
 
   async function run(query: string) {
     if (!query.trim()) return;
     setLoading(true);
     try {
-      setResult(await api.get<SearchResponse>(`/search?q=${encodeURIComponent(query.trim())}`));
+      const r = await api.get<SearchResponse>(`/search?q=${encodeURIComponent(query.trim())}`);
+      setResult(r);
+      // A name/phrase (unknown type) with nothing local -> discover it across the web.
+      if (
+        r.detected_type === "unknown" &&
+        r.entity_matches.length === 0 &&
+        r.evidence_matches.length === 0
+      ) {
+        void autoDiscover(query);
+      }
     } catch {
       setResult(null);
     } finally {
@@ -68,6 +93,24 @@ export function Search() {
             </span>
             · normalized {result.normalized}
           </div>
+
+          {discovering && (
+            <Link
+              to="/investigate"
+              className="hud-panel hud-frame mb-6 flex items-center gap-3 px-4 py-3 transition hover:brightness-125"
+            >
+              <Radar size={16} className="animate-spin" style={{ color: "var(--kai-hud)", animationDuration: "3s" }} />
+              <div>
+                <div className="hud-mono text-xs uppercase" style={{ color: "var(--kai-hud)" }}>
+                  ◢ Discovering “{discovering}” across the web
+                </div>
+                <div className="kai-metadata mt-0.5">
+                  Crawling + scraping public sources — building an investigation case. Open{" "}
+                  <span style={{ color: "var(--kai-hud)" }}>Investigate</span> to watch it fill.
+                </div>
+              </div>
+            </Link>
+          )}
 
           <section className="mb-6">
             <div className="hud-mono mb-2 uppercase text-xs" style={{ color: "var(--kai-hud)" }}>

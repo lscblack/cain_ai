@@ -148,6 +148,21 @@ function NamesTab() {
   const [detail, setDetail] = useState<any>(null);
   const [activeName, setActiveName] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
+  const [summary, setSummary] = useState<{ loading: boolean; text?: string; model?: string | null } | null>(null);
+
+  async function genSummary() {
+    if (!openId) return;
+    setSummary({ loading: true });
+    try {
+      const r = await api.post<{ summary: string; model: string | null }>(
+        `/discovery/investigations/${openId}/summary`,
+        {},
+      );
+      setSummary({ loading: false, text: r.summary, model: r.model });
+    } catch {
+      setSummary({ loading: false, text: "Summary unavailable." });
+    }
+  }
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function load() {
@@ -207,6 +222,7 @@ function NamesTab() {
 
   async function open(id: string) {
     setOpenId(id);
+    setSummary(null);
     setActiveName(null);
     const fetchDetail = async () => {
       try {
@@ -327,6 +343,29 @@ function NamesTab() {
                 <span className={`text-xs uppercase ${detail.status === "done" ? "text-verified" : "text-accent"}`}>{detail.status}</span>
               </div>
             </div>
+
+            {/* AI case summary — everything found, organised */}
+            <div className="hud-panel hud-frame mb-3 p-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="hud-mono text-xs uppercase hud-glow" style={{ color: "var(--kai-hud)" }}>◢ Case summary</span>
+                {!summary?.loading && (
+                  <button onClick={genSummary} className="hud-mono text-[10px] uppercase tracking-wider" style={{ color: "var(--kai-hud)" }}>
+                    {summary?.text ? "Regenerate" : "Generate"}
+                  </button>
+                )}
+              </div>
+              {summary?.loading ? (
+                <div className="kai-metadata">analyzing the case…</div>
+              ) : summary?.text ? (
+                <>
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: "var(--kai-text)" }}>{summary.text}</div>
+                  <div className="kai-metadata mt-1">{summary.model ? `ai · ${summary.model}` : "composed"} · potential, not confirmed</div>
+                </>
+              ) : (
+                <div className="kai-metadata">Generate an AI overview of everything found for this case.</div>
+              )}
+            </div>
+
             <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-muted">
               <button
                 onClick={() => setShowSources((s) => !s)}
