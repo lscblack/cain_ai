@@ -155,39 +155,101 @@ class AskIn(BaseModel):
     auto_crawl: bool = True
 
 
+# Filler/question words stripped before resolving the subject of a question.
+_QUESTION_FILLER = {
+    "i", "want", "to", "know", "about", "who", "is", "are", "was", "were", "the",
+    "of", "tell", "me", "what", "whats", "give", "info", "information", "on",
+    "please", "can", "could", "you", "find", "show", "details", "detail", "a",
+    "an", "for", "more", "everything", "regarding", "research", "investigate",
+    "look", "up", "search", "get", "need", "would", "like", "there", "any", "all",
+    "data", "do", "does", "his", "her", "their", "this", "that", "and", "with",
+    "person", "named", "name", "call", "called", "profile", "background",
+}
+
+_SUBJECT_QUERIES = (
+    "", " biography", " age date of birth", " wife husband children family",
+    " photos images",
+)
+
+
+def _clean_question(q: str) -> str:
+    """Strip filler/question words, keeping the meaningful subject terms."""
+    import re
+
+    words = re.findall(r"[A-Za-z0-9.&'\-]+", q.lower())
+    kept = [w for w in words if w not in _QUESTION_FILLER and len(w) > 1]
+    return " ".join(kept).strip()
+
+
+def _subject_queries(subject: str) -> list[str]:
+    return [f"{subject}{suffix}" for suffix in _SUBJECT_QUERIES]
+
+
 async def _resolve_subject(question: str) -> tuple[str, list[str]]:
     """Turn a natural-language question into a subject + web queries, covering
-    bio, age, family and photos. Uses the AI provider when configured; otherwise
-    composes queries directly. Public-OSINT only."""
+    bio, age, family and photos. Public-OSINT only.
+
+    Keyless by default: strips filler words then resolves a canonical subject via
+    Wikipedia's free opensearch API (e.g. "i want to know about president paul
+    kagame" -> "Paul Kagame"). An AI provider, if actually reachable, may refine
+    it — but resolution never DEPENDS on one (the provider here 402s)."""
+    from app.discovery.search import wikipedia_article
+
     q = question.strip()
-    fallback = (q, [
-        q, f"{q} biography", f"{q} age date of birth",
-        f"{q} wife husband children family", f"{q} photos images",
-    ])
+    cleaned = _clean_question(q) or q
+
+    # Aspect words describe what the operator wants ABOUT the subject, not the
+    # subject itself — drop them when resolving the canonical name.
+    aspects = {
+        "family", "wife", "husband", "children", "child", "spouse", "parents",
+        "father", "mother", "son", "daughter", "age", "biography", "bio",
+        "photos", "photo", "images", "image", "pictures", "picture", "date",
+        "birth", "born", "death", "died", "net", "worth", "education", "career",
+        "history", "life", "story", "details",
+    }
+    core = " ".join(w for w in cleaned.split() if w not in aspects).strip()
+
+    # 1) Keyless canonical resolution via Wikipedia (always available). Try the
+    #    core phrase, then progressively shorter prefixes, first hit wins.
+    tokens = (core or cleaned).split()
+    candidates = [core, cleaned] + [" ".join(tokens[:n]) for n in (4, 3, 2)]
+    subject = core or cleaned
+    for cand in dict.fromkeys([c for c in candidates if c]):
+        try:
+            art = await wikipedia_article(cand)
+        except Exception:
+            art = None
+        if art:
+            subject = art[1]  # canonical article title, e.g. "Paul Kagame"
+            break
+    queries = _subject_queries(subject)
+
+    # 2) Optional AI refinement — only if the provider is truly working.
     try:
         from app.ai.router import AIMessage, get_ai_provider
 
         provider = get_ai_provider()
-        if provider is None or not provider.available():
-            return fallback
-        system = (
-            "Extract the primary PERSON a question is about. Return STRICT JSON only: "
-            '{"subject": "<full name or best guess>", "queries": ["<web search query>", ...]}. '
-            "Include queries covering biography, age/date of birth, family (spouse, children, "
-            "parents) and photos. Public OSINT only. If no specific person is implied, set "
-            "subject to the key phrase."
-        )
-        out = await provider.chat(
-            [AIMessage(role="system", content=system), AIMessage(role="user", content=q)]
-        )
-        data = json.loads(out[out.find("{"): out.rfind("}") + 1])
-        subject = (str(data.get("subject") or q)).strip()
-        queries = [str(x).strip() for x in (data.get("queries") or []) if str(x).strip()][:20]
-        if not queries:
-            queries = fallback[1]
-        return subject, queries
+        if provider is not None and provider.available():
+            system = (
+                "Extract the primary PERSON a question is about. Return STRICT JSON only: "
+                '{"subject": "<full name or best guess>", "queries": ["<web search query>", ...]}. '
+                "Include queries covering biography, age/date of birth, family (spouse, children, "
+                "parents) and photos. Public OSINT only. If no specific person is implied, set "
+                "subject to the key phrase."
+            )
+            out = await provider.chat(
+                [AIMessage(role="system", content=system), AIMessage(role="user", content=q)]
+            )
+            data = json.loads(out[out.find("{"): out.rfind("}") + 1])
+            ai_subject = (str(data.get("subject") or "")).strip()
+            ai_queries = [str(x).strip() for x in (data.get("queries") or []) if str(x).strip()][:20]
+            if ai_subject:
+                subject = ai_subject
+                queries = ai_queries or _subject_queries(ai_subject)
     except Exception:
-        return fallback
+        pass  # AI unavailable/unpaid — keep the keyless result
+
+    return subject, queries
 
 
 @router.post("/ask", response_model=DiscoveryRunStarted, status_code=status.HTTP_202_ACCEPTED)

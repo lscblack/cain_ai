@@ -86,14 +86,53 @@ def test_name_deep_queries_includes_family():
     assert '"Jane Doe" family' in out
 
 
-async def test_resolve_subject_fallback_without_ai():
-    from app.api.discovery import _resolve_subject
+async def test_resolve_subject_keyless_via_wikipedia(monkeypatch):
+    """Without a working AI provider, the subject is resolved from the question
+    via Wikipedia's keyless opensearch (filler words stripped) — not left as the
+    raw question."""
+    import app.api.discovery as disc
+    import app.discovery.search as search
 
-    subject, queries = await _resolve_subject("who is the president of Rwanda")
-    assert subject == "who is the president of Rwanda"
+    import app.ai.router as airouter
+    monkeypatch.setattr(airouter, "get_ai_provider", lambda: None, raising=False)
+
+    async def fake_article(term: str):
+        # simulate opensearch resolving the cleaned phrase to a canonical title
+        return ("https://en.wikipedia.org/wiki/Paul_Kagame", "Paul Kagame")
+
+    monkeypatch.setattr(search, "wikipedia_article", fake_article)
+
+    subject, queries = await _resolve_subject_wrap(
+        "i want to know about president paul kagame"
+    )
+    assert subject == "Paul Kagame"  # canonical, not the full question
     assert any("family" in q for q in queries)
     assert any("photos" in q or "images" in q for q in queries)
     assert any("age" in q for q in queries)
+
+
+async def test_resolve_subject_strips_filler_when_no_wiki(monkeypatch):
+    """If Wikipedia finds nothing, we still strip filler words rather than keep
+    the whole question as the subject."""
+    import app.api.discovery as disc
+    import app.discovery.search as search
+
+    import app.ai.router as airouter
+    monkeypatch.setattr(airouter, "get_ai_provider", lambda: None, raising=False)
+
+    async def no_article(term: str):
+        return None
+
+    monkeypatch.setattr(search, "wikipedia_article", no_article)
+
+    subject, _ = await _resolve_subject_wrap("tell me everything about elon musk")
+    assert subject == "elon musk"  # filler stripped, not the full question
+
+
+async def _resolve_subject_wrap(q: str):
+    from app.api.discovery import _resolve_subject
+
+    return await _resolve_subject(q)
 
 
 def test_onion_extraction_from_ahmia_html():
