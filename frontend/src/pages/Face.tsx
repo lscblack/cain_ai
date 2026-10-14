@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ScanFace, Upload } from "lucide-react";
+import { ScanFace, Upload, Video } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
@@ -272,7 +273,7 @@ export function Face() {
         </div>
       )}
 
-      <div className="mb-5 flex gap-2 border-b border-line">
+      <div className="mb-5 flex items-center gap-2 border-b border-line">
         {(["search", "detect", "compare", "discover"] as Mode[]).map((m) => (
           <button
             key={m}
@@ -289,6 +290,13 @@ export function Face() {
                   : "Global Discovery"}
           </button>
         ))}
+        <Link
+          to="/face/live"
+          className="ml-auto mb-1 flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition hover:brightness-125"
+          style={{ borderColor: "var(--kai-hud-dim)", color: "var(--kai-hud)", background: "rgba(34,211,238,0.06)" }}
+        >
+          <Video size={14} /> Live Camera
+        </Link>
       </div>
 
       {mode === "detect" && <MultiFaceDetect engineAvailable={status?.available ?? false} />}
