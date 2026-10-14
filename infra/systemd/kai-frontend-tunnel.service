@@ -1,0 +1,16 @@
+[Unit]
+Description=KAI frontend public HTTPS (Cloudflare quick tunnel -> :5174)
+After=kai-frontend.service
+Wants=kai-frontend.service
+
+[Service]
+Type=simple
+# Quick tunnel: ephemeral HTTPS URL (changes each (re)start). The frontend
+# proxies /api -> backend, so this one URL serves the whole web app over HTTPS.
+ExecStart=/home/lscblack/.local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:5174
+Restart=always
+RestartSec=5
+Environment=HOME=/home/lscblack
+
+[Install]
+WantedBy=default.target
