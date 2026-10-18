@@ -89,6 +89,33 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(default="https://api.openai.com/v1")
     ai_model: str = Field(default="openai/gpt-4o-mini")
 
+    # ── Local KAI chat model (Ollama) ──
+    # The customised security model served by a local Ollama. KAI never
+    # silently falls back to a cloud model when this is unreachable — it
+    # reports the exact problem instead.
+    kai_ollama_model: str = Field(default="kai-security")
+    ollama_base_url: str = Field(default="http://127.0.0.1:11434")
+    kai_ollama_num_ctx: int = Field(default=8192)       # model context window (tokens)
+    kai_ollama_temperature: float = Field(default=0.2)
+    # CPU inference of an 8B model on this host is slow (minutes for a long
+    # answer); streaming keeps the UI responsive, but non-stream calls need a
+    # generous ceiling so a real generation isn't cut off mid-thought.
+    kai_ollama_timeout_s: float = Field(default=600.0)  # per-request HTTP timeout
+    # Rough chars-per-token used only to trim history so the prompt fits num_ctx.
+    kai_ollama_chars_per_token: int = Field(default=4)
+
+    # ── Security tool execution ──
+    tool_exec_timeout_s: int = Field(default=60)        # hard wall-clock cap per tool run
+    tool_output_max_bytes: int = Field(default=200_000)  # stdout/stderr capture ceiling
+    tool_rate_limit_per_min: int = Field(default=30)    # per-operator tool runs / minute
+    tool_max_agent_steps: int = Field(default=6)        # tool calls the model may chain in one turn
+    # Privileged package installs. The backend never gives the model a root
+    # shell; installs run a single argv through this helper. "sudo" needs a
+    # scoped NOPASSWD sudoers entry; "pkexec" prompts the desktop. Empty string
+    # disables real installation (approval workflow still records the request).
+    tool_install_helper: str = Field(default="sudo")
+    tool_install_enabled: bool = Field(default=True)
+
     # Maps / geo
     tomtom_api_key: str = Field(default="")
     cesium_ion_token: str = Field(default="")

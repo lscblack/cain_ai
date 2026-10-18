@@ -23,6 +23,8 @@ import { PowerUp } from "@/pages/PowerUp";
 import { MapView } from "@/pages/MapView";
 import { Timeline } from "@/pages/Timeline";
 import { System } from "@/pages/System";
+import { Chat } from "@/pages/Chat";
+import { Security } from "@/pages/Security";
 import { Home } from "@/pages/Home";
 
 export default function App() {
@@ -48,6 +50,8 @@ export default function App() {
         <AppShell>
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/chat" element={<Chat />} />
+            <Route path="/security" element={<Security />} />
             <Route path="/search" element={<Search />} />
             <Route path="/phone" element={<Phone />} />
             <Route path="/email" element={<Email />} />

@@ -21,6 +21,8 @@ import {
   Smartphone,
   Video,
   LogOut,
+  MessageSquare,
+  ShieldCheck,
 } from "lucide-react";
 
 import { StatusIndicator } from "@/components/StatusIndicator";
@@ -29,6 +31,8 @@ import { useAuth } from "@/lib/auth";
 
 const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: LayoutDashboard, label: "Dashboard", to: "/" },
+  { icon: MessageSquare, label: "KAI Chat", to: "/chat" },
+  { icon: ShieldCheck, label: "Security", to: "/security" },
   { icon: Search, label: "Search", to: "/search" },
   { icon: FolderSearch, label: "Investigations", to: "/investigations" },
   { icon: Users, label: "Faces", to: "/face" },

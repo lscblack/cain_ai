@@ -31,9 +31,60 @@ Built phase by phase. See `docs/superpowers/specs/` (designs) and
 - **Phase 15 — AI analyst:** OpenRouter/OpenAI-compatible, evidence-grounded. ✅
 - **Phase 16 — Timeline:** chronological observation view. ✅
 - **Phase 18 — Hardening:** security headers, login rate-limit, evidence export (JSON/CSV). ✅
+- **KAI Chat + Security Tools:** local `kai-security` (Ollama) chat with persistent
+  conversations and streaming, plus a backend-managed registry of real Ubuntu
+  security tools (DNS/WHOIS/HTTP-headers/TLS/nmap/log-analysis/CVE research) that
+  the model can select and run under strict controls, a controlled apt install
+  approval workflow, and a Security Console UI. ✅
 
 External providers (reverse-image, AI, map tiles) report **UNAVAILABLE** until
 their API keys are set in `.env` — KAI never fabricates results.
+
+## KAI Chat & security tools (local model)
+
+KAI talks to a local **Ollama** server running the customised `kai-security`
+model (configure with `KAI_OLLAMA_MODEL`, default `kai-security`;
+`OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434`). KAI **never silently
+falls back to a cloud model** — if Ollama is down or the model is missing, the
+chat and the status badge say exactly what to fix.
+
+Open **KAI Chat** to converse (streaming; conversations persist). With the
+*tools* toggle on, the model can select and run real host tools through a
+hardened backend:
+
+- **Execution is argv-only** (`subprocess`, never a shell), with a sanitised
+  environment, per-run timeout, output caps, rate limiting, secret redaction,
+  and an audit log. The model never gets a shell or root.
+- Because `kai-security` has no native tool-calling, KAI uses a **validated JSON
+  orchestration protocol** — the model proposes a tool call, the backend
+  validates + executes it, and the real result is fed back. Nothing is faked.
+- **Active** operations (e.g. `nmap`) are refused unless the target is on the
+  operator's **authorized-targets** list (passive OSINT needs no entry).
+- The **Security Console** shows tool inventory (live host state), execution
+  history, authorized targets, structured findings, and the install workflow.
+
+### Controlled package installs
+
+The model can *request* a missing tool; only an operator *approves*, and nothing
+is marked installed until it verifies on the real host. Installs run one fixed
+argv — `apt-get install -y --no-install-recommends <validated-package>` — via a
+scoped privileged helper (`TOOL_INSTALL_HELPER`, default `sudo`). For real
+execution, grant a **narrow** NOPASSWD rule (installs otherwise fail honestly
+with `sudo_needs_password`):
+
+```sudoers
+# /etc/sudoers.d/kai-apt   (edit with: sudo visudo -f /etc/sudoers.d/kai-apt)
+# Replace <user> with the account running the backend.
+<user> ALL=(root) NOPASSWD: /usr/bin/apt-get install -y --no-install-recommends *
+```
+
+Alternatively set `TOOL_INSTALL_HELPER=pkexec` for a desktop prompt, or
+`TOOL_INSTALL_ENABLED=false` to record approvals without executing. KAI does
+**not** add Kali/Parrot repos, install RPMs, or disable signature verification.
+
+Requires the dnsutils/whois/curl/openssl/nmap/systemd/ufw packages for the
+built-in tools (most ship with Ubuntu). CVE research uses the keyless OSV.dev
+public API.
 
 ## Architecture
 
