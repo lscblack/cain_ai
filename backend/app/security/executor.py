@@ -67,6 +67,7 @@ async def run_argv(
     timeout: int | None = None,
     max_bytes: int | None = None,
     stdin: bytes | None = None,
+    env_extra: dict | None = None,
 ) -> ExecResult:
     s = get_settings()
     timeout = timeout or s.tool_exec_timeout_s
@@ -76,13 +77,16 @@ async def run_argv(
         return ExecResult(argv=argv or [], status="error", error="invalid argv")
 
     start = time.monotonic()
+    # Base env is minimal (no KAI secrets). Callers may add a few vetted keys —
+    # e.g. the graphical-session vars pkexec needs to show its polkit prompt.
+    env = {**_SAFE_ENV, **(env_extra or {})}
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=_SAFE_ENV,
+            env=env,
             start_new_session=True,  # own process group → we can kill children too
         )
     except FileNotFoundError:

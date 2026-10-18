@@ -84,15 +84,25 @@ async def test_install_request_reject_then_cannot_approve(client, auth_headers):
     assert appr.status_code == 409
 
 
-async def test_install_approve_reports_honest_outcome(client, auth_headers):
-    """Approve attempts a real privileged install. On this host sudo needs a
-    password, so the outcome must be reported as failed (never faked installed)."""
-    req = await client.post("/tools/install/requests", json={"capability": "nmap", "reason": "already here"}, headers=auth_headers)
+async def test_install_approve_reports_honest_outcome(client, auth_headers, monkeypatch):
+    """The approve endpoint must report an honest terminal state and never mark
+    a tool installed unless the real helper succeeded. We stub the privileged
+    step (so no sudo/pkexec is spawned in tests) to simulate a failed install
+    and assert nothing is faked."""
+    import app.api.tools as tools_api
+
+    async def fake_perform(package):
+        return {"ok": False, "status": "error", "exit_code": 1, "error": "exit 1",
+                "log": "simulated helper failure", "sudo_needs_password": True}
+
+    monkeypatch.setattr(tools_api.install_mod, "perform_install", fake_perform)
+
+    req = await client.post("/tools/install/requests", json={"package": "sslscan", "reason": "tls audit"}, headers=auth_headers)
     rid = req.json()["request"]["id"]
     appr = await client.post(f"/tools/install/requests/{rid}/approve", headers=auth_headers)
     assert appr.status_code == 200
     body = appr.json()
-    # nmap is already installed so verify() is True; but if the helper couldn't
-    # run, status is failed. Either way it must be a terminal, honest state.
-    assert body["request"]["status"] in ("installed", "failed")
-    assert "outcome" in body and "verify" in body
+    # helper failed → must be 'failed', never faked as installed
+    assert body["request"]["status"] == "failed"
+    assert body["outcome"]["sudo_needs_password"] is True
+    assert body["verify"]["installed"] is False

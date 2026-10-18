@@ -12,6 +12,7 @@ is fixed here and only the validated package name varies.
 """
 from __future__ import annotations
 
+import os
 import shutil
 
 from app.core.config import get_settings
@@ -82,13 +83,21 @@ async def perform_install(package: str) -> dict:
     if not apt_get:
         return {"ok": False, "status": "error", "error": "apt-get not found", "log": ""}
 
+    env_extra: dict = {}
     if helper == "sudo":
         argv = [helper_path, "-n", apt_get, "install", "-y", "--no-install-recommends", pkg]
     else:  # pkexec and friends
         argv = [helper_path, apt_get, "install", "-y", "--no-install-recommends", pkg]
+        # pkexec needs the graphical-session vars (inherited by the backend
+        # service) to reach the desktop polkit agent and show its prompt.
+        for k in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+                  "DBUS_SESSION_BUS_ADDRESS", "XDG_SEAT", "XDG_SESSION_ID"):
+            v = os.environ.get(k)
+            if v:
+                env_extra[k] = v
 
     # Installs can take a while; give apt a generous but bounded window.
-    res = await run_argv(argv, timeout=600, max_bytes=500_000)
+    res = await run_argv(argv, timeout=600, max_bytes=500_000, env_extra=env_extra)
     log = (res.stdout + "\n" + res.stderr).strip()
     sudo_needs_pw = helper == "sudo" and (
         "a password is required" in log or "a terminal is required" in log
