@@ -70,13 +70,19 @@ async def protocol_system_message(max_steps: int) -> AIMessage:
         '  {\"action\":\"tool\",\"operation\":\"<operation key>\",\"params\":{...}}\n'
         f"• You may run at most {max_steps} tools, one per reply. After each you "
         "receive its real output as a tool message.\n"
-        "• When you can answer, reply with ONLY this JSON object:\n"
-        '  {\"action\":\"final\",\"answer\":\"<concise markdown grounded in the '
-        'tool output>\",\"findings\":[]}\n'
-        "• findings is optional; each item may have: title, description, severity "
-        "(info|low|medium|high|critical), confidence (suspected|likely|confirmed), "
-        "status (suspected|verified), asset, tool, evidence (list of strings), "
-        "impact, remediation, validation, limitations.\n\n"
+        "• To ANSWER the operator, do NOT use JSON — just write your answer directly "
+        "as markdown prose (it is streamed to them live). JSON is ONLY for tool calls.\n"
+        "• If you have structured security findings, put them AFTER your prose answer "
+        "inside ONE fenced block labelled findings, e.g.:\n"
+        "  ```findings\n"
+        '  [{\"title\":\"...\",\"severity\":\"medium\",\"confidence\":\"suspected\",'
+        '\"status\":\"suspected\",\"asset\":\"...\",\"evidence\":[\"...\"],'
+        '\"remediation\":\"...\"}]\n'
+        "  ```\n"
+        "  Each finding may include: title, description, severity (info|low|medium|"
+        "high|critical), confidence (suspected|likely|confirmed), status (suspected|"
+        "verified), asset, tool, evidence (list of strings), impact, remediation, "
+        "validation, limitations.\n\n"
         "RULES:\n"
         "• Never invent or assume tool output. Only use what tools actually return.\n"
         "• If a needed tool is NOT INSTALLED, do not try to run it — produce a final "
@@ -85,7 +91,7 @@ async def protocol_system_message(max_steps: int) -> AIMessage:
         "list; if a run is denied, say so and ask the operator to authorize it.\n"
         "• Distinguish a suspected issue from a verified finding; cite the tool and "
         "evidence for every claim.\n"
-        "• For simple conversational questions, just answer with the final JSON.\n\n"
+        "• For simple conversational questions, just write your answer directly.\n\n"
         "GUIDANCE:\n"
         "• For a website / domain security review, gather evidence from several "
         "passive tools before concluding — typically http.headers (missing "
@@ -134,6 +140,57 @@ def extract_json(text: str) -> dict | None:
                             break
         start = text.find("{", start + 1)
     return None
+
+
+import re
+
+_FENCE_RE = re.compile(r"```[a-zA-Z]*\s*(.*?)```", re.S)
+
+
+def extract_findings(text: str) -> list:
+    """Pull findings out of a fenced code block in a prose answer (best effort)."""
+    if not text:
+        return []
+    for body in _FENCE_RE.findall(text):
+        body = body.strip()
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and isinstance(data.get("findings"), list):
+            return data["findings"]
+    return []
+
+
+async def _stream_decision(provider, messages, params):
+    """Run one model turn as a stream. Decide early whether the reply is a tool
+    call (JSON — buffered silently) or a prose answer (streamed live, with any
+    trailing code fence hidden from the live view). Yields ("token", text) for
+    visible prose and finally ("result", {...}). Propagates OllamaError."""
+    buf = ""
+    mode: str | None = None
+    emitted = 0          # chars of prose already yielded
+    fence_hit = False
+    async for chunk in provider.chat_stream(messages, params=params):
+        buf += chunk
+        if mode is None:
+            stripped = buf.lstrip()
+            if not stripped:
+                continue
+            mode = "json" if stripped[0] == "{" else "prose"
+        if mode == "prose" and not fence_hit:
+            idx = buf.find("```")
+            visible_end = idx if idx != -1 else len(buf)
+            if idx != -1:
+                fence_hit = True
+            if visible_end > emitted:
+                yield ("token", buf[emitted:visible_end])
+                emitted = visible_end
+    obj = extract_json(buf) if mode == "json" else None
+    visible = buf[:emitted] if mode == "prose" else ""
+    yield ("result", {"raw": buf, "json": obj, "mode": mode or "prose", "visible": visible})
 
 
 def trim_history(messages: list[AIMessage]) -> list[AIMessage]:
@@ -205,60 +262,80 @@ async def run_turn(
     for step in range(max_steps + 1):
         last_step = step == max_steps
         yield {"type": "thinking", "step": step}
+
+        # Stream the decision; forward prose tokens live as they arrive.
+        payload: dict = {}
         try:
-            raw = await provider.chat(trim_history(convo), params=params)
+            async for kind, data in _stream_decision(provider, trim_history(convo), params):
+                if kind == "token":
+                    yield {"type": "token", "text": data}
+                else:
+                    payload = data
         except OllamaError as exc:
             yield {"type": "error", "code": getattr(exc, "code", "ollama_error"), "message": str(exc)}
             return
 
-        obj = extract_json(raw)
-        action = (obj or {}).get("action")
+        obj = payload.get("json")
+        mode = payload.get("mode")
+        action = (obj or {}).get("action") if obj else None
 
-        # No/!tool JSON, or explicit final, or we've run out of tool budget.
-        if not obj or action == "final" or (action == "tool" and last_step) or action not in ("tool", "final"):
-            if action == "tool" and last_step:
-                convo.append(AIMessage(role="user", content=(
-                    "Tool budget exhausted. Provide your final answer now as the "
-                    "final JSON object.")))
-                try:
-                    raw = await provider.chat(trim_history(convo), params=params)
-                except OllamaError as exc:
-                    yield {"type": "error", "code": getattr(exc, "code", "ollama_error"), "message": str(exc)}
-                    return
-                obj = extract_json(raw)
+        # ── tool call (and we still have budget) ──
+        if mode == "json" and action == "tool" and not last_step:
+            op_key = str(obj.get("operation", ""))
+            op_params = obj.get("params") or {}
+            if not isinstance(op_params, dict):
+                op_params = {}
+            yield {"type": "tool_call", "operation": op_key, "params": op_params, "step": step}
+            result = await service.run_operation(
+                session, user_id=user_id, op_key=op_key, params=op_params,
+                conversation_id=conversation_id,
+            )
+            tool_calls_made.append({"operation": op_key, "params": op_params, "result": _slim(result)})
+            yield {"type": "tool_result", "operation": op_key, "result": _slim(result)}
+            convo.append(AIMessage(role="assistant", content=json.dumps(
+                {"action": "tool", "operation": op_key, "params": op_params})))
+            convo.append(AIMessage(role="user", content=(
+                "TOOL RESULT for " + op_key + ":\n" + _result_for_model(result))))
+            continue
 
-            answer = ""
-            findings_in: list = []
-            if obj and obj.get("action") == "final":
-                answer = str(obj.get("answer", "")).strip()
-                findings_in = obj.get("findings") or []
+        # ── tool call but budget exhausted → force a final prose answer ──
+        if mode == "json" and action == "tool" and last_step:
+            convo.append(AIMessage(role="user", content=(
+                "Tool budget reached. Write your final answer to the operator now "
+                "as markdown prose (do not use JSON).")))
+            try:
+                async for kind, data in _stream_decision(provider, trim_history(convo), params):
+                    if kind == "token":
+                        yield {"type": "token", "text": data}
+                    else:
+                        payload = data
+            except OllamaError as exc:
+                yield {"type": "error", "code": getattr(exc, "code", "ollama_error"), "message": str(exc)}
+                return
+            obj = payload.get("json")
+            mode = payload.get("mode")
+
+        # ── final answer ──
+        if mode == "prose":
+            answer = (payload.get("visible") or "").strip()
+            findings_in = extract_findings(payload.get("raw", ""))
             if not answer:
-                # Model replied in prose (or malformed JSON) — use it verbatim.
-                answer = raw.strip()
+                answer = (payload.get("raw") or "").strip()
+        elif obj is not None and obj.get("action") == "final":
+            # Fallback: model used the old JSON final form (no live stream).
+            answer = str(obj.get("answer", "")).strip()
+            findings_in = obj.get("findings") or []
+            if answer:
+                yield {"type": "token", "text": answer}
+        else:
+            answer = (payload.get("visible") or payload.get("raw") or "").strip()
+            findings_in = extract_findings(payload.get("raw", ""))
+        if not answer:
+            answer = "I reached the tool limit before I could fully answer."
 
-            findings = await _persist_findings(session, user_id, conversation_id, findings_in)
-            yield {"type": "final", "answer": answer, "tool_calls": tool_calls_made, "findings": findings}
-            return
-
-        # action == "tool"
-        op_key = str(obj.get("operation", ""))
-        op_params = obj.get("params") or {}
-        if not isinstance(op_params, dict):
-            op_params = {}
-        yield {"type": "tool_call", "operation": op_key, "params": op_params, "step": step}
-
-        result = await service.run_operation(
-            session, user_id=user_id, op_key=op_key, params=op_params,
-            conversation_id=conversation_id,
-        )
-        tool_calls_made.append({"operation": op_key, "params": op_params, "result": _slim(result)})
-        yield {"type": "tool_result", "operation": op_key, "result": _slim(result)}
-
-        # Feed the model the real (redacted, trimmed) result.
-        convo.append(AIMessage(role="assistant", content=json.dumps(
-            {"action": "tool", "operation": op_key, "params": op_params})))
-        convo.append(AIMessage(role="user", content=(
-            "TOOL RESULT for " + op_key + ":\n" + _result_for_model(result))))
+        findings = await _persist_findings(session, user_id, conversation_id, findings_in)
+        yield {"type": "final", "answer": answer, "tool_calls": tool_calls_made, "findings": findings}
+        return
 
 
 def _slim(result: dict) -> dict:

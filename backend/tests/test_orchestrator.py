@@ -13,16 +13,21 @@ from app.security import orchestrator as orch
 
 
 class FakeProvider:
-    """Returns scripted replies in order; optionally raises."""
+    """Streams scripted replies in order (one per call); optionally raises."""
 
     def __init__(self, replies, *, raise_exc=None):
         self._replies = list(replies)
         self._raise = raise_exc
 
-    async def chat(self, messages, *, params=None):
+    async def chat_stream(self, messages, *, params=None):
         if self._raise:
             raise self._raise
-        return self._replies.pop(0)
+        reply = self._replies.pop(0)
+        # emit in a couple of chunks to exercise streaming assembly
+        mid = max(1, len(reply) // 2)
+        for piece in (reply[:mid], reply[mid:]):
+            if piece:
+                yield piece
 
 
 def test_extract_json_variants():

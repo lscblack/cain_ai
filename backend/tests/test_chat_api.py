@@ -28,10 +28,12 @@ class FakeOllama:
     async def list_models(self):
         return ["kai-security:latest", "llama3:latest"]
 
-    async def chat(self, messages, *, params=None):
-        return self._replies.pop(0)
-
     async def chat_stream(self, messages, *, params=None):
+        # Orchestrator (tool mode) consumes one scripted reply per call; the
+        # plain path consumes the stream chunks.
+        if self._replies:
+            yield self._replies.pop(0)
+            return
         for c in self._stream:
             yield c
 
