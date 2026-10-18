@@ -6,9 +6,10 @@ orchestration (the default), chosen per message via ``use_tools``.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -33,6 +34,37 @@ def get_chat_provider() -> OllamaProvider:
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+# SSE comment line — ignored by the client, keeps the connection from going
+# idle while the (slow, CPU-only) model generates with no events to emit.
+_HEARTBEAT = ": keepalive\n\n"
+_HEARTBEAT_INTERVAL = 15.0
+
+
+async def _with_heartbeat(aiter: AsyncIterator, interval: float = _HEARTBEAT_INTERVAL):
+    """Yield ("data", item) from aiter, injecting ("ping", None) whenever no
+    item arrives within `interval` seconds — WITHOUT cancelling the in-flight
+    await (so the model keeps generating). Exceptions from aiter propagate."""
+    it = aiter.__aiter__()
+    pending: asyncio.Task | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(it.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if not done:
+                yield ("ping", None)
+                continue
+            task, pending = pending, None
+            try:
+                item = task.result()
+            except StopAsyncIteration:
+                return
+            yield ("data", item)
+    finally:
+        if pending is not None:
+            pending.cancel()
 
 
 # ───────────────────────── schemas ──────────────────────────────────── #
@@ -218,10 +250,14 @@ async def post_message(
         yield _sse("start", {"conversation_id": str(conv.id), "use_tools": body.use_tools})
         try:
             if body.use_tools:
-                async for ev in orchestrator.run_turn(
+                turn = orchestrator.run_turn(
                     session, user_id=operator.id, conversation_id=conv.id,
                     history=history, provider=provider,
-                ):
+                )
+                async for kind, ev in _with_heartbeat(turn):
+                    if kind == "ping":
+                        yield _HEARTBEAT
+                        continue
                     if ev["type"] == "final":
                         answer_parts = [ev["answer"]]
                         tool_calls = ev.get("tool_calls", [])
@@ -231,7 +267,10 @@ async def post_message(
                         errored = ev.get("message")
                     yield _sse(ev["type"], ev)
             else:
-                async for chunk in provider.chat_stream(history, params=GenParams()):
+                async for kind, chunk in _with_heartbeat(provider.chat_stream(history, params=GenParams())):
+                    if kind == "ping":
+                        yield _HEARTBEAT
+                        continue
                     answer_parts.append(chunk)
                     yield _sse("token", {"text": chunk})
         except OllamaError as exc:

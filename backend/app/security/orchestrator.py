@@ -86,6 +86,14 @@ async def protocol_system_message(max_steps: int) -> AIMessage:
         "• Distinguish a suspected issue from a verified finding; cite the tool and "
         "evidence for every claim.\n"
         "• For simple conversational questions, just answer with the final JSON.\n\n"
+        "GUIDANCE:\n"
+        "• For a website / domain security review, gather evidence from several "
+        "passive tools before concluding — typically http.headers (missing "
+        "security headers like HSTS/CSP/X-Frame-Options), tls.inspect "
+        "(certificate + protocol), dns.records, and whois. Run them one per step, "
+        "then summarise findings with severity and remediation.\n"
+        "• http.headers and tls.inspect accept the site's URL/host; use the exact "
+        "host the operator gave.\n\n"
         + catalogue
     )
     return AIMessage(role="system", content=content)
