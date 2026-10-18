@@ -1,4 +1,5 @@
 import { ApiError } from "@/types";
+import { beginRequest, endRequest } from "@/lib/activity";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 const TOKEN_KEY = "kai.token";
@@ -43,6 +44,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   let res: Response;
+  beginRequest();
   try {
     res = await fetch(`${BASE}${path}`, {
       method,
@@ -51,6 +53,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     });
   } catch {
     throw new ApiError(0, "network_error");
+  } finally {
+    endRequest();
   }
 
   const text = await res.text();
@@ -67,10 +71,13 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
   let res: Response;
+  beginRequest();
   try {
     res = await fetch(`${BASE}${path}`, { method: "POST", headers, body: form });
   } catch {
     throw new ApiError(0, "network_error");
+  } finally {
+    endRequest();
   }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;

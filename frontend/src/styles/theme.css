@@ -111,6 +111,15 @@ body {
   50% { opacity: 1; }
   100% { transform: translateY(100%); opacity: 0; }
 }
+/* indeterminate top progress bar (global request activity) */
+@keyframes kai-progress {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 25%;  width: 55%; }
+  100% { left: 100%; width: 40%; }
+}
+/* spinner */
+@keyframes kai-spin { to { transform: rotate(360deg); } }
+.kai-spin { animation: kai-spin 0.8s linear infinite; }
 .hud-bar {
   height: 6px;
   background: var(--kai-panel);

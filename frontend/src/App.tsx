@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
+import { TopProgress } from "@/components/TopProgress";
 import { useAuth } from "@/lib/auth";
 import { Login } from "@/pages/Login";
 import { Dashboard } from "@/pages/Dashboard";
@@ -40,6 +41,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <TopProgress />
       {!operator ? (
         <Routes>
           <Route path="/" element={<Home />} />

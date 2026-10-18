@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  MessageSquare, Plus, Trash2, Send, Square, Wrench, AlertTriangle, Cpu,
+  MessageSquare, Plus, Trash2, Send, Square, Wrench, AlertTriangle, Cpu, RefreshCw,
 } from "lucide-react";
 
 import {
   chatApi, streamMessage, type Conversation, type ChatMessage, type ModelStatus, type Finding,
 } from "@/lib/chat";
+import { PageLoading } from "@/components/Async";
 
 interface ToolEvent {
   operation: string;
@@ -115,8 +116,10 @@ export function Chat() {
   const [useTools, setUseTools] = useState(true);
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const [convLoading, setConvLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const lastSentRef = useRef<string>("");
 
   const loadConversations = useCallback(async () => {
     try { setConversations(await chatApi.listConversations()); } catch { /* */ }
@@ -132,10 +135,12 @@ export function Chat() {
   const openConversation = useCallback(async (id: string) => {
     setActiveId(id);
     setLive(null);
+    setConvLoading(true);
     try {
       const detail = await chatApi.getConversation(id);
       setMessages(detail.messages);
     } catch { setMessages([]); }
+    finally { setConvLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -156,9 +161,10 @@ export function Chat() {
     loadConversations();
   }
 
-  async function send() {
-    const content = input.trim();
+  async function send(forced?: string) {
+    const content = (forced ?? input).trim();
     if (!content || streaming) return;
+    lastSentRef.current = content;
     let convId = activeId;
     if (!convId) {
       const c = await chatApi.createConversation({});
@@ -166,7 +172,7 @@ export function Chat() {
       setActiveId(c.id);
       loadConversations();
     }
-    setInput("");
+    if (forced === undefined) setInput("");
     setMessages((m) => [...m, {
       id: `local-${Date.now()}`, role: "user", content, tool_calls: null,
       tool_results: null, meta: {}, created_at: new Date().toISOString(),
@@ -213,6 +219,22 @@ export function Chat() {
   function cancel() {
     abortRef.current?.abort();
   }
+
+  function retryLast() {
+    const last = messages[messages.length - 1];
+    // Drop the failed assistant turn so the retry replaces it.
+    if (last && last.role === "assistant" && (last.meta?.error || last.meta?.cancelled)) {
+      setMessages((m) => m.slice(0, -1));
+    }
+    const content = lastSentRef.current
+      || [...messages].reverse().find((m) => m.role === "user")?.content
+      || "";
+    if (content) send(content);
+  }
+
+  const lastMsg = messages[messages.length - 1];
+  const showRetry = !streaming && !live && lastMsg?.role === "assistant"
+    && (lastMsg.meta?.error || lastMsg.meta?.cancelled);
 
   return (
     <div className="flex h-[calc(100vh-7rem)] gap-4">
@@ -262,13 +284,20 @@ export function Chat() {
         )}
 
         <div ref={scrollRef} className="hud-panel flex-1 overflow-auto rounded border border-line p-4">
-          {messages.length === 0 && !live && (
+          {convLoading && messages.length === 0 && <PageLoading label="Loading conversation…" />}
+          {!convLoading && messages.length === 0 && !live && (
             <div className="kai-metadata">
               Ask KAI a security question — e.g. “Inspect the public security headers of example.com”,
               “Which assessment tools are installed?”, or “Research advisories for openssl 3.0.2”.
             </div>
           )}
           {messages.map((m) => <MessageBubble key={m.id} m={m} />)}
+          {showRetry && (
+            <button onClick={retryLast}
+              className="mb-4 flex items-center gap-2 rounded border border-line px-3 py-1.5 text-sm hover:bg-panel">
+              <RefreshCw size={14} /> Retry
+            </button>
+          )}
           {live && (
             <div className="mb-4">
               <div className="kai-metadata mb-1">KAI</div>
@@ -306,7 +335,7 @@ export function Chat() {
               <Square size={14} /> Stop
             </button>
           ) : (
-            <button onClick={send} disabled={!input.trim()}
+            <button onClick={() => send()} disabled={!input.trim()}
               className="flex items-center gap-1 rounded border border-line px-3 py-2 text-sm hover:bg-panel disabled:opacity-40">
               <Send size={14} /> Send
             </button>

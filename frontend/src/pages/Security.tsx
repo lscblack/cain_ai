@@ -7,6 +7,7 @@ import {
   toolsApi, type Inventory, type Execution, type Target, type InstallReq, type ToolOperation,
 } from "@/lib/tools";
 import type { Finding } from "@/lib/chat";
+import { PageLoading, ErrorRetry, Spinner } from "@/components/Async";
 
 const TABS = ["Inventory", "Installs", "Executions", "Targets", "Findings"] as const;
 type Tab = (typeof TABS)[number];
@@ -82,16 +83,41 @@ export function Security() {
   const [newTarget, setNewTarget] = useState({ target: "", scope: "active", note: "" });
   const [newInstall, setNewInstall] = useState({ package: "", reason: "" });
   const [msg, setMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    try { setInv(await toolsApi.inventory()); } catch { /* */ }
+    setLoading(true);
+    setLoadErr(null);
+    try {
+      // Inventory is the primary slice; if it fails we show error+retry.
+      setInv(await toolsApi.inventory());
+    } catch (e: any) {
+      setLoadErr(e?.message || "failed to load tool inventory");
+      setLoading(false);
+      return;
+    }
     try { setExecs(await toolsApi.executions()); } catch { /* */ }
     try { setTargets(await toolsApi.targets()); } catch { /* */ }
     try { setFindings(await toolsApi.findings()); } catch { /* */ }
     try { setInstalls(await toolsApi.installRequests()); } catch { /* */ }
+    setLoading(false);
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  async function retryExecution(e: Execution) {
+    setRetrying(e.id);
+    const params: Record<string, string> = {};
+    for (const a of e.args || []) {
+      const i = a.indexOf("=");
+      if (i > 0) params[a.slice(0, i)] = a.slice(i + 1);
+    }
+    try { await toolsApi.execute(e.operation, params); } catch { /* recorded server-side */ }
+    setRetrying(null);
+    setExecs(await toolsApi.executions());
+  }
 
   async function addTarget() {
     if (!newTarget.target.trim()) return;
@@ -147,6 +173,9 @@ export function Security() {
 
       {msg && <div className="mb-3 text-xs text-muted">{msg}</div>}
 
+      {loadErr && !inv && <ErrorRetry error={loadErr} onRetry={refresh} />}
+      {!loadErr && loading && !inv && <PageLoading label="Loading security console…" />}
+
       {tab === "Inventory" && inv && (
         <div className="grid gap-3 md:grid-cols-2">
           {inv.tools.map((t) => (
@@ -199,11 +228,15 @@ export function Security() {
                 ● {r.status}{r.installed_version ? ` · ${r.installed_version}` : ""}</span>}>
               <div className="text-sm text-muted">{r.reason || "—"}</div>
               <div className="kai-metadata mt-1">source: {r.source} · root: {String(r.needs_root)}</div>
-              {r.status === "pending" && (
-                <div className="mt-2 flex gap-2 text-xs">
-                  <button onClick={() => approve(r.id)} className="rounded border border-line px-2 py-1 hover:bg-panel" style={{ color: "var(--kai-verified)" }}>approve &amp; install</button>
-                  <button onClick={async () => { await toolsApi.rejectInstall(r.id); setInstalls(await toolsApi.installRequests()); }}
-                    className="rounded border border-line px-2 py-1 hover:bg-panel" style={{ color: "var(--kai-accent)" }}>reject</button>
+              {(r.status === "pending" || r.status === "failed") && (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <button onClick={() => approve(r.id)} className="flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-panel" style={{ color: "var(--kai-verified)" }}>
+                    {r.status === "failed" ? <><RefreshCw size={12} /> retry install</> : "approve & install"}
+                  </button>
+                  {r.status === "pending" && (
+                    <button onClick={async () => { await toolsApi.rejectInstall(r.id); setInstalls(await toolsApi.installRequests()); }}
+                      className="rounded border border-line px-2 py-1 hover:bg-panel" style={{ color: "var(--kai-accent)" }}>reject</button>
+                  )}
                 </div>
               )}
               {r.log && <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted">{r.log}</pre>}
@@ -224,6 +257,12 @@ export function Security() {
                 {e.target && <span className="kai-metadata">target: {e.target}</span>}
                 {e.duration_ms != null && <span className="kai-metadata">{e.duration_ms}ms</span>}
                 <span className="kai-metadata ml-auto">{e.created_at ? new Date(e.created_at).toLocaleString() : ""}</span>
+                {e.status !== "ok" && e.args && e.args.length > 0 && (
+                  <button onClick={() => retryExecution(e)} disabled={retrying === e.id}
+                    className="flex items-center gap-1 rounded border border-line px-2 py-0.5 hover:bg-panel disabled:opacity-40">
+                    {retrying === e.id ? <Spinner size={11} /> : <><RefreshCw size={11} /> retry</>}
+                  </button>
+                )}
               </div>
               <div className="kai-metadata mt-1">{(e.args || []).join("  ")}</div>
               {(e.stdout || e.stderr || e.error) && (

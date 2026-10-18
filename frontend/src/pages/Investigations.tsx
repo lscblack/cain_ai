@@ -5,6 +5,7 @@ import { Plus, FolderSearch } from "lucide-react";
 import { api } from "@/lib/api";
 import { investigationsApi } from "@/lib/investigations";
 import { FolderCard } from "@/components/FolderCard";
+import { PageLoading, ErrorRetry } from "@/components/Async";
 import type { InvestigationDetail } from "@/types";
 
 interface DiscoveryRun {
@@ -21,12 +22,16 @@ export function Investigations() {
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   async function load() {
     try {
       setCases(await investigationsApi.list());
+      setError(null);
     } catch {
       setError("Failed to load investigations.");
+    } finally {
+      setLoaded(true);
     }
     try {
       const r = await api.get<{ investigations: DiscoveryRun[] }>("/discovery/investigations");
@@ -143,7 +148,11 @@ export function Investigations() {
       <div className="hud-mono mb-3 text-xs uppercase" style={{ color: "var(--kai-muted)" }}>
         ◢ Manual cases · {cases.length}
       </div>
-      {cases.length === 0 ? (
+      {!loaded ? (
+        <PageLoading label="Loading investigations…" />
+      ) : error && cases.length === 0 ? (
+        <ErrorRetry error={error} onRetry={load} />
+      ) : cases.length === 0 ? (
         <div className="rounded-lg border border-line bg-panel p-6 text-sm text-muted">
           No manual cases yet. Create one above, or search a name to start a discovery case.
         </div>

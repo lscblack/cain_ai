@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Database, Play, Trash2, RefreshCw } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { PageLoading, ErrorRetry } from "@/components/Async";
 
 interface Source {
   id: string;
@@ -28,6 +29,8 @@ interface Stats {
 
 export function Sources() {
   const [sources, setSources] = useState<Source[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, Stats>>({});
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -71,7 +74,10 @@ export function Sources() {
   }
 
   async function load() {
-    const list = await api.get<Source[]>("/sources").catch(() => []);
+    let failed = false;
+    const list = await api.get<Source[]>("/sources").catch(() => { failed = true; return [] as Source[]; });
+    setLoadErr(failed ? "Failed to load sources." : null);
+    setLoaded(true);
     setSources(list);
     const s: Record<string, Stats> = {};
     await Promise.all(
@@ -238,7 +244,9 @@ export function Sources() {
       </div>
 
       <div className="space-y-3">
-        {sources.length === 0 && <div className="text-sm text-muted">No sources. Add a permitted public domain to start building the local index.</div>}
+        {!loaded && <PageLoading label="Loading sources…" />}
+        {loaded && loadErr && sources.length === 0 && <ErrorRetry error={loadErr} onRetry={load} />}
+        {loaded && !loadErr && sources.length === 0 && <div className="text-sm text-muted">No sources. Add a permitted public domain to start building the local index.</div>}
         {sources.map((s) => {
           const st = stats[s.id];
           const color = s.status === "crawling" ? "var(--kai-warn)" : s.status === "error" ? "var(--kai-accent)" : "var(--kai-verified)";
