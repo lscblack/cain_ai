@@ -75,6 +75,25 @@ async def _record(
     return row
 
 
+async def _auto_authorize(session: AsyncSession, user_id: uuid.UUID, host: str, op_key: str) -> None:
+    """Auto-add a target to the operator's authorized list (audited). A domain
+    entry covers its subdomains, so we don't create duplicate rows for those."""
+    from app.database.models.audit import AuditLog
+    from app.database.models.security import AuthorizedTarget
+
+    if await targets.is_authorized(session, user_id, host):
+        return  # already covered (e.g. by a parent domain)
+    session.add(AuthorizedTarget(
+        user_id=user_id, target=host, scope="active",
+        note=f"auto-authorized on first use ({op_key})",
+    ))
+    session.add(AuditLog(
+        actor_id=user_id, action="target.auto_authorize",
+        detail={"target": host, "operation": op_key},
+    ))
+    await session.flush()
+
+
 async def run_operation(
     session: AsyncSession,
     *,
@@ -111,25 +130,36 @@ async def run_operation(
     if op.requires_authorization:
         if not target:
             return {"ok": False, "status": "error", "error": "target required"}
+        # Normalize URL/host:port → bare host; reject anything unparseable.
+        from app.security.validate import ArgError as _ArgError
+        from app.security.validate import target_host as _target_host
+
+        try:
+            norm_host = _target_host(target)
+        except _ArgError as exc:
+            return {"ok": False, "status": "error", "error": f"invalid target: {exc}"}
+
         if not await targets.is_authorized(session, user_id, target):
-            res = ExecResult(argv=[], status="error", error="target not authorized")
-            await _record(
-                session, user_id=user_id, conversation_id=conversation_id, tool=tool.name,
-                operation=op_key, args=params, target=target, posture=op.posture, result=res,
-            )
-            res.status = "denied"
-            return {
-                "ok": False,
-                "status": "denied",
-                "reason": "target_not_authorized",
-                "tool": tool.name,
-                "operation": op_key,
-                "target": target,
-                "message": (
-                    f"'{target}' is not on your authorized-targets list. Active "
-                    f"assessment is refused until you authorize it explicitly."
-                ),
-            }
+            if get_settings().tool_auto_authorize_targets:
+                await _auto_authorize(session, user_id, norm_host, op_key)
+            else:
+                res = ExecResult(argv=[], status="error", error="target not authorized")
+                await _record(
+                    session, user_id=user_id, conversation_id=conversation_id, tool=tool.name,
+                    operation=op_key, args=params, target=norm_host, posture=op.posture, result=res,
+                )
+                return {
+                    "ok": False,
+                    "status": "denied",
+                    "reason": "target_not_authorized",
+                    "tool": tool.name,
+                    "operation": op_key,
+                    "target": norm_host,
+                    "message": (
+                        f"'{norm_host}' is not on your authorized-targets list. Active "
+                        f"assessment is refused until you authorize it explicitly."
+                    ),
+                }
 
     # 3. rate limit
     if await _rate_limited(session, user_id):

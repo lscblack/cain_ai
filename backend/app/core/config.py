@@ -115,6 +115,11 @@ class Settings(BaseSettings):
     # disables real installation (approval workflow still records the request).
     tool_install_helper: str = Field(default="sudo")
     tool_install_enabled: bool = Field(default=True)
+    # When true, an ACTIVE operation whose target isn't on the operator's
+    # authorized list auto-adds it (normalized to host/domain; subdomains
+    # included) and proceeds — every auto-authorization is still audited and
+    # shown in the Targets list. Set false to require explicit authorization.
+    tool_auto_authorize_targets: bool = Field(default=True)
 
     # Maps / geo
     tomtom_api_key: str = Field(default="")

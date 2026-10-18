@@ -104,6 +104,38 @@ def package_name(value: str) -> str:
     return value
 
 
+def target_host(value: str) -> str:
+    """Extract a bare host/IP from a value that may be a URL, host:port, or
+    host/path. Used so an operator can authorize/scan 'https://example.com/'
+    and have it resolve to 'example.com'."""
+    value = (value or "").strip()
+    _no_meta(value)
+    if "://" in value:
+        from urllib.parse import urlsplit
+
+        host = urlsplit(value).hostname or ""
+        return host_or_ip(host)
+    # strip any path, then a trailing :port (but leave bare IPv6 / IPs alone)
+    value = value.split("/", 1)[0]
+    if value.count(":") == 1:
+        head, _, tail = value.partition(":")
+        if tail.isdigit():
+            value = head
+    return host_or_ip(value)
+
+
+def target_or_cidr(value: str) -> str:
+    """Normalize an authorized-target entry: a CIDR passes through; anything
+    else is reduced to its bare host/IP."""
+    value = (value or "").strip()
+    if "/" in value and "://" not in value:
+        try:
+            return str(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            pass
+    return target_host(value)
+
+
 def url(value: str):
     """Validate a public http(s) URL (reuses the SSRF guard)."""
     from app.core.net import UnsafeUrlError, validate_public_url

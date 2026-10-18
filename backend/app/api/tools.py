@@ -172,7 +172,7 @@ async def add_target(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
-        norm = V.host_or_ip(body.target) if "/" not in body.target else body.target.strip()
+        norm = V.target_or_cidr(body.target)
     except V.ArgError as exc:
         raise HTTPException(status_code=422, detail=f"invalid target: {exc}")
     row = AuthorizedTarget(user_id=operator.id, target=norm, scope=body.scope, note=body.note[:500])

@@ -18,9 +18,26 @@ from app.database.models.security import AuthorizedTarget
 from app.security import validate as V
 
 
+def _norm_entry(entry: str) -> str:
+    """Normalize a stored authorized-target entry to a bare host/IP or CIDR,
+    so a URL ('https://x.com/') or host:port entry still matches a host."""
+    entry = (entry or "").strip().lower().rstrip(".")
+    if "://" in entry:
+        from urllib.parse import urlsplit
+
+        return (urlsplit(entry).hostname or "").rstrip(".")
+    if "/" in entry:
+        try:
+            ipaddress.ip_network(entry, strict=False)
+            return entry  # keep CIDR as-is
+        except ValueError:
+            return entry.split("/", 1)[0]  # host/path → host
+    return entry
+
+
 def _matches(target: str, entry: str) -> bool:
     target = target.strip().lower().rstrip(".")
-    entry = entry.strip().lower().rstrip(".")
+    entry = _norm_entry(entry)
     if not entry:
         return False
     if target == entry:
@@ -32,7 +49,7 @@ def _matches(target: str, entry: str) -> bool:
             return ipaddress.ip_address(target) in net
         except ValueError:
             return False
-    # domain entry authorizes its subdomains
+    # a domain entry authorizes all of its subdomains
     if target.endswith("." + entry):
         return True
     return False
@@ -40,7 +57,7 @@ def _matches(target: str, entry: str) -> bool:
 
 async def is_authorized(session: AsyncSession, user_id: uuid.UUID, target: str) -> bool:
     try:
-        norm = V.host_or_ip(target)
+        norm = V.target_host(target)
     except V.ArgError:
         return False
     rows = (

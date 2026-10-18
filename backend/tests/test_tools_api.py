@@ -27,7 +27,10 @@ async def test_inventory_requires_auth(client):
     assert (await client.get("/tools/inventory")).status_code == 401
 
 
-async def test_active_scan_denied_without_authorized_target(client, auth_headers):
+async def test_active_scan_denied_when_auto_authorize_off(client, auth_headers, monkeypatch):
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "tool_auto_authorize_targets", False)
+
     r = await client.post("/tools/execute", json={
         "operation": "nmap.service_scan", "params": {"target": "scanme.nmap.org", "ports": "80"}
     }, headers=auth_headers)
@@ -37,6 +40,22 @@ async def test_active_scan_denied_without_authorized_target(client, auth_headers
     # a denied attempt is still recorded in execution history
     hist = (await client.get("/tools/executions", headers=auth_headers)).json()
     assert any(h["operation"] == "nmap.service_scan" for h in hist)
+
+
+async def test_auto_authorize_adds_target_from_url(client, auth_headers, monkeypatch):
+    # auto-authorize is on by default; a URL target should be normalized to its
+    # host, added to the authorized list, and the scan should NOT be denied.
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "tool_auto_authorize_targets", True)
+
+    r = await client.post("/tools/execute", json={
+        "operation": "nmap.service_scan", "params": {"target": "https://127.0.0.1/", "ports": "1-3"}
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json().get("reason") != "target_not_authorized"
+    # 127.0.0.1 (host extracted from the URL) is now authorized
+    targets = (await client.get("/tools/targets", headers=auth_headers)).json()
+    assert any(t["target"] == "127.0.0.1" for t in targets)
 
 
 async def test_invalid_arguments_rejected(client, auth_headers):
@@ -97,7 +116,7 @@ async def test_install_approve_reports_honest_outcome(client, auth_headers, monk
 
     monkeypatch.setattr(tools_api.install_mod, "perform_install", fake_perform)
 
-    req = await client.post("/tools/install/requests", json={"package": "sslscan", "reason": "tls audit"}, headers=auth_headers)
+    req = await client.post("/tools/install/requests", json={"package": "kai-nonexistent-tool", "reason": "tls audit"}, headers=auth_headers)
     rid = req.json()["request"]["id"]
     appr = await client.post(f"/tools/install/requests/{rid}/approve", headers=auth_headers)
     assert appr.status_code == 200

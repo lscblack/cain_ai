@@ -292,7 +292,11 @@ export function Security() {
                 className="w-48 rounded border border-line bg-panel-2 px-2 py-1 outline-none focus:border-current" />
               <button onClick={addTarget} className="rounded border border-line px-2 py-1 hover:bg-panel">authorize</button>
             </div>
-            <div className="kai-metadata mt-2">Active scans (e.g. nmap) are refused unless the target is listed here. Only authorize assets you own or are permitted to test.</div>
+            <div className="kai-metadata mt-2">
+              A domain here also authorizes its subdomains, and URLs are stored as their host.
+              Auto-authorization is on, so an active scan of a new target adds it here automatically
+              (every addition is audited). Only point KAI at assets you own or are permitted to test.
+            </div>
           </Panel>
           <div className="space-y-1">
             {targets.map((t) => (

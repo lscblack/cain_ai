@@ -48,6 +48,32 @@ def test_url_rejects_private():
         V.url("ftp://example.com")
 
 
+def test_target_host_normalizes_url_and_port():
+    assert V.target_host("https://tap.nexventures.net/") == "tap.nexventures.net"
+    assert V.target_host("tap.nexventures.net:443") == "tap.nexventures.net"
+    assert V.target_host("example.com/some/path") == "example.com"
+    assert V.target_host("https://10.0.0.5:8443/x") == "10.0.0.5"
+
+
+def test_target_or_cidr():
+    assert V.target_or_cidr("10.0.0.0/24") == "10.0.0.0/24"
+    assert V.target_or_cidr("https://example.com/") == "example.com"
+
+
+def test_target_matching_url_entry_and_subdomains():
+    from app.security.targets import _matches
+    # a URL entry matches the bare host
+    assert _matches("tap.nexventures.net", "https://tap.nexventures.net/")
+    # a domain entry authorizes its subdomains
+    assert _matches("api.tap.nexventures.net", "tap.nexventures.net")
+    assert _matches("deep.api.tap.nexventures.net", "tap.nexventures.net")
+    # unrelated host does not match
+    assert not _matches("evil.com", "tap.nexventures.net")
+    # CIDR entry contains the IP
+    assert _matches("10.0.0.7", "10.0.0.0/24")
+    assert not _matches("10.0.1.7", "10.0.0.0/24")
+
+
 # ───────────────────────── adapters ─────────────────────────────────── #
 def test_dig_argv():
     argv = adapters.dig_records("/usr/bin/dig", {"domain": "example.com", "type": "mx"})

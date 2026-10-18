@@ -15,14 +15,16 @@ from app.security import validate as V
 
 
 def dig_records(path: str, params: dict) -> list[str]:
-    domain = V.domain(params.get("domain", ""))
+    raw = str(params.get("domain", ""))
+    # tolerate a pasted URL — extract the host, then validate as a domain
+    domain = V.domain(V.target_host(raw) if "://" in raw or "/" in raw else raw)
     rtype = V.dns_type(params.get("type", "A"))
     # +nocmd/+noall/+answer → terse, parseable answer section only.
     return [path, "+nocmd", "+noall", "+answer", "+time=5", "+tries=2", domain, rtype]
 
 
 def whois_lookup(path: str, params: dict) -> list[str]:
-    target = V.host_or_ip(params.get("target", ""))
+    target = V.target_host(params.get("target", ""))
     return [path, "--", target]
 
 
@@ -37,7 +39,7 @@ def curl_headers(path: str, params: dict) -> list[str]:
 
 
 def openssl_tls(path: str, params: dict) -> list[str]:
-    host = V.host_or_ip(params.get("host", ""))
+    host = V.target_host(params.get("host", ""))
     ports = V.port_spec(str(params.get("port", "443")))
     port = ports.split(",")[0].split("-")[0]
     V.port(port)
@@ -49,7 +51,7 @@ def openssl_tls(path: str, params: dict) -> list[str]:
 
 
 def nmap_service_scan(path: str, params: dict) -> list[str]:
-    target = V.host_or_ip(params.get("target", ""))
+    target = V.target_host(params.get("target", ""))
     ports = V.port_spec(str(params.get("ports", "22,80,443")))
     # -sT connect scan (no root), -Pn skip host discovery, -sV versions,
     # -T3 polite timing, --host-timeout bounds the run.
