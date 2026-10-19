@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  ShieldCheck, Package, History, Crosshair, AlertTriangle, Play, Trash2, RefreshCw,
+  ShieldCheck, Package, History, Crosshair, AlertTriangle, Play, Trash2, RefreshCw, Radar,
 } from "lucide-react";
 
 import {
   toolsApi, type Inventory, type Execution, type Target, type InstallReq, type ToolOperation,
+  type SweepResult,
 } from "@/lib/tools";
 import type { Finding } from "@/lib/chat";
 import { PageLoading, ErrorRetry, Spinner } from "@/components/Async";
 
-const TABS = ["Inventory", "Installs", "Executions", "Targets", "Findings"] as const;
+const TABS = ["Inventory", "OSINT Sweep", "Installs", "Executions", "Targets", "Findings"] as const;
 type Tab = (typeof TABS)[number];
 
 const POSTURE_COLOR: Record<string, string> = {
@@ -86,6 +87,19 @@ export function Security() {
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [sweepIn, setSweepIn] = useState<Record<string, string>>(
+    { domain: "", host: "", email: "", username: "", phone: "", ip: "" });
+  const [sweepRes, setSweepRes] = useState<SweepResult | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+
+  async function runSweep() {
+    const body = Object.fromEntries(Object.entries(sweepIn).filter(([, v]) => v.trim()));
+    if (Object.keys(body).length === 0) { setMsg("Enter at least one identifier."); return; }
+    setMsg(null); setSweeping(true); setSweepRes(null);
+    try { setSweepRes(await toolsApi.sweep(body)); } catch (e: any) { setMsg(e?.message || "sweep failed"); }
+    setSweeping(false);
+    try { setExecs(await toolsApi.executions()); } catch { /* */ }
+  }
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -161,6 +175,7 @@ export function Security() {
             className={`flex items-center gap-1 border-b-2 px-3 py-2 hud-mono text-xs ${tab === t ? "" : "border-transparent text-muted"}`}
             style={tab === t ? { color: "var(--kai-hud)", borderColor: "var(--kai-hud)" } : undefined}>
             {t === "Inventory" && <Package size={13} />}
+            {t === "OSINT Sweep" && <Radar size={13} />}
             {t === "Installs" && <Package size={13} />}
             {t === "Executions" && <History size={13} />}
             {t === "Targets" && <Crosshair size={13} />}
@@ -202,6 +217,48 @@ export function Security() {
               </div>
             </Panel>
           ))}
+        </div>
+      )}
+
+      {tab === "OSINT Sweep" && (
+        <div className="space-y-3">
+          <Panel title="Sweep identifiers with every installed tool">
+            <div className="grid gap-2 sm:grid-cols-3 text-xs">
+              {(["domain", "host", "email", "username", "phone", "ip"] as const).map((k) => (
+                <input key={k} placeholder={k} value={sweepIn[k]}
+                  onChange={(e) => setSweepIn((s) => ({ ...s, [k]: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === "Enter") runSweep(); }}
+                  className="rounded border border-line bg-panel-2 px-2 py-1 outline-none focus:border-current" />
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button onClick={runSweep} disabled={sweeping}
+                className="flex items-center gap-1 rounded border border-line px-3 py-1.5 text-sm hover:bg-panel disabled:opacity-40">
+                {sweeping ? <Spinner size={13} label="running tools…" /> : <><Radar size={14} /> Sweep</>}
+              </button>
+              {sweepRes && <span className="kai-metadata">ran {sweepRes.ran}{sweepRes.skipped ? ` · ${sweepRes.skipped} skipped` : ""}</span>}
+            </div>
+            <div className="kai-metadata mt-2">
+              Runs all applicable INSTALLED passive tools (DNS, WHOIS, TLS, subdomains, username/email
+              lookups, phone intel…) over each identifier at once. Install more tools in the Inventory tab
+              to widen coverage. This is the same engine KAI uses during a person search.
+            </div>
+          </Panel>
+          {sweepRes && sweepRes.results.map((r, i) => (
+            <div key={i} className="hud-panel rounded border border-line p-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="hud-mono" style={{ color: "var(--kai-hud)" }}>{r.operation}</span>
+                <span className="hud-mono" style={{ color: r.ok ? "var(--kai-verified)" : "var(--kai-accent)" }}>● {r.status}</span>
+                <span className="kai-metadata">{r.kind}: {r.identifier}</span>
+              </div>
+              {r.summary && (
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">{r.summary}</pre>
+              )}
+            </div>
+          ))}
+          {sweepRes && sweepRes.results.length === 0 && (
+            <div className="kai-metadata">No installed tools matched those identifiers — install some in the Inventory tab.</div>
+          )}
         </div>
       )}
 

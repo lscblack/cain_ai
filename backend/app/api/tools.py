@@ -117,6 +117,44 @@ async def execute(
     )
 
 
+class SweepBody(BaseModel):
+    domain: str | None = None
+    host: str | None = None
+    url: str | None = None
+    email: str | None = None
+    username: str | None = None
+    phone: str | None = None
+    ip: str | None = None
+    identifiers: list[dict] = Field(default_factory=list)  # [{kind,value},...]
+    conversation_id: uuid.UUID | None = None
+
+
+@router.post("/sweep")
+async def osint_sweep(
+    body: SweepBody,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Run every applicable INSTALLED passive OSINT tool over the given
+    identifiers (a person search's email/username/phone, a domain, a host…)."""
+    from app.security import sweep
+
+    ids: list[tuple[str, str]] = []
+    for kind in ("domain", "host", "url", "email", "username", "phone", "ip"):
+        v = getattr(body, kind)
+        if v:
+            ids.append((kind, v.strip()))
+    for item in body.identifiers:
+        k, v = item.get("kind"), item.get("value")
+        if k and v:
+            ids.append((str(k), str(v).strip()))
+    if not ids:
+        raise HTTPException(status_code=422, detail="at least one identifier required")
+    return await sweep.run_osint_sweep(
+        session, user_id=operator.id, identifiers=ids, conversation_id=body.conversation_id,
+    )
+
+
 @router.get("/executions")
 async def executions(
     limit: int = 50,

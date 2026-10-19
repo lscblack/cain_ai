@@ -87,4 +87,21 @@ export const toolsApi = {
     api.post<{ request: InstallReq; plan: any }>("/tools/install/requests", body),
   approveInstall: (id: string) => api.post<any>(`/tools/install/requests/${id}/approve`),
   rejectInstall: (id: string) => api.post<InstallReq>(`/tools/install/requests/${id}/reject`),
+  sweep: (body: Record<string, string>) => api.post<SweepResult>("/tools/sweep", body),
 };
+
+export interface SweepResult {
+  ran: number;
+  skipped: number;
+  results: {
+    identifier: string;
+    kind: string;
+    operation: string;
+    tool: string | null;
+    status: string;
+    ok: boolean;
+    execution_id?: string;
+    summary: string;
+  }[];
+  note: string;
+}
