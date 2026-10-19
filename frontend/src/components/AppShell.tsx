@@ -27,6 +27,7 @@ import {
 
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { PairMobile } from "@/components/PairMobile";
+import { PowerControl } from "@/components/PowerControl";
 import { useAuth } from "@/lib/auth";
 
 const NAV: { icon: typeof Search; label: string; to?: string }[] = [
@@ -119,6 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <Smartphone size={14} /> Pair mobile
             </button>
+            <PowerControl />
             <StatusIndicator />
           </div>
         </header>

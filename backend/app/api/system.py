@@ -91,6 +91,46 @@ async def system_stats(
     }
 
 
+@router.get("/power")
+async def power_state(
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    from app.core import power
+
+    return await power.power_status(redis)
+
+
+@router.post("/power/stop")
+async def power_stop(
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from app.core import power
+    from app.database.models.audit import AuditLog
+
+    result = await power.stop_kai(redis)
+    session.add(AuditLog(actor_id=operator.id, action="power.stop", detail=result))
+    await session.flush()
+    return result
+
+
+@router.post("/power/start")
+async def power_start(
+    operator: User = Depends(get_current_operator),
+    redis: Redis = Depends(get_redis),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from app.core import power
+    from app.database.models.audit import AuditLog
+
+    result = await power.start_kai(redis)
+    session.add(AuditLog(actor_id=operator.id, action="power.start", detail=result))
+    await session.flush()
+    return result
+
+
 @router.get("/analytics")
 async def usage_analytics(
     operator: User = Depends(get_current_operator),
