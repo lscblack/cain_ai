@@ -25,6 +25,8 @@ MANAGED_KEYS: dict[str, tuple[str, str, bool]] = {
     "openrouter_api_key": ("OPENROUTER_API_KEY", "OpenRouter (AI)", True),
     "openai_api_key": ("OPENAI_API_KEY", "OpenAI (AI)", True),
     "ai_model": ("AI_MODEL", "AI model id", False),
+    "kai_ollama_model": ("KAI_OLLAMA_MODEL", "KAI chat model (Ollama)", False),
+    "ollama_base_url": ("OLLAMA_BASE_URL", "Ollama endpoint URL", False),
     "tomtom_api_key": ("TOMTOM_API_KEY", "TomTom (map tiles)", True),
     "cesium_ion_token": ("CESIUM_ION_TOKEN", "Cesium Ion token", True),
     "firms_map_key": ("FIRMS_MAP_KEY", "NASA FIRMS (satellite fires)", True),
@@ -81,10 +83,12 @@ async def set_keys(body: KeyUpdateIn, operator: User = Depends(get_current_opera
 
     # hot-reload: clear settings cache and dependent caches
     get_settings.cache_clear()
+    import app.ai.ollama as ollama_mod
     import app.ai.router as ai_router
     import app.providers.geo as geo
 
     ai_router._provider = None
+    ollama_mod._provider = None  # rebuild with the newly selected chat model
     geo._OPENSKY_TOKEN = {"token": None, "exp": 0.0}
 
     return {"updated": list(body.values.keys()), "count": len(body.values)}

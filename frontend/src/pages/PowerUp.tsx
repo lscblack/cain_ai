@@ -1,7 +1,82 @@
 import { useEffect, useState } from "react";
-import { Zap, KeyRound, Save } from "lucide-react";
+import { Zap, KeyRound, Save, Cpu } from "lucide-react";
 
 import { api } from "@/lib/api";
+
+interface ModelStatus {
+  model: string; reachable: boolean; model_installed: boolean; ready: boolean; error: string | null;
+}
+
+function ChatModelSelector() {
+  const [models, setModels] = useState<string[]>([]);
+  const [status, setStatus] = useState<ModelStatus | null>(null);
+  const [choice, setChoice] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  function load() {
+    api.get<{ models: string[]; configured: string }>("/chat/models")
+      .then((r) => { setModels(r.models); setChoice((c) => c || r.configured); })
+      .catch(() => setModels([]));
+    api.get<ModelStatus>("/chat/status").then((s) => { setStatus(s); setChoice((c) => c || s.model); }).catch(() => setStatus(null));
+  }
+  useEffect(load, []);
+
+  async function save() {
+    if (!choice) return;
+    setSaving(true); setMsg(null);
+    try {
+      await api.post("/settings/keys", { values: { kai_ollama_model: choice } });
+      setMsg(`Now using ${choice}. New chats use it immediately.`);
+      load();
+    } catch {
+      setMsg("Failed to switch model.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ensure the configured model is always selectable even if not in the list
+  const options = Array.from(new Set([choice, ...(status ? [status.model] : []), ...models].filter(Boolean)));
+  const dirty = status != null && choice !== status.model;
+  const color = status?.ready ? "var(--kai-verified)" : "var(--kai-accent)";
+
+  return (
+    <div className="hud-panel hud-frame mb-6 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Cpu size={16} style={{ color: "var(--kai-hud)" }} />
+        <span className="hud-mono uppercase text-xs" style={{ color: "var(--kai-hud)" }}>◢ KAI chat model</span>
+        {status && (
+          <span className="kai-metadata" style={{ color }}>
+            ● {status.ready ? `${status.model} ready` : status.reachable ? `${status.model} not installed` : "Ollama offline"}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={choice}
+          onChange={(e) => setChoice(e.target.value)}
+          className="min-w-56 rounded-md border border-line bg-panel-2 px-3 py-2 font-mono text-xs outline-none focus:border-muted"
+        >
+          {options.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <button
+          onClick={save}
+          disabled={saving || !dirty}
+          className="flex items-center gap-1 rounded-md border border-line px-3 py-2 text-xs hover:bg-panel-2 disabled:opacity-40"
+        >
+          <Save size={13} /> {saving ? "Switching…" : "Use model"}
+        </button>
+        <button onClick={load} className="rounded-md border border-line px-2 py-2 text-xs hover:bg-panel-2">refresh</button>
+      </div>
+      {msg && <div className="mt-2 kai-metadata" style={{ color: "var(--kai-verified)" }}>{msg}</div>}
+      <div className="kai-metadata mt-2 text-muted">
+        Lists the models your local Ollama has. Switching writes KAI_OLLAMA_MODEL to the backend .env
+        and hot-reloads — KAI never silently falls back to a different model.
+      </div>
+    </div>
+  );
+}
 
 interface ManagedKey {
   field: string;
@@ -118,6 +193,8 @@ export function PowerUp() {
         providers need an API key — add it below and it's written to the backend
         <span className="font-mono"> .env</span> and hot-reloaded. Secrets are never shown back to this UI.
       </p>
+
+      <ChatModelSelector />
 
       <KeysEditor onSaved={load} />
 
