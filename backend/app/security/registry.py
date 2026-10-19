@@ -58,6 +58,11 @@ class ToolSpec:
     categories: tuple[str, ...] = ()
     needs_root_default: bool = False
     operations: tuple[Operation, ...] = ()
+    binary: str = ""                  # executable to discover (defaults to name)
+
+    @property
+    def exe(self) -> str:
+        return self.binary or self.name
 
 
 # ───────────────────────── tool definitions ─────────────────────────── #
@@ -231,7 +236,74 @@ CVE = ToolSpec(
 )
 
 
-ALL_TOOLS: tuple[ToolSpec, ...] = (DIG, WHOIS, CURL, OPENSSL, NMAP, JOURNAL, UFW, CVE)
+_CORE_TOOLS: tuple[ToolSpec, ...] = (DIG, WHOIS, CURL, OPENSSL, NMAP, JOURNAL, UFW, CVE)
+
+
+# ───────────────── catalogue → ToolSpec builder ───────────────── #
+def _make_templated(opdef: dict) -> Callable[[str, dict], list[str]]:
+    """Build an argv from fixed template strings + one validated target. All
+    flags come from the catalogue (trusted); only the target is user-supplied."""
+    from app.security import validate as V
+
+    target = opdef.get("target")
+    template = list(opdef.get("template", []))
+
+    def build(path: str, params: dict) -> list[str]:
+        tval = None
+        if target:
+            tval = V.by_kind(target["kind"], params.get(target["name"], ""))
+        argv = [path]
+        for tok in template:
+            argv.append(tval if tok == "{target}" else tok)
+        return argv
+
+    return build
+
+
+def _spec_from_catalogue(entry: dict) -> ToolSpec:
+    ops: list[Operation] = []
+    for od in entry.get("ops", []):
+        tgt = od.get("target")
+        params = []
+        if tgt:
+            params = [ParamSpec(tgt["name"], tgt["kind"], help=f"{tgt['kind']} target")]
+        posture = od.get("posture", PASSIVE)
+        ops.append(Operation(
+            key=od["key"],
+            tool=entry["name"],
+            title=od.get("title", od["key"]),
+            description=od.get("desc", entry.get("purpose", "")),
+            posture=posture,
+            params=params,
+            requires_authorization=bool(od.get("auth", posture in (ACTIVE, DISRUPTIVE) and od.get("auth", False))),
+            needs_root=bool(od.get("root", False)),
+            target_param=tgt["name"] if tgt else None,
+            build_argv=_make_templated(od),
+        ))
+    return ToolSpec(
+        name=entry["name"],
+        purpose=entry.get("purpose", ""),
+        package=entry.get("package", ""),
+        source=entry.get("source", "apt"),
+        categories=tuple(entry.get("categories", ())),
+        needs_root_default=bool(entry.get("root", False)),
+        operations=tuple(ops),
+        binary=entry.get("binary", ""),
+    )
+
+
+def _build_all() -> tuple[ToolSpec, ...]:
+    from app.security.catalog import CATALOG
+
+    by_name: dict[str, ToolSpec] = {t.name: t for t in _CORE_TOOLS}
+    for entry in CATALOG:
+        if entry["name"] in by_name:
+            continue  # core tools win
+        by_name[entry["name"]] = _spec_from_catalogue(entry)
+    return tuple(by_name.values())
+
+
+ALL_TOOLS: tuple[ToolSpec, ...] = _build_all()
 
 _TOOLS_BY_NAME = {t.name: t for t in ALL_TOOLS}
 _OPS_BY_KEY = {op.key: (t, op) for t in ALL_TOOLS for op in t.operations}
@@ -267,8 +339,8 @@ async def discover(tool: ToolSpec) -> Discovered:
     """Discover a tool's real presence and version on this host."""
     if tool.source == "builtin":
         return Discovered(name=tool.name, installed=True, path="(builtin)", version="builtin")
-    path = which(tool.name)
+    path = which(tool.exe)
     if not path:
         return Discovered(name=tool.name, installed=False, path=None, version=None)
-    version = await adapters.probe_version(tool.name, path)
+    version = await adapters.probe_version(tool.exe, path)
     return Discovered(name=tool.name, installed=True, path=path, version=version)

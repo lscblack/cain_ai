@@ -34,30 +34,50 @@ FINDING_FIELDS = (
 )
 
 
-async def build_catalogue() -> str:
+import time as _time
+
+_CATALOGUE_CACHE: tuple[float, str] | None = None
+_CATALOGUE_TTL = 120.0  # seconds
+
+
+async def build_catalogue(force: bool = False) -> str:
+    """Operations the model may call. To keep the (slow) model's prompt small,
+    we list only INSTALLED tools' operations and summarise the rest as
+    installable. Cached briefly since host state changes rarely."""
+    global _CATALOGUE_CACHE
+    now = _time.monotonic()
+    if not force and _CATALOGUE_CACHE and now - _CATALOGUE_CACHE[0] < _CATALOGUE_TTL:
+        return _CATALOGUE_CACHE[1]
+
+    # discover every tool once, in parallel
+    tools = list(registry.ALL_TOOLS)
+    import asyncio
+
+    discs = await asyncio.gather(*(registry.discover(t) for t in tools))
+    installed_names = {t.name for t, d in zip(tools, discs) if d.installed}
+    missing_names = [t.name for t, d in zip(tools, discs) if not d.installed]
+
     lines: list[str] = []
-    installed: list[str] = []
-    missing: list[str] = []
-    seen_tools: dict[str, bool] = {}
     for tool, op in registry.all_operations():
-        if tool.name not in seen_tools:
-            disc = await registry.discover(tool)
-            seen_tools[tool.name] = disc.installed
-            (installed if disc.installed else missing).append(f"{tool.name}({tool.package})")
-        avail = "installed" if seen_tools[tool.name] else "NOT INSTALLED"
+        if tool.name not in installed_names:
+            continue
         params = ", ".join(
             f"{p.name}" + ("" if p.required else f"[{p.default}]") for p in op.params
         ) or "(none)"
-        auth = " [requires authorized target]" if op.requires_authorization else ""
-        lines.append(
-            f"- {op.key} ({op.posture}, {avail}){auth}: {op.description} "
-            f"params: {params}"
+        auth = " [needs authorized target]" if op.requires_authorization else ""
+        lines.append(f"- {op.key} ({op.posture}){auth}: {op.description} params: {params}")
+
+    more = ""
+    if missing_names:
+        sample = ", ".join(sorted(missing_names)[:30])
+        more = (
+            f"\n\n{len(missing_names)} more OSINT/security tools can be installed on "
+            f"request (e.g. {sample}). If one would help, tell the operator to install "
+            f"its package via the approval workflow."
         )
-    return (
-        "Available operations:\n" + "\n".join(lines)
-        + "\n\nInstalled tools: " + (", ".join(sorted(set(installed))) or "none")
-        + "\nMissing tools: " + (", ".join(sorted(set(missing))) or "none")
-    )
+    text = "Runnable operations (installed tools only):\n" + ("\n".join(lines) or "(none)") + more
+    _CATALOGUE_CACHE = (now, text)
+    return text
 
 
 async def protocol_system_message(max_steps: int) -> AIMessage:

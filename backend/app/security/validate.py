@@ -136,6 +136,86 @@ def target_or_cidr(value: str) -> str:
     return target_host(value)
 
 
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,}$")
+
+
+def username(value: str) -> str:
+    value = (value or "").strip().lstrip("@")
+    _no_meta(value)
+    if not _USERNAME_RE.match(value):
+        raise ArgError(f"invalid username: {value!r}")
+    return value
+
+
+def email(value: str) -> str:
+    value = (value or "").strip()
+    _no_meta(value)
+    if not _EMAIL_RE.match(value):
+        raise ArgError(f"invalid email: {value!r}")
+    return value.lower()
+
+
+def phone(value: str) -> str:
+    value = (value or "").strip()
+    _no_meta(value)
+    cleaned = re.sub(r"[\s().\-]", "", value)
+    if not re.fullmatch(r"\+?\d{6,15}", cleaned):
+        raise ArgError(f"invalid phone number: {value!r}")
+    return cleaned
+
+
+def onion(value: str) -> str:
+    value = (value or "").strip().lower()
+    _no_meta(value)
+    if "://" in value:
+        from urllib.parse import urlsplit
+
+        value = urlsplit(value).hostname or ""
+    if not re.fullmatch(r"[a-z2-7]{16}\.onion|[a-z2-7]{56}\.onion", value):
+        raise ArgError(f"invalid .onion address: {value!r}")
+    return value
+
+
+def search_term(value: str) -> str:
+    """A free-text search term (e.g. for searchsploit). Spaces allowed, but no
+    control/shell metacharacters and not a flag."""
+    value = (value or "").strip()
+    if not value or len(value) > 200:
+        raise ArgError("search term must be 1-200 chars")
+    if any(c in value for c in "\n\r\t\x00`$;|&<>\\"):
+        raise ArgError("search term contains disallowed characters")
+    if value.startswith("-"):
+        raise ArgError("search term may not start with '-'")
+    return value
+
+
+def by_kind(kind: str, value) -> str:
+    """Validate a value according to a target kind; returns the safe string."""
+    kind = (kind or "").lower()
+    if kind == "domain":
+        return domain(value)
+    if kind == "host":
+        return target_host(value)
+    if kind == "ip":
+        return ip_address(value)
+    if kind == "url":
+        return url(value).url
+    if kind == "username":
+        return username(value)
+    if kind == "email":
+        return email(value)
+    if kind == "phone":
+        return phone(value)
+    if kind == "onion":
+        return onion(value)
+    if kind == "term":
+        return search_term(value)
+    if kind == "port_spec":
+        return port_spec(str(value))
+    raise ArgError(f"unknown target kind: {kind}")
+
+
 def url(value: str):
     """Validate a public http(s) URL (reuses the SSRF guard)."""
     from app.core.net import UnsafeUrlError, validate_public_url

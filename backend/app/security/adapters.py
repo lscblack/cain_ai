@@ -93,20 +93,28 @@ _VERSION_ARGS: dict[str, list[str]] = {
 
 
 async def probe_version(name: str, path: str) -> str | None:
-    args = _VERSION_ARGS.get(name)
-    if args is None:
-        return None
+    # Known flag, else a best-effort generic --version.
+    args = _VERSION_ARGS.get(name, ["--version"])
     try:
         proc = await asyncio.create_subprocess_exec(
             path, *args,
+            stdin=asyncio.subprocess.DEVNULL,  # never block on stdin
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=8)
     except (OSError, asyncio.TimeoutError):
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
         return None
     text = (out or b"").decode("utf-8", "replace").strip()
-    return text.splitlines()[0][:200] if text else None
+    if not text:
+        return None
+    first = text.splitlines()[0][:200]
+    # Guard against a tool that printed a usage/error instead of a version.
+    return first if len(first) < 200 else None
 
 
 # ───────────────────────── OSV (CVE research) ───────────────────────── #

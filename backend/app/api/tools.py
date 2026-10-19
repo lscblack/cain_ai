@@ -40,10 +40,13 @@ async def inventory(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Live tool inventory from the real host; also persists verification rows."""
+    import asyncio
+
     now = datetime.now(timezone.utc).isoformat()
+    tools = list(registry.ALL_TOOLS)
+    discs = await asyncio.gather(*(registry.discover(t) for t in tools))
     tools_out = []
-    for tool in registry.ALL_TOOLS:
-        disc = await registry.discover(tool)
+    for tool, disc in zip(tools, discs):
         # upsert verification record
         row = (
             await session.execute(
