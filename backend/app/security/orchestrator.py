@@ -184,32 +184,59 @@ def extract_findings(text: str) -> list:
     return []
 
 
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+
+
 async def _stream_decision(provider, messages, params):
     """Run one model turn as a stream. Decide early whether the reply is a tool
     call (JSON — buffered silently) or a prose answer (streamed live, with any
     trailing code fence hidden from the live view). Yields ("token", text) for
-    visible prose and finally ("result", {...}). Propagates OllamaError."""
+    visible prose and finally ("result", {...}). Propagates OllamaError.
+
+    A hybrid reasoning model (e.g. Qwen3) may prefix its reply with a
+    ``<think>...</think>`` block. We request think=False from Ollama, but as a
+    defensive measure we also skip a leading think block here so the JSON/prose
+    decision looks at the real content and the reasoning never reaches the
+    operator."""
     buf = ""
     mode: str | None = None
-    emitted = 0          # chars of prose already yielded
+    emitted = 0          # chars of visible prose already yielded (within content)
     fence_hit = False
+    content_start: int | None = None  # index in buf where real content begins
     async for chunk in provider.chat_stream(messages, params=params):
         buf += chunk
+        if content_start is None:
+            lstripped = buf.lstrip()
+            lead = len(buf) - len(lstripped)
+            if lstripped.startswith(_THINK_OPEN):
+                end = buf.find(_THINK_CLOSE)
+                if end == -1:
+                    continue  # still inside the think block — keep buffering
+                content_start = end + len(_THINK_CLOSE)
+            elif lstripped and _THINK_OPEN.startswith(lstripped[: len(_THINK_OPEN)]):
+                continue  # possible "<think>" arriving in pieces — wait
+            elif not lstripped:
+                continue  # only whitespace so far
+            else:
+                content_start = lead  # no think block
+        content = buf[content_start:]
         if mode is None:
-            stripped = buf.lstrip()
+            stripped = content.lstrip()
             if not stripped:
                 continue
             mode = "json" if stripped[0] == "{" else "prose"
         if mode == "prose" and not fence_hit:
-            idx = buf.find("```")
-            visible_end = idx if idx != -1 else len(buf)
+            idx = content.find("```")
+            visible_end = idx if idx != -1 else len(content)
             if idx != -1:
                 fence_hit = True
             if visible_end > emitted:
-                yield ("token", buf[emitted:visible_end])
+                yield ("token", content[emitted:visible_end])
                 emitted = visible_end
-    obj = extract_json(buf) if mode == "json" else None
-    visible = buf[:emitted] if mode == "prose" else ""
+    content = buf[content_start:] if content_start is not None else buf
+    obj = extract_json(content) if mode == "json" else None
+    visible = content[:emitted] if mode == "prose" else ""
     yield ("result", {"raw": buf, "json": obj, "mode": mode or "prose", "visible": visible})
 
 

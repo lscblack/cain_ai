@@ -51,6 +51,32 @@ async def _drain(gen):
     return [e async for e in gen]
 
 
+async def test_stream_decision_strips_leading_think_prose():
+    """A <think> block before a prose answer must not leak to the operator and
+    must not flip the turn into 'json' mode."""
+    reply = "<think>let me reason about this</think>Here is the answer."
+    prov = FakeProvider([reply])
+    events = await _drain(orch._stream_decision(prov, [], None))
+    result = events[-1][1]
+    assert result["mode"] == "prose"
+    assert result["visible"] == "Here is the answer."
+    tokens = "".join(t for kind, t in events[:-1] if kind == "token")
+    assert tokens == "Here is the answer."
+    assert "think" not in tokens
+
+
+async def test_stream_decision_strips_leading_think_tool_call():
+    """A <think> block before a tool-call JSON must still be parsed as a tool."""
+    reply = '<think>I should check DNS</think>{"action":"tool","operation":"dns.records","params":{"domain":"x.com"}}'
+    prov = FakeProvider([reply])
+    events = await _drain(orch._stream_decision(prov, [], None))
+    result = events[-1][1]
+    assert result["mode"] == "json"
+    assert result["json"]["operation"] == "dns.records"
+    # nothing streamed to the operator for a tool call
+    assert not [t for kind, t in events[:-1] if kind == "token"]
+
+
 async def test_run_turn_simple_final_persists_finding(db_session):
     uid = uuid.uuid4()
     final = json.dumps({

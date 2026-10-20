@@ -167,6 +167,12 @@ class OllamaProvider:
             "stream": stream,
             "options": params.to_options(),
             "keep_alive": "10m",
+            # Disable "thinking" for hybrid reasoning models (e.g. Qwen3). KAI's
+            # orchestration relies on the FIRST non-whitespace char to decide
+            # tool-call JSON vs prose; a leading <think> block would break that,
+            # and on CPU the reasoning tokens cost minutes per turn. Ollama
+            # ignores this for non-thinking models (dolphin, llama3).
+            "think": False,
         }
 
     @staticmethod
