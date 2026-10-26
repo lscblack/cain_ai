@@ -177,6 +177,22 @@ def onion(value: str) -> str:
     return value
 
 
+_HASH_RE = re.compile(r"^[A-Za-z0-9$./:_+=-]{4,256}$")
+
+
+def hash_value(value: str) -> str:
+    """A password-hash string for an offline cracking op (e.g. john/hashcat).
+    Strict allowlist charset (hex digests, $id$salt$hash crypt forms, NTLM, etc.);
+    no network target is ever touched by these ops."""
+    value = (value or "").strip()
+    _no_meta(value)
+    if value.startswith("-"):
+        raise ArgError("hash may not start with '-' (looks like a flag)")
+    if not _HASH_RE.match(value):
+        raise ArgError(f"invalid hash value: {value!r}")
+    return value
+
+
 def search_term(value: str) -> str:
     """A free-text search term (e.g. for searchsploit). Spaces allowed, but no
     control/shell metacharacters and not a flag."""
@@ -211,6 +227,8 @@ def by_kind(kind: str, value) -> str:
         return onion(value)
     if kind == "term":
         return search_term(value)
+    if kind == "hash":
+        return hash_value(value)
     if kind == "port_spec":
         return port_spec(str(value))
     raise ArgError(f"unknown target kind: {kind}")

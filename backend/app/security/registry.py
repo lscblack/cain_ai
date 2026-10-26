@@ -43,6 +43,7 @@ class Operation:
     params: list[ParamSpec] = field(default_factory=list)
     requires_authorization: bool = False  # true for ACTIVE scans against targets
     needs_root: bool = False
+    timeout_s: int | None = None  # override the default wall-clock cap (slow, bounded scans)
     target_param: str | None = None  # which param is the network target (for auth checks)
     # exactly one of these is set:
     build_argv: Callable[[str, dict], list[str]] | None = None  # (resolved_path, params)->argv
@@ -70,7 +71,7 @@ class ToolSpec:
 DIG = ToolSpec(
     name="dig",
     purpose="DNS record inspection (resolve A/AAAA/MX/TXT/NS/SOA/CAA records).",
-    package="dnsutils",
+    package="bind9-dnsutils",
     categories=("domain-intel",),
     operations=(
         Operation(
@@ -236,7 +237,142 @@ CVE = ToolSpec(
 )
 
 
-_CORE_TOOLS: tuple[ToolSpec, ...] = (DIG, WHOIS, CURL, OPENSSL, NMAP, JOURNAL, UFW, CVE)
+WEB = ToolSpec(
+    name="web",
+    purpose=("General open-web research + reading one page's content, clearnet "
+            "or a Tor hidden service (.onion) — keyless, built-in Python."),
+    package="",  # no CLI tool; built-in Python adapters
+    source="builtin",
+    categories=("web-intel",),
+    operations=(
+        Operation(
+            key="web.search",
+            tool="web",
+            title="Web search",
+            description=("Search the open web (DuckDuckGo-over-Tor / SearXNG / Mojeek pool) "
+                        "for candidate sources on a topic. Returns URLs, not content — "
+                        "follow up with web.fetch to read one."),
+            posture=PASSIVE,
+            params=[ParamSpec("query", "str", help="search query")],
+            pyrun=adapters.web_search,
+        ),
+        Operation(
+            key="web.fetch",
+            tool="web",
+            title="Fetch a web page",
+            description=("Read ONE public page's text. Works on a normal URL or a .onion "
+                        "address (routed through the system Tor service automatically). "
+                        "SSRF-guarded: private/internal addresses are refused. Read-only — "
+                        "never submits forms or logs in."),
+            posture=PASSIVE,
+            params=[ParamSpec("url", "url", help="http(s) URL, or a .onion address")],
+            target_param="url",
+            pyrun=adapters.web_fetch,
+        ),
+    ),
+)
+
+METASPLOIT = ToolSpec(
+    name="metasploit-framework",
+    purpose=("Metasploit module research and non-destructive vulnerability checks. "
+            "KAI can search/inspect modules and run a module's 'check' against an "
+            "authorized target — it never runs 'exploit'/'run' or generates a payload."),
+    package="metasploit-framework",
+    source="kali",
+    categories=("support", "vuln-research"),
+    binary="msfconsole",
+    operations=(
+        Operation(
+            key="msf.search",
+            tool="metasploit-framework",
+            title="Search the module database",
+            description="Search Metasploit's local module database (read-only, no target).",
+            posture=PASSIVE,
+            params=[ParamSpec("query", "term", help="search term, e.g. 'eternalblue' or 'type:exploit apache'")],
+            timeout_s=60,
+            build_argv=adapters.msf_search,
+        ),
+        Operation(
+            key="msf.info",
+            tool="metasploit-framework",
+            title="Show info for a module",
+            description="Show a module's info (description, options, targets, references).",
+            posture=PASSIVE,
+            params=[ParamSpec("module", "term", help="module path, e.g. exploit/windows/smb/ms17_010_eternalblue")],
+            timeout_s=60,
+            build_argv=adapters.msf_info,
+        ),
+        Operation(
+            key="msf.check",
+            tool="metasploit-framework",
+            title="Check (authorized, non-destructive)",
+            description=(
+                "Run a module's built-in 'check' against an AUTHORIZED target: probes "
+                "for the vulnerability without exploiting it. Never runs exploit/run."
+            ),
+            posture=ACTIVE,
+            requires_authorization=True,
+            target_param="target",
+            params=[
+                ParamSpec("module", "term", help="module path, e.g. exploit/windows/smb/ms17_010_eternalblue"),
+                ParamSpec("target", "host", help="authorized host or IP (sets RHOSTS)"),
+            ],
+            timeout_s=60,
+            build_argv=adapters.msf_check,
+        ),
+    ),
+)
+
+JOHN = ToolSpec(
+    name="john",
+    purpose=("Offline single-hash cracking attempt against a small built-in "
+            "wordlist. No network target — operates only on a hash string the "
+            "operator supplies directly."),
+    package="john",
+    categories=("assessment",),
+    operations=(
+        Operation(
+            key="john.crack",
+            tool="john",
+            title="Crack a single hash (offline, built-in wordlist)",
+            description=("Attempt to crack ONE password hash against john's small "
+                        "built-in wordlist. Passive — no host or network is touched."),
+            posture=PASSIVE,
+            params=[ParamSpec("hash", "hash", help="the password hash to crack")],
+            timeout_s=60,
+            pyrun=adapters.john_crack,
+        ),
+    ),
+)
+
+HYDRA = ToolSpec(
+    name="hydra",
+    purpose=("Online SSH credential check against an authorized target, using "
+            "a small FIXED built-in user/password list (not operator-suppliable "
+            "in this pass) — bounded and auditable, stops at first hit."),
+    package="hydra",
+    categories=("assessment",),
+    operations=(
+        Operation(
+            key="hydra.ssh_brute",
+            tool="hydra",
+            title="SSH credential check (authorized, built-in list)",
+            description=("Try a small fixed set of common SSH username/password pairs "
+                        "against an AUTHORIZED target. Active — requires authorization. "
+                        "Stops at the first successful pair; hard-capped runtime."),
+            posture=ACTIVE,
+            requires_authorization=True,
+            target_param="target",
+            params=[ParamSpec("target", "host", help="authorized host or IP")],
+            timeout_s=45,
+            build_argv=adapters.hydra_ssh_brute,
+        ),
+    ),
+)
+
+_CORE_TOOLS: tuple[ToolSpec, ...] = (
+    DIG, WHOIS, CURL, OPENSSL, NMAP, JOURNAL, UFW, CVE, WEB, METASPLOIT, JOHN, HYDRA,
+)
 
 
 # ───────────────── catalogue → ToolSpec builder ───────────────── #
@@ -277,6 +413,7 @@ def _spec_from_catalogue(entry: dict) -> ToolSpec:
             params=params,
             requires_authorization=bool(od.get("auth", posture in (ACTIVE, DISRUPTIVE) and od.get("auth", False))),
             needs_root=bool(od.get("root", False)),
+            timeout_s=od.get("timeout"),
             target_param=tgt["name"] if tgt else None,
             build_argv=_make_templated(od),
         ))
@@ -332,7 +469,12 @@ class Discovered:
 
 
 def which(name: str) -> str | None:
-    return shutil.which(name)
+    """Find a tool in the SAME system directories the executor runs with, so KAI only
+    ever uses system (apt) installs — never a conda/cargo/~/.local copy that happens to be
+    earlier on the backend service's own PATH."""
+    from app.security.executor import _SAFE_ENV
+
+    return shutil.which(name, path=_SAFE_ENV["PATH"])
 
 
 async def discover(tool: ToolSpec) -> Discovered:

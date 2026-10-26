@@ -79,6 +79,26 @@ def ufw_status(path: str, params: dict) -> list[str]:
     return [path, "status", "verbose"]
 
 
+def msf_search(path: str, params: dict) -> list[str]:
+    term = V.search_term(params.get("query", ""))
+    # -q quiet banner, -x run a resource-script string then exit. search_term()
+    # already rejects ; | & $ ` < > \ etc., so this can't smuggle extra msf commands.
+    return [path, "-q", "-x", f"search {term}; exit"]
+
+
+def msf_info(path: str, params: dict) -> list[str]:
+    module = V.search_term(params.get("module", ""))
+    return [path, "-q", "-x", f"info {module}; exit"]
+
+
+def msf_check(path: str, params: dict) -> list[str]:
+    # Non-destructive only: 'check' probes for the vulnerability without exploiting
+    # it. No 'exploit'/'run' command is ever built here.
+    module = V.search_term(params.get("module", ""))
+    target = V.target_host(params.get("target", ""))
+    return [path, "-q", "-x", f"use {module}; set RHOSTS {target}; check; exit"]
+
+
 # ───────────────────────── version probing ──────────────────────────── #
 
 _VERSION_ARGS: dict[str, list[str]] = {
@@ -163,4 +183,142 @@ async def osv_lookup(params: dict) -> dict:
         "count": len(vulns),
         "advisories": summary,
         "source": "https://api.osv.dev/v1/query",
+    }
+
+
+_HYDRA_USERS = ["admin", "root", "test", "ubuntu", "administrator"]
+_HYDRA_PASSWORDS = ["admin", "password", "123456", "root", "changeme", "test123", "letmein"]
+_JOHN_WORDLISTS = ("/usr/share/john/password.lst", "/usr/share/dict/words")
+
+
+def hydra_ssh_brute(path: str, params: dict) -> list[str]:
+    """Online SSH credential check against an AUTHORIZED target only, using a
+    small FIXED built-in user/pass list (no operator-suppliable wordlists in
+    this pass — keeps it bounded and auditable). -f stops at the first hit;
+    -t/-w cap concurrency and per-attempt wait so this can't run unbounded."""
+    import os
+
+    from app.security.executor import _TOOL_HOME
+
+    target = V.target_host(params.get("target", ""))
+    users_path = os.path.join(_TOOL_HOME, "hydra-users.txt")
+    pass_path = os.path.join(_TOOL_HOME, "hydra-passwords.txt")
+    with open(users_path, "w") as f:
+        f.write("\n".join(_HYDRA_USERS) + "\n")
+    with open(pass_path, "w") as f:
+        f.write("\n".join(_HYDRA_PASSWORDS) + "\n")
+    return [
+        path, "-L", users_path, "-P", pass_path, "-t", "4", "-w", "10", "-f",
+        f"ssh://{target}",
+    ]
+
+
+async def john_crack(params: dict) -> dict:
+    """Offline single-hash cracking attempt (john). No network target — the
+    operator supplies the hash itself. Uses the small built-in wordlist that
+    ships with john (or the system dictionary as a fallback); does NOT accept
+    an operator-supplied wordlist path in this pass."""
+    import os
+    import uuid as _uuid
+
+    from app.security import registry
+    from app.security.executor import _TOOL_HOME, run_argv
+
+    hash_str = V.hash_value(params.get("hash", ""))
+    john_path = registry.which("john")
+    if not john_path:
+        raise RuntimeError("john is not installed")
+    wordlist = next((w for w in _JOHN_WORDLISTS if os.path.exists(w)), None)
+    if not wordlist:
+        raise RuntimeError("no built-in wordlist found on this host (expected john's own password.lst)")
+
+    hash_path = os.path.join(_TOOL_HOME, f"john-{_uuid.uuid4().hex}.hash")
+    with open(hash_path, "w") as f:
+        f.write(hash_str + "\n")
+    try:
+        crack = await run_argv(
+            [john_path, f"--wordlist={wordlist}", hash_path], timeout=40, max_bytes=50_000,
+        )
+        show = await run_argv([john_path, "--show", hash_path], timeout=10, max_bytes=50_000)
+    finally:
+        try:
+            os.remove(hash_path)
+        except OSError:
+            pass
+    show_out = show.stdout or ""
+    cracked = ":" in show_out and "0 password hash" not in show_out
+    password = show_out.split(":", 2)[1] if cracked and show_out.count(":") >= 1 else None
+    return {
+        "hash": hash_str,
+        "wordlist": wordlist,
+        "cracked": bool(cracked and password),
+        "password": password,
+        "john_output": (crack.stdout or "")[:2000],
+    }
+
+
+async def web_search(params: dict) -> dict:
+    """Open-web search (keyless engine pool: DuckDuckGo-over-Tor, SearXNG,
+    Mojeek — see app.discovery.search) for general research during an
+    investigation. Returns candidate domains/URLs with provenance; use
+    web.fetch to actually read one."""
+    from app.discovery.search import search_candidates_free
+
+    query = str(params.get("query", "")).strip()
+    if not query:
+        raise ValueError("query is required")
+
+    found = await search_candidates_free([query], concurrency=1)
+    results = [{"domain": dom, "url": url} for dom, url in list(found.items())[:15]]
+    return {
+        "query": query,
+        "count": len(results),
+        "results": results,
+        "note": "Candidate sources only — use web.fetch on a specific URL to read its content.",
+    }
+
+
+async def web_fetch(params: dict) -> dict:
+    """Fetch and read ONE public page's text (clearnet or a .onion hidden
+    service, routed via Tor automatically — see app.crawlers.http). SSRF-guarded
+    (app.core.net.validate_public_url): private/internal addresses are refused.
+    Read-only — never submits forms, logs in, or interacts with a site."""
+    from app.core.net import UnsafeUrlError, validate_public_url
+    from app.crawlers.extract import extract_page_meta, extract_text_excerpt
+    from app.crawlers.http import httpx_fetch
+
+    url = str(params.get("url", "")).strip()
+    if not url:
+        raise ValueError("url is required")
+    try:
+        validate_public_url(url)
+    except UnsafeUrlError as exc:
+        raise ValueError(f"refused: {exc}") from exc
+
+    fetched = await httpx_fetch(url)
+    if fetched.status == 0:
+        host = url.split("/")[2] if "//" in url else url
+        reason = "Tor is required to reach .onion addresses and is not configured" \
+            if host.endswith(".onion") else "could not be reached (SSRF-blocked, proxy required, or unreachable)"
+        return {"ok": False, "url": url, "status": 0, "error": reason}
+    if fetched.status != 200:
+        return {"ok": False, "url": url, "status": fetched.status,
+                "content_type": fetched.content_type}
+
+    is_text = fetched.content_type.startswith(("text/", "application/xhtml", "application/json"))
+    if not is_text:
+        return {"ok": True, "url": url, "status": 200, "content_type": fetched.content_type,
+                "note": "non-text content — not extracted", "size_bytes": len(fetched.body)}
+
+    html = fetched.body.decode("utf-8", errors="replace")
+    meta = extract_page_meta(html) if "html" in fetched.content_type else {}
+    text = extract_text_excerpt(html, max_len=3000) or html[:3000]
+    return {
+        "ok": True,
+        "url": url,
+        "status": 200,
+        "content_type": fetched.content_type,
+        "title": meta.get("title"),
+        "text": text,
+        "truncated": len(html) > 3000,
     }

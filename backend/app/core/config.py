@@ -93,6 +93,20 @@ class Settings(BaseSettings):
     # The customised security model served by a local Ollama. KAI never
     # silently falls back to a cloud model when this is unreachable — it
     # reports the exact problem instead.
+    # Which local inference server backs KAI Chat: "llamacpp" (llama-server,
+    # CUDA-capable) or "ollama". Switchable at runtime from Power Up.
+    # Shared secret that lets the local desktop app sign in without a password
+    # (POST /auth/desktop). Empty = endpoint disabled. Lives only in .env.
+    kai_desktop_token: str = Field(default="")
+    kai_llm_backend: str = Field(default="ollama")
+    llamacpp_base_url: str = Field(default="http://127.0.0.1:8080")
+    kai_llamacpp_model: str = Field(default="kai")      # alias llama-server serves the GGUF under
+    llamacpp_log_path: str = Field(default="")          # llama-server log (for GPU/CPU detection)
+    # Extra llama-server instances serving the SAME model on other hardware (e.g. the
+    # Intel iGPU next to the CPU one). Conversations are spread across all of them.
+    llamacpp_extra_urls: str = Field(default="")        # comma-separated base URLs
+    llamacpp_extra_log_paths: str = Field(default="")   # comma-separated, same order
+    llamacpp_extra_weight: float = Field(default=0.35)  # relative speed of an extra instance
     kai_ollama_model: str = Field(default="kai-security")
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
     kai_ollama_num_ctx: int = Field(default=8192)       # model context window (tokens)

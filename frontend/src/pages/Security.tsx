@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  ShieldCheck, Package, History, Crosshair, AlertTriangle, Play, Trash2, RefreshCw, Radar,
+  ShieldCheck, Package, History, Crosshair, AlertTriangle, Play, Trash2, RefreshCw, Radar, Download,
 } from "lucide-react";
 
 import {
   toolsApi, type Inventory, type Execution, type Target, type InstallReq, type ToolOperation,
-  type SweepResult,
+  type SweepResult, type InstallBatchResult,
 } from "@/lib/tools";
 import type { Finding } from "@/lib/chat";
+import { JsonView } from "@/components/JsonView";
 import { PageLoading, ErrorRetry, Spinner } from "@/components/Async";
 
 const TABS = ["Inventory", "OSINT Sweep", "Installs", "Executions", "Targets", "Findings"] as const;
@@ -66,7 +67,7 @@ function RunOp({ op, onDone }: { op: ToolOperation; onDone: () => void }) {
               {(result.stdout || "") + (result.stderr ? "\n" + result.stderr : "")}
             </pre>
           )}
-          {result.result && <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted">{JSON.stringify(result.result, null, 2)}</pre>}
+          {result.result && <JsonView value={result.result} />}
         </div>
       )}
     </div>
@@ -91,6 +92,42 @@ export function Security() {
     { domain: "", host: "", email: "", username: "", phone: "", ip: "" });
   const [sweepRes, setSweepRes] = useState<SweepResult | null>(null);
   const [sweeping, setSweeping] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [installing, setInstalling] = useState<Set<string>>(new Set());
+  const [batchRes, setBatchRes] = useState<InstallBatchResult | null>(null);
+
+  const toggleSel = (n: string) =>
+    setSelected((s) => { const x = new Set(s); x.has(n) ? x.delete(n) : x.add(n); return x; });
+
+  async function installOne(name: string, reinstall: boolean) {
+    setInstalling((s) => new Set(s).add(name));
+    setMsg(`${reinstall ? "reinstalling" : "installing"} ${name} — approve the system password prompt…`);
+    try {
+      const r = await toolsApi.installNow({ capability: name, reinstall });
+      setMsg(r.verify?.installed
+        ? `${name} ${reinstall ? "reinstalled" : "installed"}${r.verify.version ? ` (${r.verify.version})` : ""}`
+        : `${name}: install failed${r.outcome?.error ? ` — ${r.outcome.error}` : ""}${r.outcome?.sudo_needs_password ? " — sudo needs a password" : ""}`);
+    } catch (e: any) { setMsg(`${name}: ${e?.message || "install failed"}`); }
+    setInstalling((s) => { const x = new Set(s); x.delete(name); return x; });
+    try { setInv(await toolsApi.inventory()); setInstalls(await toolsApi.installRequests()); } catch { /* */ }
+  }
+
+  async function installMany(names: string[], reinstall: boolean) {
+    if (names.length === 0) { setMsg("Nothing selected."); return; }
+    if (!window.confirm(`${reinstall ? "Reinstall" : "Install"} ${names.length} tool(s) with apt? You will get one system password prompt.`)) return;
+    setBatchRes(null);
+    setInstalling((s) => new Set([...s, ...names]));
+    setMsg(`installing ${names.length} tool(s) — approve the system password prompt…`);
+    try {
+      const r = await toolsApi.installBatch(names, reinstall);
+      setBatchRes(r);
+      setMsg(`${r.installed.length} installed · ${r.failed.length} failed · ${r.skipped.length} skipped`
+        + (r.outcome?.sudo_needs_password ? " — sudo needs a password" : ""));
+    } catch (e: any) { setMsg(e?.message || "batch install failed"); }
+    setInstalling((s) => { const x = new Set(s); names.forEach((n) => x.delete(n)); return x; });
+    setSelected(new Set());
+    try { setInv(await toolsApi.inventory()); setInstalls(await toolsApi.installRequests()); } catch { /* */ }
+  }
 
   async function runSweep() {
     const body = Object.fromEntries(Object.entries(sweepIn).filter(([, v]) => v.trim()));
@@ -192,13 +229,71 @@ export function Security() {
       {!loadErr && loading && !inv && <PageLoading label="Loading security console…" />}
 
       {tab === "Inventory" && inv && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <button disabled={selected.size === 0 || installing.size > 0}
+            onClick={() => installMany([...selected].filter((n) => !inv.tools.find((t) => t.name === n)?.installed), false)}
+            className="flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-panel disabled:opacity-40" style={{ color: "var(--kai-verified)" }}>
+            <Download size={12} /> install selected ({selected.size})
+          </button>
+          <button disabled={selected.size === 0 || installing.size > 0}
+            onClick={() => installMany([...selected].filter((n) => inv.tools.find((t) => t.name === n)?.installed), true)}
+            className="flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-panel disabled:opacity-40">
+            <RefreshCw size={12} /> reinstall selected
+          </button>
+          <button disabled={installing.size > 0}
+            onClick={() => installMany(inv.tools.filter((t) => !t.installed && t.source === "apt" && t.apt_available !== false).map((t) => t.name), false)}
+            className="flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-panel disabled:opacity-40">
+            <Download size={12} /> install all missing (apt)
+          </button>
+          <button onClick={() => setSelected(new Set(inv.tools.map((t) => t.name)))} className="text-muted hover:text-ink">select all</button>
+          <button onClick={() => setSelected(new Set())} className="text-muted hover:text-ink">clear</button>
+        </div>
+      )}
+      {tab === "Inventory" && batchRes && (
+        <div className="hud-panel mb-3 rounded border border-line p-3 text-xs">
+          {batchRes.installed.length > 0 && <div style={{ color: "var(--kai-verified)" }}>installed: {batchRes.installed.map((i) => i.tool).join(", ")}</div>}
+          {batchRes.failed.length > 0 && <div style={{ color: "var(--kai-accent)" }}>failed: {batchRes.failed.map((i) => i.tool).join(", ")}</div>}
+          {batchRes.skipped.length > 0 && <div className="text-muted">skipped: {batchRes.skipped.map((i) => `${i.tool} (${i.reason})`).join(", ")}</div>}
+        </div>
+      )}
+
+      {tab === "Inventory" && inv && (
         <div className="grid gap-3 md:grid-cols-2">
           {inv.tools.map((t) => (
             <Panel key={t.name} title={t.name}
-              right={<span className="hud-mono text-xs" style={{ color: t.installed ? "var(--kai-verified)" : "var(--kai-accent)" }}>
-                ● {t.installed ? (t.version || "installed") : "not installed"}</span>}>
+              right={<span className="flex items-center gap-2 hud-mono text-xs">
+                <span style={{ color: t.installed ? "var(--kai-verified)" : "var(--kai-accent)" }}>
+                  ● {t.installed ? (t.version || "installed") : "not installed"}</span>
+                {t.source !== "builtin" && (
+                  <input type="checkbox" checked={selected.has(t.name)} onChange={() => toggleSel(t.name)} title="select" />
+                )}
+              </span>}>
               <div className="text-sm text-muted">{t.purpose}</div>
               <div className="kai-metadata mt-1">pkg: {t.package || "(builtin)"} · {t.source} · {t.path || "—"}</div>
+              {t.source !== "builtin" && (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  {t.source === "apt" && t.apt_available === false && !t.installed ? (
+                    <span className="kai-metadata">not in Ubuntu’s apt sources (Kali-only) — install manually</span>
+                  ) : t.source === "apt" ? (
+                    <>
+                      {!t.installed && (
+                        <button onClick={() => installOne(t.name, false)} disabled={installing.has(t.name)}
+                          className="flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-panel disabled:opacity-40" style={{ color: "var(--kai-verified)" }}>
+                          {installing.has(t.name) ? <Spinner size={12} /> : <Download size={12} />} install
+                        </button>
+                      )}
+                      {t.installed && (
+                        <button onClick={() => installOne(t.name, true)} disabled={installing.has(t.name)}
+                          className="flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-panel disabled:opacity-40">
+                          {installing.has(t.name) ? <Spinner size={12} /> : <RefreshCw size={12} />} reinstall
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <span className="kai-metadata">install manually ({t.source}) — not an apt package</span>
+                  )}
+                </div>
+              )}
               <div className="mt-2 space-y-2">
                 {t.operations.map((op) => (
                   <div key={op.key} className="border-t border-line/50 pt-2">
@@ -211,7 +306,7 @@ export function Security() {
                     </button>
                     {expanded === op.key && (t.installed
                       ? <RunOp op={op} onDone={refresh} />
-                      : <div className="kai-metadata mt-1">Install “{t.package}” first (Installs tab).</div>)}
+                      : <div className="kai-metadata mt-1">Not installed — use the install button above{t.source !== "apt" ? ` (${t.source}: install manually)` : ""}.</div>)}
                   </div>
                 ))}
               </div>
@@ -375,7 +470,7 @@ export function Security() {
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-ink">{f.title}</span>
                 <span className="hud-mono uppercase">{f.severity}</span>
-                <span className="kai-metadata">· {f.confidence} · {f.status}{f.tool ? ` · ${f.tool}` : ""}</span>
+                <span className="kai-metadata">· {f.status === f.confidence ? f.status : `${f.confidence} · ${f.status}`}{f.tool ? ` · ${f.tool}` : ""}</span>
               </div>
               {f.asset && <div className="kai-metadata mt-1">asset: {f.asset}</div>}
               {f.description && <div className="mt-1 text-muted">{f.description}</div>}

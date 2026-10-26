@@ -110,7 +110,7 @@ async def test_install_approve_reports_honest_outcome(client, auth_headers, monk
     and assert nothing is faked."""
     import app.api.tools as tools_api
 
-    async def fake_perform(package):
+    async def fake_perform(package, reinstall=False):
         return {"ok": False, "status": "error", "exit_code": 1, "error": "exit 1",
                 "log": "simulated helper failure", "sudo_needs_password": True}
 
@@ -125,3 +125,62 @@ async def test_install_approve_reports_honest_outcome(client, auth_headers, monk
     assert body["request"]["status"] == "failed"
     assert body["outcome"]["sudo_needs_password"] is True
     assert body["verify"]["installed"] is False
+
+
+async def test_install_now_non_apt_tool_is_refused(client, auth_headers):
+    r = await client.post("/tools/install/now", json={"capability": "subfinder"}, headers=auth_headers)
+    assert r.status_code == 422 and "not apt" in r.json()["detail"]
+
+
+async def test_install_now_unknown_package_never_reaches_helper(client, auth_headers, monkeypatch):
+    import app.api.tools as tools_api
+
+    async def boom(*a, **k):  # must not be called
+        raise AssertionError("privileged helper called for an unavailable package")
+
+    monkeypatch.setattr(tools_api.install_mod, "perform_install", boom)
+    r = await client.post("/tools/install/now", json={"package": "kai-nonexistent-tool"}, headers=auth_headers)
+    assert r.status_code == 422 and "not available" in r.json()["detail"]
+
+
+async def test_install_now_reinstall_passes_flag_and_verifies(client, auth_headers, monkeypatch):
+    import app.api.tools as tools_api
+    seen = {}
+
+    async def plan(pkg):
+        return {"ok": True, "package": pkg, "already_installed": True, "available": True}
+
+    async def perform(package, reinstall=False):
+        seen["reinstall"] = reinstall
+        return {"ok": True, "status": "ok", "exit_code": 0, "error": None, "log": "ok"}
+
+    monkeypatch.setattr(tools_api.install_mod, "plan_install", plan)
+    monkeypatch.setattr(tools_api.install_mod, "perform_install", perform)
+    # without reinstall an already-installed tool is a no-op (no privileged call)
+    r = await client.post("/tools/install/now", json={"capability": "dig"}, headers=auth_headers)
+    assert r.json()["outcome"]["status"] == "already_installed" and "reinstall" not in seen
+    r = await client.post("/tools/install/now", json={"capability": "dig", "reinstall": True}, headers=auth_headers)
+    assert r.status_code == 200 and seen["reinstall"] is True
+    assert r.json()["request"]["status"] == "installed"  # dig really is on the host
+
+
+async def test_install_batch_single_privileged_call_and_skips(client, auth_headers, monkeypatch):
+    import app.api.tools as tools_api
+    calls = []
+
+    async def plan(pkg):
+        return {"ok": True, "package": pkg, "already_installed": False, "available": pkg != "kai-missing"}
+
+    async def many(packages, reinstall=False, timeout=600):
+        calls.append(list(packages))
+        return {"ok": True, "status": "ok", "exit_code": 0, "error": None, "log": ""}
+
+    monkeypatch.setattr(tools_api.install_mod, "plan_install", plan)
+    monkeypatch.setattr(tools_api.install_mod, "perform_install_many", many)
+    r = await client.post("/tools/install/batch",
+                          json={"capabilities": ["nmap", "subfinder", "nope-tool"]}, headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert len(calls) == 1 and "nmap" in calls[0]            # one polkit prompt
+    reasons = {s["tool"]: s["reason"] for s in body["skipped"]}
+    assert "subfinder" in reasons and "nope-tool" in reasons  # non-apt / unknown skipped, reported

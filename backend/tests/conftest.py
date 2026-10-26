@@ -77,9 +77,15 @@ async def client(fake_redis) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides[get_session] = _override_get_session
     app.dependency_overrides[get_redis] = _override_get_redis
 
+    # Chat turns run in a background task with their own session; point it at the test DB.
+    import app.api.chat as chat_api
+    _orig_maker = chat_api.async_session_maker
+    chat_api.async_session_maker = _session_maker
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         c.app = app  # type: ignore[attr-defined]  # expose for dependency overrides in tests
         yield c
 
     app.dependency_overrides.clear()
+    chat_api.async_session_maker = _orig_maker

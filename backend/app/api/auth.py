@@ -5,11 +5,15 @@ no open registration and no password reset flow in Phase 1 (solo, local).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import hmac
+from datetime import timedelta
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_operator
+from app.core.config import get_settings
 from app.core.ratelimit import check_rate_limit
 from app.core.redis import get_redis
 from app.core.security import create_access_token, hash_password, verify_password
@@ -97,3 +101,32 @@ async def login(
 @router.get("/me", response_model=OperatorOut)
 async def me(operator: User = Depends(get_current_operator)) -> OperatorOut:
     return OperatorOut(id=operator.id, email=operator.email, created_at=operator.created_at)
+
+
+@router.post("/desktop", response_model=TokenOut)
+async def desktop_login(
+    request: Request,
+    x_kai_desktop: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
+) -> TokenOut:
+    """Password-less sign-in for the local desktop app.
+
+    The desktop shell reads KAI_DESKTOP_TOKEN from the local .env and presents it
+    in a header. Web/tunnel visitors don't have that secret, so the normal login
+    stays in force for them. Disabled (404) when no secret is configured."""
+    secret = get_settings().kai_desktop_token
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+    ip = _client_ip(request) or "unknown"
+    await check_rate_limit(redis, f"rl:desktop:{ip}", limit=30, window_seconds=300)
+    if not x_kai_desktop or not hmac.compare_digest(x_kai_desktop.encode(), secret.encode()):
+        await AuditRepository(session).record("operator.desktop_login_denied", ip=ip)
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_desktop_token")
+    users = await UserRepository(session).list(limit=1)
+    user = users[0] if users else None
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="no_operator_yet")
+    await AuditRepository(session).record("operator.desktop_login", actor_id=user.id, ip=ip)
+    return TokenOut(access_token=create_access_token(str(user.id), timedelta(days=30)))

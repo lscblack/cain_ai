@@ -25,6 +25,8 @@ MANAGED_KEYS: dict[str, tuple[str, str, bool]] = {
     "openrouter_api_key": ("OPENROUTER_API_KEY", "OpenRouter (AI)", True),
     "openai_api_key": ("OPENAI_API_KEY", "OpenAI (AI)", True),
     "ai_model": ("AI_MODEL", "AI model id", False),
+    "kai_llm_backend": ("KAI_LLM_BACKEND", "KAI chat backend (llamacpp | ollama)", False),
+    "llamacpp_base_url": ("LLAMACPP_BASE_URL", "llama.cpp server URL", False),
     "kai_ollama_model": ("KAI_OLLAMA_MODEL", "KAI chat model (Ollama)", False),
     "ollama_base_url": ("OLLAMA_BASE_URL", "Ollama endpoint URL", False),
     "tomtom_api_key": ("TOMTOM_API_KEY", "TomTom (map tiles)", True),

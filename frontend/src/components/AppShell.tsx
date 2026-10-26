@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderSearch,
@@ -29,6 +29,9 @@ import { StatusIndicator } from "@/components/StatusIndicator";
 import { PairMobile } from "@/components/PairMobile";
 import { PowerControl } from "@/components/PowerControl";
 import { useAuth } from "@/lib/auth";
+import { useActiveRuns } from "@/lib/kaiWork";
+
+const BASE_TITLE = document.title;
 
 const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: LayoutDashboard, label: "Dashboard", to: "/" },
@@ -56,6 +59,14 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { operator, logout } = useAuth();
   const [pairOpen, setPairOpen] = useState(false);
+  const runs = useActiveRuns();
+  const navigate = useNavigate();
+
+  // Visible even from another browser tab: "⏳ KAI working…" in the tab title.
+  useEffect(() => {
+    document.title = runs.length ? `⏳ KAI working… · ${BASE_TITLE}` : BASE_TITLE;
+    return () => { document.title = BASE_TITLE; };
+  }, [runs.length]);
 
   return (
     <div className="flex min-h-screen bg-base text-ink">
@@ -95,6 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ),
           )}
         </nav>
+        {!(window as any).kaiDesktop && (
         <div className="border-t border-line p-3">
           <button
             onClick={logout}
@@ -103,6 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <LogOut size={16} /> Sign out
           </button>
         </div>
+        )}
       </aside>
 
       {/* Main */}
@@ -113,6 +126,17 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span style={{ color: "var(--kai-hud)" }}>OPERATOR</span> / {operator?.email ?? "—"}
           </div>
           <div className="flex items-center gap-3">
+            {runs.length > 0 && (
+              <button
+                onClick={() => navigate(`/chat?c=${runs[0].conversation_id}`)}
+                title="KAI is working in the background — click to open"
+                className="flex items-center gap-2 rounded border px-2 py-1 text-xs hud-mono"
+                style={{ borderColor: "var(--kai-hud)", color: "var(--kai-hud)" }}
+              >
+                <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--kai-hud)" }} />
+                KAI working · {runs[0].activity}{runs.length > 1 ? ` (+${runs.length - 1})` : ""} · {runs[0].seconds}s
+              </button>
+            )}
             <button
               onClick={() => setPairOpen(true)}
               title="Pair mobile device (QR login)"

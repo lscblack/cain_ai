@@ -1,17 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  MessageSquare, Plus, Trash2, Send, Square, Wrench, AlertTriangle, Cpu, RefreshCw,
+  MessageSquare, Plus, Trash2, Send, Square, Wrench, AlertTriangle, Cpu, RefreshCw, Download, Play,
 } from "lucide-react";
 
+import { useSearchParams } from "react-router-dom";
 import {
-  chatApi, streamMessage, type Conversation, type ChatMessage, type ModelStatus, type Finding,
+  chatApi, streamMessage, attachStream, type Conversation, type ChatMessage, type ModelStatus,
+  type Finding, type SseEvent, type ToolPreview,
 } from "@/lib/chat";
-import { PageLoading } from "@/components/Async";
+import { useActiveRuns, pollActiveNow } from "@/lib/kaiWork";
+import { PageLoading, Spinner } from "@/components/Async";
+import { toolsApi } from "@/lib/tools";
+import { Markdown } from "@/components/Markdown";
+import { JsonView } from "@/components/JsonView";
 
 interface ToolEvent {
   operation: string;
   params?: any;
   result?: any;
+  skipped?: boolean;
+}
+interface PendingApproval {
+  operation: string;
+  params: Record<string, any>;
+  preview: ToolPreview;
+  step: number;
 }
 interface LiveTurn {
   content: string;
@@ -19,12 +32,38 @@ interface LiveTurn {
   findings: Finding[];
   error: string | null;
   thinking: boolean;
+  pending: PendingApproval | null;
 }
 
 const SEV_COLOR: Record<string, string> = {
   critical: "var(--kai-accent)", high: "var(--kai-accent)", medium: "#f59e0b",
   low: "var(--kai-hud)", info: "var(--kai-hud)",
 };
+
+function applyEvent(turn: LiveTurn, e: SseEvent) {
+  if (e.event === "thinking") turn.thinking = true;
+  else if (e.event === "tool_proposed") {
+    turn.pending = { operation: e.data.operation, params: e.data.params, preview: e.data.preview, step: e.data.step };
+    turn.thinking = false;
+  } else if (e.event === "tool_call") {
+    turn.pending = null;   // approved (or auto-approved) — now actually running
+    turn.tools.push({ operation: e.data.operation, params: e.data.params });
+    turn.thinking = false;
+  } else if (e.event === "tool_denied") {
+    turn.pending = null;
+    turn.tools.push({ operation: e.data.operation, params: e.data.params, skipped: true });
+    turn.thinking = false;
+  } else if (e.event === "tool_result") {
+    const last = turn.tools[turn.tools.length - 1];
+    if (last && last.operation === e.data.operation) last.result = e.data.result;
+    else turn.tools.push({ operation: e.data.operation, result: e.data.result });
+  } else if (e.event === "token") { turn.content += e.data.text; turn.thinking = false; }
+  else if (e.event === "message" || e.event === "final") {
+    turn.content = e.data.answer ?? e.data.content ?? turn.content;
+    if (e.data.findings) turn.findings = e.data.findings;
+    turn.thinking = false;
+  } else if (e.event === "error") { turn.error = e.data.message || e.data.code; turn.thinking = false; }
+}
 
 function ModelBadge({ status }: { status: ModelStatus | null }) {
   if (!status) return <span className="kai-metadata">checking model…</span>;
@@ -34,14 +73,108 @@ function ModelBadge({ status }: { status: ModelStatus | null }) {
     <div className="flex items-center gap-2" title={status.error || status.endpoint}>
       <Cpu size={14} style={{ color }} />
       <span className="hud-mono text-xs" style={{ color }}>
-        {status.model} · {ok ? "ready" : status.reachable ? "model missing" : "offline"}
+        {status.model} · {ok ? "ready" : status.reachable ? (status.backend === "llamacpp" ? "loading / unavailable" : "model missing") : "offline"}
+        {ok && status.backend ? ` · ${status.backend === "llamacpp" ? "llama.cpp" : "Ollama"}` : ""}
+        {ok && status.accelerator ? ` · ${status.accelerator}` : ""}
       </span>
     </div>
   );
 }
 
+function InstallNow({ tool, onDone }: { tool: string; onDone?: () => void }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [note, setNote] = useState("");
+  async function go() {
+    setState("busy"); setNote("Waiting for the system password prompt…");
+    try {
+      const r = await toolsApi.installNow({ capability: tool });
+      if (r.verify?.installed) {
+        setState("done");
+        setNote(`${tool} installed${r.verify.version ? ` (${r.verify.version})` : ""} — ask again to run it.`);
+        onDone?.();
+      } else {
+        setState("error");
+        setNote(r.outcome?.sudo_needs_password
+          ? "sudo needs a password — set TOOL_INSTALL_HELPER=pkexec or add a NOPASSWD rule."
+          : (r.request?.log?.split("\n").filter((l: string) => l.startsWith("E:")).join(" ") || r.request?.log?.slice(-300))
+            || r.outcome?.error || "install failed");
+      }
+    } catch (e: any) { setState("error"); setNote(e?.message || "install failed"); }
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      {state !== "done" && (
+        <button onClick={go} disabled={state === "busy"}
+          className="flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-panel disabled:opacity-40"
+          style={{ color: "var(--kai-verified)" }}>
+          {state === "busy" ? <Spinner size={12} /> : <Download size={12} />}
+          {state === "error" ? "retry install" : `Install ${tool} now`}
+        </button>
+      )}
+      {note && <span className="kai-metadata" style={{ color: state === "error" ? "var(--kai-accent)" : undefined }}>{note}</span>}
+    </div>
+  );
+}
+
+function ApprovalCard({ pending, onDecide, busy }: {
+  pending: PendingApproval; onDecide: (approved: boolean) => void; busy: boolean;
+}) {
+  const p = pending.preview;
+  const blocked = !p || !p.ok;
+  return (
+    <div className="my-2 rounded border p-3 text-xs" style={{ borderColor: "#f59e0b" }}>
+      <div className="flex items-center gap-2">
+        <Wrench size={13} style={{ color: "#f59e0b" }} />
+        <span className="hud-mono font-semibold" style={{ color: "#f59e0b" }}>KAI wants to run</span>
+        <span className="hud-mono" style={{ color: "var(--kai-hud)" }}>{pending.operation}</span>
+        {p?.posture && <span className="kai-metadata uppercase">{p.posture}</span>}
+      </div>
+      {!blocked && (
+        <pre className="mt-2 overflow-auto whitespace-pre-wrap break-words rounded border border-line bg-panel px-2 py-1.5 font-mono text-[12px]" style={{ color: "var(--kai-hud)" }}>
+          $ {p.preview}
+        </pre>
+      )}
+      {blocked && (
+        <div className="mt-2 text-muted">{p?.message || p?.error || "This tool call cannot run."}</div>
+      )}
+      {p?.needs_authorization && (
+        <div className="mt-1" style={{ color: "#f59e0b" }}>
+          Approving this will also add “{p.target}” to your authorized-targets list (active scan).
+        </div>
+      )}
+      {pending.params && Object.keys(pending.params).length > 0 && (
+        <div className="kai-metadata mt-1">{Object.entries(pending.params).map(([k, v]) => `${k}=${v}`).join("  ")}</div>
+      )}
+      <div className="mt-2 flex items-center gap-2">
+        <button onClick={() => onDecide(true)} disabled={busy || blocked}
+          className="flex items-center gap-1 rounded border px-3 py-1.5 font-semibold disabled:opacity-40"
+          style={{ borderColor: "var(--kai-verified)", color: "var(--kai-verified)" }}>
+          <Play size={12} /> Go ahead
+        </button>
+        <button onClick={() => onDecide(false)} disabled={busy}
+          className="rounded border border-line px-3 py-1.5 hover:bg-panel disabled:opacity-40">
+          Skip
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ToolCard({ t }: { t: ToolEvent }) {
+  if (t.skipped) {
+    return (
+      <div className="my-2 rounded border border-line bg-panel-2 p-2 text-xs">
+        <div className="flex items-center gap-2">
+          <Wrench size={12} className="text-muted" />
+          <span className="hud-mono text-muted">{t.operation}</span>
+          <span className="hud-mono" style={{ color: "#f59e0b" }}>● declined</span>
+        </div>
+        <div className="kai-metadata mt-1">You chose Skip — KAI did not run this.</div>
+      </div>
+    );
+  }
   const r = t.result || {};
+  const notInstalled = r.reason === "tool_not_installed" && r.tool && (r.install_hint?.source ?? "apt") === "apt";
   const status = r.status || (r.ok ? "ok" : "…");
   const color = r.ok ? "var(--kai-verified)" : status === "denied" || status === "blocked" ? "#f59e0b" : "var(--kai-accent)";
   const out = (r.stdout || "") + (r.stderr ? "\n" + r.stderr : "");
@@ -57,12 +190,14 @@ function ToolCard({ t }: { t: ToolEvent }) {
         <div className="kai-metadata mt-1">{Object.entries(t.params).map(([k, v]) => `${k}=${v}`).join("  ")}</div>
       )}
       {(r.message || r.error) && <div className="mt-1" style={{ color }}>{r.message || r.error}</div>}
+      {notInstalled && <InstallNow tool={r.tool} />}
+      {r.reason === "tool_not_installed" && !notInstalled && r.install_hint && (
+        <div className="kai-metadata mt-1">Source “{r.install_hint.source}” — install it manually, then retry.</div>
+      )}
       {out.trim() && (
         <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">{out.trim()}</pre>
       )}
-      {r.result && (
-        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">{JSON.stringify(r.result, null, 2)}</pre>
-      )}
+      {r.result && <JsonView value={r.result} />}
     </div>
   );
 }
@@ -75,7 +210,7 @@ function FindingCard({ f }: { f: Finding }) {
         <AlertTriangle size={12} style={{ color }} />
         <span className="font-semibold" style={{ color }}>{f.title}</span>
         <span className="hud-mono uppercase" style={{ color }}>{f.severity}</span>
-        <span className="kai-metadata">· {f.confidence} · {f.status}</span>
+        <span className="kai-metadata">· {f.status === f.confidence ? f.status : `${f.confidence} · ${f.status}`}</span>
       </div>
       {f.asset && <div className="kai-metadata mt-1">asset: {f.asset}{f.tool ? ` · tool: ${f.tool}` : ""}</div>}
       {f.description && <div className="mt-1 text-ink">{f.description}</div>}
@@ -99,7 +234,9 @@ function MessageBubble({ m }: { m: ChatMessage }) {
     <div className={`mb-4 ${isUser ? "text-right" : ""}`}>
       <div className="kai-metadata mb-1">{isUser ? "OPERATOR" : "KAI"}</div>
       <div className={`inline-block max-w-full rounded px-3 py-2 text-sm ${isUser ? "bg-panel-2" : "bg-panel"}`}>
-        <div className="whitespace-pre-wrap break-words text-left">{m.content}</div>
+        {isUser
+          ? <div className="whitespace-pre-wrap break-words text-left">{m.content}</div>
+          : <Markdown>{m.content}</Markdown>}
       </div>
       {!isUser && (m.tool_calls || []).map((t: any, i: number) => <ToolCard key={i} t={t} />)}
       {!isUser && findings.map((f, i) => <FindingCard key={i} f={f} />)}
@@ -114,12 +251,19 @@ export function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [useTools, setUseTools] = useState(true);
+  const [autoApprove, setAutoApprove] = useState(false);
+  const [deciding, setDeciding] = useState(false);
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [convLoading, setConvLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastSentRef = useRef<string>("");
+  const activeIdRef = useRef<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const runs = useActiveRuns(2000);
+  const workingIds = new Set(runs.map((r) => r.conversation_id));
+  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
   const loadConversations = useCallback(async () => {
     try { setConversations(await chatApi.listConversations()); } catch { /* */ }
@@ -132,7 +276,36 @@ export function Chat() {
     return () => clearInterval(id);
   }, [loadConversations]);
 
+  // Follow a turn that is running on the server (also used after navigating back).
+  const followRun = useCallback(async (id: string) => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const turn: LiveTurn = { content: "", tools: [], findings: [], error: null, thinking: true, pending: null };
+    setLive({ ...turn });
+    setStreaming(true);
+    try {
+      await attachStream(id, (e) => {
+        applyEvent(turn, e);
+        setLive({ ...turn, tools: [...turn.tools], findings: [...turn.findings] });
+      }, ctrl.signal);
+    } catch { /* aborted / network drop: the run continues server-side */ }
+    if (abortRef.current === ctrl) {
+      abortRef.current = null;
+      setStreaming(false);
+      setLive(null);
+      if (activeIdRef.current === id && !ctrl.signal.aborted) {
+        try { setMessages((await chatApi.getConversation(id)).messages); } catch { /* */ }
+      }
+      loadConversations();
+      pollActiveNow();
+    }
+  }, [loadConversations]);
+
   const openConversation = useCallback(async (id: string) => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreaming(false);
     setActiveId(id);
     setLive(null);
     setConvLoading(true);
@@ -141,7 +314,22 @@ export function Chat() {
       setMessages(detail.messages);
     } catch { setMessages([]); }
     finally { setConvLoading(false); }
-  }, []);
+    // If KAI is still working on this conversation, pick the live turn back up.
+    try {
+      const active = await chatApi.active();
+      if (active.some((r) => r.conversation_id === id)) followRun(id);
+    } catch { /* */ }
+  }, [followRun]);
+
+  // Deep-link from the global "KAI is working" pill: /chat?c=<conversation id>
+  useEffect(() => {
+    const c = params.get("c");
+    if (c && c !== activeIdRef.current) openConversation(c);
+    if (c) setParams({}, { replace: true });
+  }, [params, setParams, openConversation]);
+
+  // Leaving the page only detaches this view; the turn keeps running on the server.
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -177,7 +365,7 @@ export function Chat() {
       id: `local-${Date.now()}`, role: "user", content, tool_calls: null,
       tool_results: null, meta: {}, created_at: new Date().toISOString(),
     }]);
-    const turn: LiveTurn = { content: "", tools: [], findings: [], error: null, thinking: true };
+    const turn: LiveTurn = { content: "", tools: [], findings: [], error: null, thinking: true, pending: null };
     setLive({ ...turn });
     setStreaming(true);
     const ctrl = new AbortController();
@@ -185,23 +373,18 @@ export function Chat() {
 
     try {
       await streamMessage(convId!, content, useTools, (e) => {
-        if (e.event === "thinking") turn.thinking = true;
-        else if (e.event === "tool_call") { turn.tools.push({ operation: e.data.operation, params: e.data.params }); turn.thinking = false; }
-        else if (e.event === "tool_result") {
-          const last = turn.tools[turn.tools.length - 1];
-          if (last && last.operation === e.data.operation) last.result = e.data.result;
-          else turn.tools.push({ operation: e.data.operation, result: e.data.result });
-        } else if (e.event === "token") { turn.content += e.data.text; turn.thinking = false; }
-        else if (e.event === "message" || e.event === "final") {
-          turn.content = e.data.answer ?? e.data.content ?? turn.content;
-          if (e.data.findings) turn.findings = e.data.findings;
-          turn.thinking = false;
-        } else if (e.event === "error") { turn.error = e.data.message || e.data.code; turn.thinking = false; }
+        applyEvent(turn, e);
         setLive({ ...turn, tools: [...turn.tools], findings: [...turn.findings] });
-      }, ctrl.signal);
+      }, ctrl.signal, autoApprove);
     } catch (err: any) {
+      if (ctrl.signal.aborted) return;   // navigated away: the turn continues server-side
+      // connection dropped mid-turn: if KAI is still on it, re-attach instead of failing
+      try {
+        if ((await chatApi.active()).some((r) => r.conversation_id === convId)) { followRun(convId!); return; }
+      } catch { /* */ }
       turn.error = err?.message || "stream failed";
     } finally {
+      if (ctrl.signal.aborted || abortRef.current !== ctrl) return;
       setStreaming(false);
       abortRef.current = null;
       // Commit the live turn into the message list as a persisted-style assistant message.
@@ -217,7 +400,15 @@ export function Chat() {
   }
 
   function cancel() {
-    abortRef.current?.abort();
+    // Really stop the server-side turn (leaving the page does NOT).
+    if (activeId) chatApi.cancel(activeId).catch(() => {});
+  }
+
+  async function decide(approved: boolean) {
+    if (!activeId || deciding) return;
+    setDeciding(true);
+    try { await chatApi.approve(activeId, approved); } catch { /* the SSE stream reports the real outcome */ }
+    setDeciding(false);
   }
 
   function retryLast() {
@@ -249,7 +440,13 @@ export function Chat() {
             <div key={c.id}
               className={`group flex items-center justify-between rounded px-2 py-2 text-sm cursor-pointer ${activeId === c.id ? "bg-panel" : "hover:bg-panel-2"}`}
               onClick={() => openConversation(c.id)}>
-              <span className="truncate">{c.title}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                {workingIds.has(c.id) && (
+                  <span title="KAI is working on this" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full"
+                    style={{ background: "var(--kai-hud)" }} />
+                )}
+                <span className="truncate">{c.title}</span>
+              </span>
               <button onClick={(e) => { e.stopPropagation(); removeConversation(c.id); }}
                 className="opacity-0 group-hover:opacity-100" title="Delete">
                 <Trash2 size={13} className="text-muted hover:text-ink" />
@@ -276,7 +473,9 @@ export function Chat() {
               <AlertTriangle size={14} /> Model not ready
             </div>
             <div className="mt-1 text-muted">
-              {status.reachable
+              {status.backend === "llamacpp"
+                ? (status.error || `llama.cpp at ${status.endpoint} is not ready.`) + "  Start it with:  systemctl --user start kai-llama"
+                : status.reachable
                 ? `Ollama is reachable at ${status.endpoint} but the model "${status.model}" is not installed. Install it with:  ollama pull ${status.model}  (or create it from your Modelfile).`
                 : `Cannot reach Ollama at ${status.endpoint}. Start it with:  ollama serve  — ${status.error ?? ""}`}
             </div>
@@ -302,9 +501,10 @@ export function Chat() {
             <div className="mb-4">
               <div className="kai-metadata mb-1">KAI</div>
               {live.tools.map((t, i) => <ToolCard key={i} t={t} />)}
+              {live.pending && <ApprovalCard pending={live.pending} onDecide={decide} busy={deciding} />}
               {live.content && (
                 <div className="inline-block max-w-full rounded bg-panel px-3 py-2 text-sm">
-                  <div className="whitespace-pre-wrap break-words">{live.content}</div>
+                  <Markdown>{live.content}</Markdown>
                 </div>
               )}
               {live.thinking && !live.content && (
@@ -321,6 +521,13 @@ export function Chat() {
             <input type="checkbox" checked={useTools} onChange={(e) => setUseTools(e.target.checked)} />
             tools
           </label>
+          {useTools && (
+            <label className="flex items-center gap-1 text-xs text-muted"
+              title="Skip the Go ahead / Skip prompt and let KAI run tools immediately">
+              <input type="checkbox" checked={autoApprove} onChange={(e) => setAutoApprove(e.target.checked)} />
+              auto-run
+            </label>
+          )}
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}

@@ -1,0 +1,24 @@
+{
+  "name": "kai-desktop",
+  "version": "1.0.0",
+  "description": "KAI — native Linux desktop shell",
+  "main": "main.js",
+  "author": "KAI",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --linux AppImage deb"
+  },
+  "pnpm": { "onlyBuiltDependencies": ["electron"] },
+  "build": {
+    "appId": "net.nexventures.kai",
+    "productName": "KAI",
+    "linux": { "category": "Utility", "icon": "assets/icon.png", "target": ["AppImage", "deb"] },
+    "files": ["main.js", "splash.html", "preload.js", "assets/**"]
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

@@ -5,7 +5,13 @@ import { api } from "@/lib/api";
 
 interface ModelStatus {
   model: string; reachable: boolean; model_installed: boolean; ready: boolean; error: string | null;
+  backend?: "ollama" | "llamacpp"; accelerator?: string | null;
 }
+
+const BACKENDS: { id: "llamacpp" | "ollama"; label: string; hint: string }[] = [
+  { id: "llamacpp", label: "llama.cpp", hint: "llama-server · GPU offload (Vulkan / CUDA)" },
+  { id: "ollama", label: "Ollama", hint: "Ollama server" },
+];
 
 function ChatModelSelector() {
   const [models, setModels] = useState<string[]>([]);
@@ -21,6 +27,20 @@ function ChatModelSelector() {
     api.get<ModelStatus>("/chat/status").then((s) => { setStatus(s); setChoice((c) => c || s.model); }).catch(() => setStatus(null));
   }
   useEffect(load, []);
+
+  async function switchBackend(id: "llamacpp" | "ollama") {
+    setSaving(true); setMsg(null);
+    try {
+      await api.post("/settings/keys", { values: { kai_llm_backend: id } });
+      setMsg(`Chat now runs on ${id === "llamacpp" ? "llama.cpp" : "Ollama"}. New chats use it immediately.`);
+      setChoice("");
+      load();
+    } catch {
+      setMsg("Failed to switch backend.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function save() {
     if (!choice) return;
@@ -48,10 +68,29 @@ function ChatModelSelector() {
         <span className="hud-mono uppercase text-xs" style={{ color: "var(--kai-hud)" }}>◢ KAI chat model</span>
         {status && (
           <span className="kai-metadata" style={{ color }}>
-            ● {status.ready ? `${status.model} ready` : status.reachable ? `${status.model} not installed` : "Ollama offline"}
+            ● {status.ready ? `${status.model} ready` : status.reachable ? (status.error || `${status.model} not installed`) : `${status.backend === "llamacpp" ? "llama.cpp" : "Ollama"} offline`}
+            {status.ready && status.accelerator ? ` · ${status.accelerator}` : ""}
           </span>
         )}
       </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {BACKENDS.map((b) => {
+          const on = (status?.backend ?? "ollama") === b.id;
+          return (
+            <button key={b.id} onClick={() => !on && switchBackend(b.id)} disabled={saving} title={b.hint}
+              className={`rounded-md border px-3 py-1.5 text-xs disabled:opacity-40 ${on ? "" : "border-line text-muted hover:bg-panel-2"}`}
+              style={on ? { borderColor: "var(--kai-hud)", color: "var(--kai-hud)" } : undefined}>
+              {on ? "● " : ""}{b.label}
+            </button>
+          );
+        })}
+      </div>
+      {status?.backend === "llamacpp" ? (
+        <div className="kai-metadata text-muted">
+          llama.cpp serves one model, chosen when its server starts (<span className="font-mono">kai-llama</span> service).
+          Serving <span className="font-mono">{status.model}</span>.
+        </div>
+      ) : (
       <div className="flex flex-wrap items-center gap-2">
         <select
           value={choice}
@@ -69,10 +108,11 @@ function ChatModelSelector() {
         </button>
         <button onClick={load} className="rounded-md border border-line px-2 py-2 text-xs hover:bg-panel-2">refresh</button>
       </div>
+      )}
       {msg && <div className="mt-2 kai-metadata" style={{ color: "var(--kai-verified)" }}>{msg}</div>}
       <div className="kai-metadata mt-2 text-muted">
-        Lists the models your local Ollama has. Switching writes KAI_OLLAMA_MODEL to the backend .env
-        and hot-reloads — KAI never silently falls back to a different model.
+        Pick the inference engine. Switching writes KAI_LLM_BACKEND to the backend .env and hot-reloads —
+        KAI never silently falls back to a different engine or a cloud model.
       </div>
     </div>
   );

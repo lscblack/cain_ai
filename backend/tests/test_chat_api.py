@@ -133,3 +133,136 @@ async def test_streamed_plain_tokens(client, auth_headers):
     assert tokens == "Hello world"
     detail = (await client.get(f"/chat/conversations/{cid}", headers=auth_headers)).json()
     assert detail["messages"][-1]["content"] == "Hello world"
+
+
+async def test_turn_survives_client_disconnect_and_can_reattach(client, auth_headers):
+    """The turn runs server-side: a client that stops reading doesn't cancel it,
+    the answer is still persisted, and /stream replays it for a re-attaching client."""
+    import asyncio
+
+    final = json.dumps({"action": "final", "answer": "Finished while you were away.", "findings": []})
+    _use_fake(client, FakeOllama(replies=[final]))
+    cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
+    async with client.stream("POST", f"/chat/conversations/{cid}/messages",
+                             json={"content": "scan something", "use_tools": True},
+                             headers=auth_headers) as resp:
+        assert resp.status_code == 200
+        # read nothing more: simulate the user leaving the page
+    for _ in range(50):
+        detail = (await client.get(f"/chat/conversations/{cid}", headers=auth_headers)).json()
+        if [m["role"] for m in detail["messages"]] == ["user", "assistant"]:
+            break
+        await asyncio.sleep(0.1)
+    assert detail["messages"][-1]["content"] == "Finished while you were away."
+    again = await client.get(f"/chat/conversations/{cid}/stream", headers=auth_headers)
+    kinds = [e["event"] for e in _parse_sse(again.text)]
+    assert "final" in kinds and "done" in kinds
+    assert (await client.get("/chat/active", headers=auth_headers)).json() == []
+
+
+async def _wait_for_pending(conv_id: str, timeout: float = 5.0):
+    """Poll the in-process ChatRun for a proposed tool call (same event loop as
+    the app under test, so this doesn't need to read the streaming body)."""
+    import asyncio
+    import uuid as uuid_mod
+    from app import chat_runs as chat_runs_mod
+
+    cid = uuid_mod.UUID(conv_id)
+    for _ in range(int(timeout / 0.02)):
+        run = chat_runs_mod.get_run(cid)
+        if run is not None and run.pending_approval:
+            return run
+        await asyncio.sleep(0.02)
+    raise AssertionError("tool call never reached the approval gate")
+
+
+async def test_tool_call_pauses_for_approval_and_runs_after_approve(client, auth_headers, monkeypatch):
+    """The operator sees the real command BEFORE it runs, and approving it is
+    what makes it actually execute."""
+    import asyncio
+    from app.security import service as service_mod
+
+    tool_call = json.dumps({"action": "tool", "operation": "cve.lookup",
+                            "params": {"ecosystem": "PyPI", "package": "requests"}})
+    final = json.dumps({"action": "final", "answer": "No advisories found.", "findings": []})
+    _use_fake(client, FakeOllama(replies=[tool_call, final]))
+
+    calls = []
+
+    async def fake_run_operation(session, *, user_id, op_key, params, conversation_id=None):
+        calls.append(op_key)
+        return {"ok": True, "status": "ok", "tool": "osv", "operation": op_key, "result": {"vulns": []}}
+
+    monkeypatch.setattr(service_mod, "run_operation", fake_run_operation)
+
+    cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
+    task = asyncio.ensure_future(client.post(
+        f"/chat/conversations/{cid}/messages",
+        json={"content": "check requests for known CVEs", "use_tools": True}, headers=auth_headers,
+    ))
+    run = await _wait_for_pending(cid)
+    assert not calls, "must not run before the operator approves it"
+    assert run.pending_approval["operation"] == "cve.lookup"
+    assert run.pending_approval["preview"]["ok"] is True
+    assert run.pending_approval["preview"]["tool"] == "osv"
+
+    appr = await client.post(f"/chat/conversations/{cid}/approve", json={"approved": True}, headers=auth_headers)
+    assert appr.status_code == 200 and appr.json() == {"ok": True, "approved": True}
+
+    resp = await task
+    events = _parse_sse(resp.text)
+    kinds = [e["event"] for e in events]
+    assert kinds.index("tool_proposed") < kinds.index("tool_call") < kinds.index("tool_result")
+    assert calls == ["cve.lookup"]
+    assert "done" in kinds
+
+
+async def test_declining_a_proposed_tool_call_skips_it(client, auth_headers, monkeypatch):
+    import asyncio
+    from app.security import service as service_mod
+
+    tool_call = json.dumps({"action": "tool", "operation": "cve.lookup",
+                            "params": {"ecosystem": "PyPI", "package": "requests"}})
+    final = json.dumps({"action": "final", "answer": "I could not check — you declined the lookup.", "findings": []})
+    _use_fake(client, FakeOllama(replies=[tool_call, final]))
+
+    calls = []
+    monkeypatch.setattr(service_mod, "run_operation",
+                        lambda *a, **k: calls.append(1) or {"ok": True, "status": "ok"})
+
+    cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
+    task = asyncio.ensure_future(client.post(
+        f"/chat/conversations/{cid}/messages",
+        json={"content": "check requests for known CVEs", "use_tools": True}, headers=auth_headers,
+    ))
+    await _wait_for_pending(cid)
+    appr = await client.post(f"/chat/conversations/{cid}/approve", json={"approved": False}, headers=auth_headers)
+    assert appr.json()["approved"] is False
+
+    resp = await task
+    kinds = [e["event"] for e in _parse_sse(resp.text)]
+    assert "tool_proposed" in kinds and "tool_denied" in kinds and "tool_call" not in kinds
+    assert calls == []
+
+
+async def test_auto_approve_skips_the_gate(client, auth_headers, monkeypatch):
+    """The old (pre-approval) behaviour is still available per-message."""
+    from app.security import service as service_mod
+
+    final = json.dumps({"action": "final", "answer": "Here you go.", "findings": []})
+    _use_fake(client, FakeOllama(replies=[final]))
+    monkeypatch.setattr(service_mod, "run_operation", lambda *a, **k: {"ok": True, "status": "ok"})
+
+    cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
+    resp = await client.post(
+        f"/chat/conversations/{cid}/messages",
+        json={"content": "hi", "use_tools": True, "auto_approve": True}, headers=auth_headers,
+    )
+    kinds = [e["event"] for e in _parse_sse(resp.text)]
+    assert "tool_proposed" not in kinds and "done" in kinds
+
+
+async def test_approve_with_nothing_pending_is_a_conflict(client, auth_headers):
+    cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
+    r = await client.post(f"/chat/conversations/{cid}/approve", json={"approved": True}, headers=auth_headers)
+    assert r.status_code == 404  # no run at all for this conversation yet

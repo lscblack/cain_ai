@@ -20,10 +20,20 @@ from dataclasses import dataclass, field
 from app.core.config import get_settings
 from app.security.redact import redact
 
+import os as _os
+
+# Some tools (e.g. lynis) hard-require $HOME to exist and refuse to run without
+# it, but the real $HOME must NOT be exposed here — it would let a tool read the
+# operator's dotfiles (.ssh, .aws, …). Give them a dedicated, empty, writable
+# scratch directory instead.
+_TOOL_HOME = "/tmp/kai-tool-home"
+_os.makedirs(_TOOL_HOME, exist_ok=True)
+
 _SAFE_ENV = {
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
+    "HOME": _TOOL_HOME,
 }
 
 
@@ -41,7 +51,7 @@ class ExecResult:
 
     def to_dict(self) -> dict:
         return {
-            "argv_display": _display_argv(self.argv),
+            "argv_display": display_argv(self.argv),
             "status": self.status,
             "exit_code": self.exit_code,
             "duration_ms": self.duration_ms,
@@ -53,7 +63,7 @@ class ExecResult:
         }
 
 
-def _display_argv(argv: list[str]) -> str:
+def display_argv(argv: list[str]) -> str:
     # The executable path's basename + args, redacted — safe to show/log.
     if not argv:
         return ""

@@ -52,6 +52,8 @@ class OllamaStatus:
     model_installed: bool
     models_available: list[str] = field(default_factory=list)
     error: str | None = None
+    backend: str = "ollama"            # "ollama" | "llamacpp"
+    accelerator: str | None = None     # e.g. "GPU (CUDA) · 37/37 layers" or "CPU"
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +63,8 @@ class OllamaStatus:
             "model_installed": self.model_installed,
             "models_available": self.models_available,
             "error": self.error,
+            "backend": self.backend,
+            "accelerator": self.accelerator,
             # A single convenience flag the UI can gate on.
             "ready": self.reachable and self.model_installed,
         }
@@ -254,8 +258,14 @@ _provider: OllamaProvider | None = None
 
 
 def get_ollama_provider() -> OllamaProvider:
-    """Process-wide default provider (reads current settings once)."""
+    """Process-wide chat provider for the selected backend (KAI_LLM_BACKEND:
+    ``llamacpp`` or ``ollama``). Named for history; both share one interface."""
     global _provider
     if _provider is None:
-        _provider = OllamaProvider()
+        if get_settings().kai_llm_backend.lower() in ("llamacpp", "llama.cpp", "llama-cpp"):
+            from app.ai.llamacpp import LlamaCppProvider
+
+            _provider = LlamaCppProvider()
+        else:
+            _provider = OllamaProvider()
     return _provider

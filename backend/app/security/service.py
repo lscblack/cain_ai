@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.database.models.security import ToolExecution
 from app.security import registry, targets
-from app.security.executor import ExecResult, run_argv
+from app.security.executor import ExecResult, display_argv, run_argv
 from app.security.redact import redact
 from app.security.validate import ArgError
 
@@ -92,6 +92,66 @@ async def _auto_authorize(session: AsyncSession, user_id: uuid.UUID, host: str, 
         detail={"target": host, "operation": op_key},
     ))
     await session.flush()
+
+
+async def preview_operation(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    op_key: str,
+    params: dict,
+) -> dict:
+    """Resolve + validate a proposed tool call WITHOUT running it: same checks as
+    :func:`run_operation` (installed, authorization) plus building its real argv,
+    so the operator can see exactly what would execute before approving it."""
+    found = registry.get_operation(op_key)
+    if not found:
+        return {"ok": False, "status": "error", "error": f"unknown operation: {op_key}"}
+    tool, op = found
+    params = params or {}
+    target = str(params.get(op.target_param)) if op.target_param and params.get(op.target_param) else None
+
+    disc = await registry.discover(tool)
+    if not disc.installed:
+        return {
+            "ok": False, "status": "blocked", "reason": "tool_not_installed",
+            "tool": tool.name, "operation": op_key,
+            "message": f"'{tool.name}' is not installed (package: {tool.package}, source: {tool.source}).",
+            "install_hint": {"package": tool.package, "source": tool.source},
+        }
+
+    needs_authorization = False
+    if op.requires_authorization and target:
+        from app.security.validate import ArgError as _ArgError
+        from app.security.validate import target_host as _target_host
+
+        try:
+            norm_host = _target_host(target)
+        except _ArgError as exc:
+            return {"ok": False, "status": "error", "error": f"invalid target: {exc}"}
+        target = norm_host
+        needs_authorization = not await targets.is_authorized(session, user_id, target)
+
+    if op.pyrun is not None:
+        preview = f"(builtin) {tool.name}.{op.key}"
+    else:
+        try:
+            argv = op.build_argv(disc.path, params)
+        except ArgError as exc:
+            return {"ok": False, "status": "error", "error": f"invalid argument: {exc}"}
+        preview = display_argv(argv)
+
+    return {
+        "ok": True,
+        "tool": tool.name,
+        "operation": op_key,
+        "posture": op.posture,
+        "requires_authorization": op.requires_authorization,
+        "needs_authorization": needs_authorization,
+        "target": target,
+        "preview": preview,
+        "params": params,
+    }
 
 
 async def run_operation(
@@ -179,7 +239,8 @@ async def run_operation(
             argv = op.build_argv(disc.path, params)  # may raise ArgError
             stdin = b"" if tool.name == "openssl" else None
             res = await run_argv(
-                argv, timeout=s.tool_exec_timeout_s, max_bytes=s.tool_output_max_bytes, stdin=stdin
+                argv, timeout=op.timeout_s or s.tool_exec_timeout_s,
+                max_bytes=s.tool_output_max_bytes, stdin=stdin
             )
     except ArgError as exc:
         res = ExecResult(argv=[], status="error", error=f"invalid argument: {exc}")

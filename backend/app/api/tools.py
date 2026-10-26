@@ -45,6 +45,7 @@ async def inventory(
     now = datetime.now(timezone.utc).isoformat()
     tools = list(registry.ALL_TOOLS)
     discs = await asyncio.gather(*(registry.discover(t) for t in tools))
+    avail = await install_mod.apt_availability([t.package for t in tools if t.source == "apt" and t.package])
     tools_out = []
     for tool, disc in zip(tools, discs):
         # upsert verification record
@@ -65,6 +66,7 @@ async def inventory(
             "purpose": tool.purpose,
             "package": tool.package,
             "source": tool.source,
+            "apt_available": avail.get(tool.package) if tool.source == "apt" else None,
             "categories": list(tool.categories),
             "installed": disc.installed,
             "path": disc.path,
@@ -354,6 +356,7 @@ async def reject_install(
 @router.post("/install/requests/{req_id}/approve")
 async def approve_install(
     req_id: uuid.UUID,
+    reinstall: bool = False,
     operator: User = Depends(get_current_operator),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -362,15 +365,22 @@ async def approve_install(
     req = await _get_install_or_404(req_id, operator.id, session)
     if req.status not in ("pending", "approved", "failed"):
         raise HTTPException(status_code=409, detail=f"request already {req.status}")
+    return await _execute_install(req, operator, session, reinstall)
+
+
+async def _execute_install(
+    req: InstallRequest, operator: User, session: AsyncSession, reinstall: bool,
+) -> dict:
     req.status = "installing"
     req.decided_by = operator.id
     req.decided_at = datetime.now(timezone.utc).isoformat()
     session.add(req)
-    session.add(AuditLog(actor_id=operator.id, action="install.approve", detail={"package": req.package}))
+    session.add(AuditLog(actor_id=operator.id, action="install.approve",
+                         detail={"package": req.package, "reinstall": reinstall}))
     await session.flush()
     await session.commit()
 
-    outcome = await install_mod.perform_install(req.package)
+    outcome = await install_mod.perform_install(req.package, reinstall=reinstall)
     # Verify against the real host regardless of reported exit code.
     verify_name = req.capability or req.package
     verify = await install_mod.verify_tool(verify_name)
@@ -384,10 +394,136 @@ async def approve_install(
     session.add(req)
     session.add(AuditLog(actor_id=operator.id, action="install.result",
                          detail={"package": req.package, "status": req.status,
-                                 "verified": verify.get("installed")}))
+                                 "reinstall": reinstall, "verified": verify.get("installed")}))
     await session.flush()
     return {"request": _install_out(req), "outcome": {k: outcome.get(k) for k in
             ("ok", "status", "exit_code", "error", "sudo_needs_password")}, "verify": verify}
+
+
+class InstallNowBody(BaseModel):
+    package: str | None = None
+    capability: str | None = None
+    reinstall: bool = False
+    reason: str = ""
+
+
+def _apt_only(capability: str | None) -> None:
+    tool = registry.get_tool(capability) if capability else None
+    if tool is not None and tool.source != "apt":
+        raise HTTPException(
+            status_code=422,
+            detail=(f"'{tool.name}' comes from {tool.source}, not apt — KAI only installs apt "
+                    f"packages. Install it manually, then press refresh."),
+        )
+
+
+@router.post("/install/now")
+async def install_now(
+    body: InstallNowBody,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """One-click install / reinstall. The operator pressing the button IS the
+    approval; the request is still recorded and audited like any other."""
+    _apt_only(body.capability)
+    pkg, cap = _resolve_package(body.package, body.capability)
+    try:
+        pkg = V.package_name(pkg)
+    except V.ArgError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    plan = await install_mod.plan_install(pkg)
+    if not plan.get("available") and not plan.get("already_installed"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"package '{pkg}' is not available in the configured apt sources",
+        )
+    if plan.get("already_installed") and not body.reinstall:
+        verify = await install_mod.verify_tool(cap or pkg)
+        return {"request": None, "outcome": {"ok": True, "status": "already_installed"},
+                "verify": verify, "plan": plan}
+    req = InstallRequest(
+        user_id=operator.id, capability=cap, package=pkg, source="apt",
+        reason=(body.reason or ("reinstall" if body.reinstall else "install now"))[:1000],
+        needs_root=True, status="pending",
+    )
+    session.add(req)
+    session.add(AuditLog(actor_id=operator.id, action="install.request", detail={"package": pkg}))
+    await session.flush()
+    await session.refresh(req)
+    out = await _execute_install(req, operator, session, body.reinstall)
+    out["plan"] = plan
+    return out
+
+
+class InstallBatchBody(BaseModel):
+    capabilities: list[str] = Field(min_length=1, max_length=150)
+    reinstall: bool = False
+
+
+@router.post("/install/batch")
+async def install_batch(
+    body: InstallBatchBody,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Install many tools with ONE privileged apt call (one polkit prompt).
+    Non-apt tools and packages missing from apt are skipped and reported."""
+    import asyncio
+
+    skipped: list[dict] = []
+    wanted: dict[str, list[str]] = {}  # package -> tool names
+    for cap in dict.fromkeys(body.capabilities):
+        tool = registry.get_tool(cap)
+        if tool is None or not tool.package:
+            skipped.append({"tool": cap, "reason": "unknown tool or no package"})
+        elif tool.source != "apt":
+            skipped.append({"tool": cap, "reason": f"source is {tool.source}, not apt"})
+        else:
+            wanted.setdefault(tool.package, []).append(cap)
+
+    plans = dict(zip(wanted, await asyncio.gather(*(install_mod.plan_install(p) for p in wanted))))
+    todo: list[str] = []
+    for pkg, plan in plans.items():
+        if not plan.get("ok"):
+            skipped.extend({"tool": t, "reason": plan.get("error", "invalid package")} for t in wanted[pkg])
+        elif plan.get("already_installed") and not body.reinstall:
+            skipped.extend({"tool": t, "reason": "already installed"} for t in wanted[pkg])
+        elif not plan.get("available") and not plan.get("already_installed"):
+            skipped.extend({"tool": t, "reason": "not available in apt sources"} for t in wanted[pkg])
+        else:
+            todo.append(pkg)
+
+    if not todo:
+        return {"installed": [], "failed": [], "skipped": skipped, "outcome": None}
+
+    session.add(AuditLog(actor_id=operator.id, action="install.batch",
+                         detail={"packages": todo, "reinstall": body.reinstall}))
+    await session.flush()
+    await session.commit()
+    outcome = await install_mod.perform_install_many(todo, reinstall=body.reinstall, timeout=3600)
+
+    installed, failed = [], []
+    for pkg in todo:
+        for name in wanted[pkg]:
+            verify = await install_mod.verify_tool(name)
+            ok = bool(outcome.get("ok") and verify.get("installed"))
+            req = InstallRequest(
+                user_id=operator.id, capability=name, package=pkg, source="apt",
+                reason="batch reinstall" if body.reinstall else "batch install",
+                needs_root=True, status="installed" if ok else "failed",
+                installed_version=verify.get("version") if ok else None,
+                log=(outcome.get("log") or "")[-4000:],
+                decided_by=operator.id, decided_at=datetime.now(timezone.utc).isoformat(),
+            )
+            session.add(req)
+            (installed if ok else failed).append({"tool": name, "package": pkg,
+                                                  "version": verify.get("version")})
+    session.add(AuditLog(actor_id=operator.id, action="install.batch.result",
+                         detail={"installed": len(installed), "failed": len(failed)}))
+    await session.flush()
+    return {"installed": installed, "failed": failed, "skipped": skipped,
+            "outcome": {k: outcome.get(k) for k in ("ok", "status", "exit_code", "error",
+                                                    "sudo_needs_password")}}
 
 
 def _install_out(r: InstallRequest) -> dict:

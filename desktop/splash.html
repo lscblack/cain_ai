@@ -1,0 +1,17 @@
+<!doctype html><meta charset="utf-8"><title>KAI</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0f17;color:#cfd8e6;font:15px system-ui,sans-serif}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
+  h1{margin:0;font-size:44px;letter-spacing:.3em;color:#5eead4}
+  #s{opacity:.8;min-height:1.4em;text-align:center;max-width:70ch}
+  .bar{width:220px;height:3px;background:#1b2433;overflow:hidden;border-radius:2px}
+  .bar i{display:block;width:40%;height:100%;background:#5eead4;animation:m 1.2s infinite ease-in-out}
+  @keyframes m{0%{margin-left:-40%}100%{margin-left:100%}}
+  button{background:#1b2433;color:#cfd8e6;border:1px solid #2b3a52;padding:8px 16px;border-radius:6px;cursor:pointer;display:none}
+</style>
+<h1>KAI</h1><div class="bar" id="bar"><i></i></div><div id="s">Starting…</div>
+<button id="r" onclick="location.href='kai://retry'">Retry</button>
+<script>
+  window.setStatus=(t,err)=>{document.getElementById('s').textContent=t;
+    if(err){document.getElementById('bar').style.display='none';document.getElementById('r').style.display='block'}};
+</script>

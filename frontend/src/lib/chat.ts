@@ -11,6 +11,8 @@ export interface ModelStatus {
   models_available: string[];
   error: string | null;
   ready: boolean;
+  backend?: "ollama" | "llamacpp";
+  accelerator?: string | null;
 }
 
 export interface Conversation {
@@ -54,6 +56,24 @@ export interface SseEvent {
   data: any;
 }
 
+/** What `service.preview_operation` returns: the real command KAI is about to
+ * run, so the operator sees it before it happens. */
+export interface ToolPreview {
+  ok: boolean;
+  tool?: string;
+  operation?: string;
+  posture?: string;
+  requires_authorization?: boolean;
+  needs_authorization?: boolean;
+  target?: string | null;
+  preview?: string;         // the redacted command line (or "(builtin) …")
+  params?: Record<string, any>;
+  status?: string;          // present when ok=false, e.g. "blocked"
+  reason?: string;
+  message?: string;
+  error?: string;
+}
+
 // ───────────────────────── REST ───────────────────────────────────── //
 export const chatApi = {
   status: () => api.get<ModelStatus>("/chat/status"),
@@ -66,36 +86,32 @@ export const chatApi = {
   renameConversation: (id: string, title: string) =>
     api.patch<Conversation>(`/chat/conversations/${id}`, { title }),
   deleteConversation: (id: string) => api.del<void>(`/chat/conversations/${id}`),
+  active: () => api.get<ActiveRun[]>("/chat/active"),
+  cancel: (id: string) => api.post<{ cancelled: boolean }>(`/chat/conversations/${id}/cancel`),
+  approve: (id: string, approved: boolean) =>
+    api.post<{ ok: boolean; approved: boolean }>(`/chat/conversations/${id}/approve`, { approved }),
 };
 
 // ───────────────────────── SSE streaming ──────────────────────────── //
-export async function streamMessage(
-  conversationId: string,
-  content: string,
-  useTools: boolean,
-  onEvent: (e: SseEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
+export interface ActiveRun {
+  conversation_id: string;
+  activity: string;
+  started_at: number;
+  seconds: number;
+}
+
+function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
 
-  const resp = await fetch(`${BASE}/chat/conversations/${conversationId}/messages`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ content, use_tools: useTools }),
-    signal,
-  });
-  if (!resp.ok || !resp.body) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(text || `request failed (${resp.status})`);
-  }
-
+async function readSse(resp: Response, onEvent: (e: SseEvent) => void): Promise<void> {
+  if (!resp.body) return;
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let evName = "message";
-
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -103,7 +119,7 @@ export async function streamMessage(
     const frames = buffer.split("\n\n");
     buffer = frames.pop() ?? "";
     for (const frame of frames) {
-      evName = "message";
+      let evName = "message";
       let dataLine = "";
       for (const line of frame.split("\n")) {
         if (line.startsWith("event: ")) evName = line.slice(7).trim();
@@ -118,4 +134,41 @@ export async function streamMessage(
       }
     }
   }
+}
+
+/** Send a message. The turn runs on the server; this connection only follows it. */
+export async function streamMessage(
+  conversationId: string,
+  content: string,
+  useTools: boolean,
+  onEvent: (e: SseEvent) => void,
+  signal?: AbortSignal,
+  autoApprove = false,
+): Promise<void> {
+  const resp = await fetch(`${BASE}/chat/conversations/${conversationId}/messages`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ content, use_tools: useTools, auto_approve: autoApprove }),
+    signal,
+  });
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(text || `request failed (${resp.status})`);
+  }
+  await readSse(resp, onEvent);
+}
+
+/** Re-attach to a turn that is still running (replays it from the start). */
+export async function attachStream(
+  conversationId: string,
+  onEvent: (e: SseEvent) => void,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const resp = await fetch(`${BASE}/chat/conversations/${conversationId}/stream`, {
+    headers: authHeaders(),
+    signal,
+  });
+  if (resp.status === 204 || !resp.ok || !resp.body) return false;
+  await readSse(resp, onEvent);
+  return true;
 }

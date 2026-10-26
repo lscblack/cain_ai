@@ -22,6 +22,7 @@ export interface ToolInfo {
   purpose: string;
   package: string;
   source: string;
+  apt_available: boolean | null;
   categories: string[];
   installed: boolean;
   path: string | null;
@@ -87,6 +88,10 @@ export const toolsApi = {
     api.post<{ request: InstallReq; plan: any }>("/tools/install/requests", body),
   approveInstall: (id: string) => api.post<any>(`/tools/install/requests/${id}/approve`),
   rejectInstall: (id: string) => api.post<InstallReq>(`/tools/install/requests/${id}/reject`),
+  installNow: (body: { capability?: string; package?: string; reinstall?: boolean }) =>
+    api.post<InstallNowResult>("/tools/install/now", body),
+  installBatch: (capabilities: string[], reinstall = false) =>
+    api.post<InstallBatchResult>("/tools/install/batch", { capabilities, reinstall }),
   sweep: (body: Record<string, string>) => api.post<SweepResult>("/tools/sweep", body),
 };
 
@@ -104,4 +109,16 @@ export interface SweepResult {
     summary: string;
   }[];
   note: string;
+}
+
+export interface InstallNowResult {
+  request: InstallReq | null;
+  outcome: { ok: boolean; status: string; error?: string | null; sudo_needs_password?: boolean };
+  verify: { installed: boolean; version: string | null; path: string | null };
+}
+export interface InstallBatchResult {
+  installed: { tool: string; package: string; version: string | null }[];
+  failed: { tool: string; package: string }[];
+  skipped: { tool: string; reason: string }[];
+  outcome: { ok: boolean; status: string; error?: string | null; sudo_needs_password?: boolean } | null;
 }
