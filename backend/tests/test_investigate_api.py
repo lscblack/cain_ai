@@ -156,3 +156,102 @@ async def test_client_disconnect_cancels_run(monkeypatch):
     await asyncio.sleep(0)
     assert state["task"].done() and state.get("cancelled")
     assert closed.get("closed") and not closed.get("committed")
+
+
+async def _audit_rows():
+    async with _session_maker() as s:
+        return (await s.execute(select(AuditLog).where(AuditLog.action == "people.investigate"))).scalars().all()
+
+
+async def test_streaming_audit_detail(client, auth_headers, seeded):
+    await client.post("/enrich/people/investigate", json={"nid": seeded}, headers=auth_headers)
+    d = (await _audit_rows())[0].detail
+    assert d["query"]["nid"] == seeded and d["query"]["web"] is False
+    assert d["agents"] == ["db", "relations"]
+    assert d["found"] is True
+
+
+async def test_audit_survives_disconnect_after_result(client, auth_headers, seeded):
+    uid = uuid.uuid4()
+    gen = inv._stream(uid, Request(nid=seeded))
+    async for chunk in gen:
+        if chunk.startswith("event: result"):
+            break
+    await gen.aclose()
+    rows = await _audit_rows()
+    assert len(rows) == 1 and rows[0].actor_id == uid
+
+
+async def test_web_only_writes_audit_and_notes_failure(client, auth_headers, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("offline")
+    import app.agents.web_agent as wa
+    monkeypatch.setattr(wa, "gather_dossier", boom)
+    r = await client.get("/enrich/people/web:Jean%20Paul/investigate", headers=auth_headers)
+    assert r.status_code == 200
+    b = r.json()
+    assert any(n.startswith("web:") for n in b["notes"]), b["notes"]
+    d = (await _audit_rows())[0].detail
+    assert d == {"query": {"name": "Jean Paul", "web_only": True}, "agents": ["web"], "found": False}
+
+
+async def test_web_only_name_validation(client, auth_headers):
+    r = await client.get("/enrich/people/web:%20%20/investigate", headers=auth_headers)
+    assert r.status_code == 400 and r.json() == {"detail": "empty name"}
+    r = await client.get("/enrich/people/web:" + "a" * 201 + "/investigate", headers=auth_headers)
+    assert r.status_code == 400 and r.json() == {"detail": "name too long"}
+
+
+async def _drain(gen):
+    return [c async for c in gen]
+
+
+async def test_error_event_is_generic(monkeypatch):
+    async def bad(*a, **k):
+        raise RuntimeError("postgresql://user:secret@host/db")
+    monkeypatch.setattr(inv, "run_investigation", bad)
+    out = await _drain(inv._stream(uuid.uuid4(), Request(nid="1")))
+    events = _parse("".join(out))
+    assert [e for e, _ in events] == ["error"]
+    assert events[0][1] == {"detail": "investigation failed"}
+    assert "secret" not in "".join(out)
+
+
+async def test_commit_failure_yields_error_not_result(monkeypatch):
+    class S:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return None
+        async def commit(self):
+            raise RuntimeError("commit boom")
+        async def rollback(self):
+            S.rolled = True
+
+    async def ok(session, user_id, req, emit, **kw):
+        await emit("agent_start", {"agent": "db"})
+        return {"person": None}
+
+    monkeypatch.setattr(inv, "async_session_maker", lambda: S())
+    monkeypatch.setattr(inv, "run_investigation", ok)
+    events = _parse("".join(await _drain(inv._stream(uuid.uuid4(), Request(nid="1")))))
+    names = [e for e, _ in events]
+    assert "result" not in names and names[-1] == "error"
+    assert events[-1][1] == {"detail": "investigation failed"}
+    assert S.rolled
+
+
+async def test_externally_cancelled_run_emits_no_result(monkeypatch):
+    async def slow(session, user_id, req, emit, **kw):
+        await emit("agent_start", {"agent": "db"})
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(inv, "run_investigation", slow)
+    gen = inv._stream(uuid.uuid4(), Request(nid="1"))
+    first = await gen.__anext__()
+    assert first.startswith("event: agent_start")
+    for t in asyncio.all_tasks():
+        if t.get_coro().__qualname__.endswith("_stream.<locals>.work"):
+            t.cancel()
+    rest = _parse("".join([c async for c in gen]))
+    assert "result" not in [e for e, _ in rest]

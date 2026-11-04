@@ -8,7 +8,6 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncGenerator
-from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -21,6 +20,7 @@ from app.agents.router import investigate_nid, run_investigation
 from app.agents.web_agent import WebAgent
 from app.api.deps import get_current_operator
 from app.database.models.user import User
+from app.database.repositories.audit_repo import AuditRepository
 from app.database.session import async_session_maker, get_session
 
 log = logging.getLogger(__name__)
@@ -50,9 +50,14 @@ def _clean(v: str | None) -> str | None:
 
 
 async def _stream(user_id: uuid.UUID, req: Request) -> AsyncGenerator[str, None]:
-    """Run the investigation in a background task on its OWN session and relay events."""
+    """Run the investigation in a background task on its OWN session and relay events.
+
+    The audit row is committed BEFORE the result event is yielded, so a client
+    that disconnects right after `result` cannot lose it.
+    """
     queue: asyncio.Queue = asyncio.Queue()
     task: asyncio.Task | None = None
+    getter: asyncio.Task | None = None
     committed = False
     async with async_session_maker() as session:
         try:
@@ -67,27 +72,35 @@ async def _stream(user_id: uuid.UUID, req: Request) -> AsyncGenerator[str, None]
 
             task = asyncio.ensure_future(work())
             while True:
-                try:
-                    item = await asyncio.wait_for(queue.get(), _HEARTBEAT_INTERVAL)
-                except asyncio.TimeoutError:
+                if getter is None:
+                    getter = asyncio.ensure_future(queue.get())
+                done, _ = await asyncio.wait({getter}, timeout=_HEARTBEAT_INTERVAL)
+                if not done:
                     yield _HEARTBEAT
                     continue
+                item = getter.result()
+                getter = None
                 if item is _DONE:
                     break
                 yield _sse(item[0], item[1])
+            if task.cancelled():
+                raise RuntimeError("investigation run was cancelled")
             result = task.result()
-            yield _sse("result", result)
-            await session.commit()
+            json.dumps(result, default=str)  # serialisable before we commit
+            await asyncio.shield(session.commit())
             committed = True
-        except Exception as e:  # noqa: BLE001
+            yield _sse("result", result)
+        except Exception:  # noqa: BLE001
             log.exception("investigation stream failed")
-            yield _sse("error", {"detail": str(e)})
+            yield _sse("error", {"detail": "investigation failed"})
         finally:
-            if task is not None and not task.done():
-                task.cancel()
-            if task is not None:
-                with contextlib.suppress(BaseException):
-                    await task
+            for t in (getter, task):
+                if t is not None and not t.done():
+                    t.cancel()
+            for t in (getter, task):
+                if t is not None:
+                    with contextlib.suppress(BaseException):
+                        await t
             if not committed:
                 with contextlib.suppress(Exception):
                     await session.rollback()
@@ -132,6 +145,14 @@ async def investigate_web_only(session: AsyncSession, user_id: uuid.UUID, name: 
     except Exception as e:  # noqa: BLE001
         notes.append(f"web: {str(e) or type(e).__name__}")
         await agent_router._rollback(ctx)
+    try:
+        await AuditRepository(session).record(
+            "people.investigate", actor_id=user_id,
+            detail={"query": {"name": name, "web_only": True}, "agents": ["web"],
+                    "found": False})
+    except Exception:  # noqa: BLE001 - audit must not break the card
+        log.exception("people.investigate audit failed")
+        notes.append("audit failed")
     return {
         "person": None,
         "web_only": True,
@@ -148,7 +169,11 @@ async def investigate_web_only(session: AsyncSession, user_id: uuid.UUID, name: 
 async def investigate_click(nid: str, operator: User = Depends(get_current_operator),
                             session: AsyncSession = Depends(get_session)):
     if nid.startswith("web:"):
-        name = unquote(nid[4:]).strip()
+        name = nid[4:].strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="empty name")
+        if len(name) > 200:
+            raise HTTPException(status_code=400, detail="name too long")
         return await investigate_web_only(session, operator.id, name)
     out = await investigate_nid(session, operator.id, nid)
     if not out.get("person"):
