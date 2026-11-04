@@ -58,6 +58,10 @@ export interface RelationNode {
   in_system: boolean;
   source_ref: string | null;
   ambiguous?: boolean;
+  /** "reported spouse" for a spouse named on a web page */
+  relation?: string;
+  /** id of the web fact the node comes from */
+  fact_id?: string | null;
 }
 
 export interface Relations {
@@ -67,20 +71,48 @@ export interface Relations {
   nodes: RelationNode[];
 }
 
+/** Person card (backend enrich/lookup.py _person_view); fields may be missing. */
 export interface PersonRef {
   nid: string;
   name: string;
+  sex?: string | null;
+  date_of_birth?: string | null;
+  marital_status?: string | null;
+  district?: string | null;
+  sector?: string | null;
+  cell?: string | null;
+  village?: string | null;
+  phones?: string[];
+  father_names?: string | null;
+  mother_names?: string | null;
   [k: string]: unknown;
+}
+
+/** One web finding from the web agent (page, face, search hit or attribute). */
+export interface WebFinding {
+  type: string;
+  url?: string;
+  title?: string | null;
+  value?: string;
+  sources?: string[];
+  face_id?: string;
 }
 
 export interface InvestigateResult {
   person: PersonRef | null;
+  /** first 5 candidates; candidate_count is the true total */
   people: PersonRef[];
+  candidate_count?: number;
+  /** a name lookup matched several people */
+  ambiguous?: boolean;
   relations: Relations | null;
-  web_findings: unknown[];
+  web_findings: WebFinding[];
   spouse_candidates: string[];
+  name_collision_warning?: boolean;
   analysis: string | null;
-  dropped?: string[];
+  /** number of unsupported sentences the grounding check removed */
+  analysis_dropped_count?: number;
+  omitted_facts?: number;
   facts: Fact[];
   notes: string[];
   agents_run: string[];
@@ -88,6 +120,8 @@ export interface InvestigateResult {
 
 export interface OneHopResult {
   person: PersonRef;
+  ambiguous?: boolean;
+  candidate_count?: number;
   relations: Relations | null;
   facts: Fact[];
   notes: string[];
@@ -98,8 +132,9 @@ export interface WebOnlyResult {
   person: null;
   web_only: true;
   name: string;
-  findings: unknown[];
+  findings: WebFinding[];
   spouse_candidates: string[];
+  name_collision_warning?: boolean;
   facts: Fact[];
   notes: string[];
   lookup_hint: string;
@@ -142,20 +177,26 @@ export function parseSseFrames(buffer: string): { events: { event: string; data:
   return { events, rest };
 }
 
-/** Turn "[F3]" markers in text into cite parts. */
+/** A citation group: "[F3]", "[F3, F4]" or "[F3; F4]" ("[F3][F4]" is two groups). */
+export const CITATION_RE = /\[(F\d+(?:\s*[,;]\s*F\d+)*)\]/;
+
+/** Turn "[F3]", "[F3, F4]" and "[F3][F4]" markers into one cite part per id. */
 export function splitCitations(text: string): { type: "text" | "cite"; value: string }[] {
   const out: { type: "text" | "cite"; value: string }[] = [];
-  const re = /\[(F\d+)\]/g;
+  const re = new RegExp(CITATION_RE.source, "g");
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push({ type: "text", value: text.slice(last, m.index) });
-    out.push({ type: "cite", value: m[1] });
+    for (const id of m[1].match(/F\d+/g) ?? []) out.push({ type: "cite", value: id });
     last = m.index + m[0].length;
   }
   if (last < text.length) out.push({ type: "text", value: text.slice(last) });
   return out;
 }
+
+/** http(s) links only: anything else (javascript:, data:) is rendered as text. */
+export const isHttpUrl = (s: string | null | undefined): s is string => !!s && /^https?:\/\//i.test(s);
 
 export function visibleEdges(edges: Edge[], weak: Edge[], showWeak: boolean): Edge[] {
   return showWeak ? [...edges, ...weak] : edges;

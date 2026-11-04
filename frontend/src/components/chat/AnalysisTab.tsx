@@ -1,14 +1,12 @@
 import { Markdown } from "@/components/Markdown";
 import type { Fact } from "@/lib/investigate";
-import { splitCitations, stripMarkdownImages } from "@/lib/investigate";
-
-const isUrl = (s: string) => /^https?:\/\//i.test(s);
+import { CITATION_RE, isHttpUrl, splitCitations, stripMarkdownImages } from "@/lib/investigate";
 
 function Cite({ id, fact }: { id: string; fact?: Fact }) {
   const cls = "mx-0.5 rounded border px-1 text-[10px]";
   if (!fact) return <span className={cls} style={{ borderColor: "var(--kai-border)", color: "var(--kai-muted)" }}>{id}</span>;
   const tip = `${fact.claim}: ${fact.value} (${fact.source}, ${fact.confidence}%)`;
-  if (isUrl(fact.source_ref)) {
+  if (isHttpUrl(fact.source_ref)) {
     return (
       <a href={fact.source_ref} target="_blank" rel="noopener noreferrer" title={tip}
         className={`${cls} hover:underline`} style={{ borderColor: "var(--kai-border)", color: "var(--kai-hud)" }}>
@@ -24,15 +22,16 @@ function Cite({ id, fact }: { id: string; fact?: Fact }) {
   );
 }
 
-export function AnalysisTab({ analysis, facts, notes, dropped }: {
+export function AnalysisTab({ analysis, facts, notes, droppedCount = 0 }: {
   analysis: string | null;
   facts: Fact[];
   notes: string[];
-  dropped?: string[];
+  /** how many unsupported sentences the grounding check removed (never the sentences) */
+  droppedCount?: number;
 }) {
   const safeAnalysis = analysis ? stripMarkdownImages(analysis) : analysis;
   const byId = new Map(facts.map((f) => [f.id, f]));
-  const hasMarkers = !!safeAnalysis && /\[F\d+\]/.test(safeAnalysis);
+  const hasMarkers = !!safeAnalysis && CITATION_RE.test(safeAnalysis);
   return (
     <div>
       {safeAnalysis ? (
@@ -46,8 +45,10 @@ export function AnalysisTab({ analysis, facts, notes, dropped }: {
       ) : (
         <div className="kai-metadata">No analysis.</div>
       )}
-      {dropped && dropped.length > 0 && (
-        <div className="kai-metadata mt-2">{dropped.length} unsupported sentences dropped</div>
+      {droppedCount > 0 && (
+        <div className="kai-metadata mt-2">
+          {droppedCount === 1 ? "1 unsupported sentence was removed." : `${droppedCount} unsupported sentences were removed.`}
+        </div>
       )}
       {notes.length > 0 && (
         <div className="mt-2 grid gap-0.5">
