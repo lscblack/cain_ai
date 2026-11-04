@@ -213,10 +213,29 @@ export async function personOneHop(nid: string, signal?: AbortSignal): Promise<O
 
 /** Remove markdown/HTML images so model text cannot make the browser load a remote URL. */
 export function stripMarkdownImages(text: string): string {
-  return text
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // ![alt](url)
-    .replace(/!\[[^\]]*\]\[[^\]]*\]/g, "") // ![alt][ref]
-    .replace(/!\[[^\]]*\](?!\()/g, "") // ![ref]
-    .replace(/^[ \t]*\[[^\]]+\]:[ \t]*\S+.*$/gm, "") // [ref]: url
-    .replace(/<img\b[^>]*>?/gi, "");
+  const imgTag = /<img\b[^>]*>?/gi;
+  const labels = new Set<string>();
+  const pass = (t: string): string => {
+    t = t.replace(imgTag, "");
+    // remember labels of reference-style images before removing them
+    for (const m of t.matchAll(/!\[[^\]]*\]\s*\[([^\]]*)\]/g)) labels.add(m[1].trim().toLowerCase());
+    for (const m of t.matchAll(/!\[([^\]]*)\](?![(\[])/g)) labels.add(m[1].trim().toLowerCase());
+    return t
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // ![alt](url)
+      .replace(/!\[[^\]]*\]\s*\[[^\]]*\]/g, "") // ![alt][ref]
+      .replace(/!\[[^\]]*\](?!\()/g, ""); // ![ref]
+  };
+  let out = text;
+  let changed = true;
+  for (let i = 0; i < 20 && changed; i++) {
+    const next = pass(out);
+    changed = next !== out;
+    out = next;
+  }
+  if (changed) out = out.replace(/!\[/g, "["); // still changing at the cap: drop every remaining "!["
+  // only definitions that fed a removed image, and only URL-like targets
+  out = out.replace(/^[ \t]*\[([^\]]+)\]:[ \t]*(?:https?:\/\/|\/\/|data:|javascript:|<)\S*.*$/gim, (line, label: string) =>
+    labels.has(label.trim().toLowerCase()) ? "" : line);
+  // final guard: nothing shaped like an image may survive
+  return out.replace(/!(\[[^\]]*\]\s*[(\[])/g, "$1");
 }
