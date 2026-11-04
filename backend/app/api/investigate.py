@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import router as agent_router
 from app.agents.base import Ctx, Request
+from app.agents.ratelimit import check_investigation_rate
 from app.agents.router import investigate_nid, run_investigation
 from app.agents.web_agent import WebAgent
 from app.api.deps import get_current_operator
@@ -112,6 +113,11 @@ async def investigate(body: InvestigateBody, operator: User = Depends(get_curren
     if not (nid or phone or name):
         raise HTTPException(status_code=400, detail="provide a nid, phone, or name")
     req = Request(nid=nid, phone=phone, name=name, web=body.web, analyse=body.analyse)
+    # throttle BEFORE streaming starts, so the client gets a real HTTP 429
+    async with async_session_maker() as s:
+        limited = await check_investigation_rate(s, operator.id, web=bool(body.web))
+    if limited:
+        raise HTTPException(status_code=429, detail=limited)
     return StreamingResponse(
         _stream(operator.id, req),
         media_type="text/event-stream",
@@ -132,7 +138,8 @@ async def investigate_web_only(session: AsyncSession, user_id: uuid.UUID, name: 
     ctx = Ctx(session=session, user_id=user_id, request=req, person=None,
               results={}, emit=_noop)
     try:
-        res = await asyncio.wait_for(WebAgent().run(ctx), agent_router.PER_AGENT_TIMEOUT)
+        timeout = agent_router._timeout_for("web")
+        res = await asyncio.wait_for(WebAgent().run(ctx), timeout)
         if res.ok:
             data = res.data
             facts = [dataclasses.asdict(dataclasses.replace(f, id=f"F{i}"))
@@ -140,7 +147,7 @@ async def investigate_web_only(session: AsyncSession, user_id: uuid.UUID, name: 
         else:
             notes.append(f"web: {res.error}")
     except asyncio.TimeoutError:
-        notes.append(f"web: timed out after {agent_router.PER_AGENT_TIMEOUT:g}s")
+        notes.append(f"web: timed out after {timeout:g}s")
         await agent_router._rollback(ctx)
     except Exception as e:  # noqa: BLE001
         notes.append(f"web: {str(e) or type(e).__name__}")
@@ -159,6 +166,7 @@ async def investigate_web_only(session: AsyncSession, user_id: uuid.UUID, name: 
         "name": name,
         "findings": list(data.get("findings") or []),
         "spouse_candidates": list(data.get("spouse_names") or []),
+        "name_collision_warning": bool(data.get("name_collision_warning")),
         "facts": facts,
         "notes": notes,
         "lookup_hint": "search this name in the system",
@@ -168,18 +176,29 @@ async def investigate_web_only(session: AsyncSession, user_id: uuid.UUID, name: 
 @router.get("/people/{nid:path}/investigate")
 async def investigate_click(nid: str, operator: User = Depends(get_current_operator),
                             session: AsyncSession = Depends(get_session)):
-    if nid.startswith("web:"):
+    web_only = nid.startswith("web:")
+    if web_only:
         name = nid[4:].strip()
         if not name:
             raise HTTPException(status_code=400, detail="empty name")
         if len(name) > 200:
             raise HTTPException(status_code=400, detail="name too long")
+    # a web-only card runs web lookups, so it counts against the web limit too
+    limited = await check_investigation_rate(session, operator.id, web=web_only)
+    if limited:
+        raise HTTPException(status_code=429, detail=limited)
+    if web_only:
         return await investigate_web_only(session, operator.id, name)
     out = await investigate_nid(session, operator.id, nid)
     if not out.get("person"):
+        # commit the audit row first: the request session rolls back on the
+        # HTTPException, and an unknown-NID probe must still be audited
+        await session.commit()
         raise HTTPException(status_code=404, detail="person_not_found")
     return {
         "person": out["person"],
+        "ambiguous": out.get("ambiguous", False),
+        "candidate_count": out.get("candidate_count", 1),
         "relations": out["relations"],
         "facts": out["facts"],
         "notes": out["notes"],

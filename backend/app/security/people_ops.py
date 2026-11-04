@@ -10,6 +10,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import Request
+from app.agents.ratelimit import check_investigation_rate
 from app.agents.router import run_investigation
 from app.database.session import async_session_maker
 
@@ -63,13 +64,48 @@ def _validate(params: dict) -> tuple[Request | None, str | None]:
     return Request(**vals), None
 
 
-def _trim(lst, path: str, cut: dict):
-    if isinstance(lst, dict):  # kin: {"parents": [...], ...}
-        return {k: _trim(v, f"{path}.{k}", cut) for k, v in lst.items()}
-    if isinstance(lst, list) and len(lst) > MAX_REL:
+_NESTED_KEYS = ("nid", "name", "label", "confidence")
+_NODE_KEYS = ("nid", "name", "in_system", "ambiguous", "source_ref")
+
+
+def _cap(lst: list, path: str, cut: dict) -> list:
+    if len(lst) > MAX_REL:
         cut[path] = True
         return lst[:MAX_REL]
     return lst
+
+
+def _reduce_nested(entry, path: str, cut: dict):
+    """A kin card keeps its own fields, but nested person lists inside it (e.g. a
+    parent's "children") shrink to {nid, name, label, confidence}, capped."""
+    if not isinstance(entry, dict):
+        return entry
+    out = {}
+    for k, v in entry.items():
+        if isinstance(v, list) and any(isinstance(x, dict) for x in v):
+            v = [{kk: x[kk] for kk in _NESTED_KEYS if kk in x} for x in v if isinstance(x, dict)]
+            v = _cap(v, f"{path}.{k}", cut)
+        out[k] = v
+    return out
+
+
+def _trim(lst, path: str, cut: dict, *, kin: bool = False):
+    if isinstance(lst, dict):  # kin: {"parents": [...], ...}
+        return {k: _trim(v, f"{path}.{k}", cut, kin=kin) for k, v in lst.items()}
+    if isinstance(lst, list):
+        lst = _cap(lst, path, cut)
+        # only kin cards carry nested person lists; associates keep their
+        # "shared" facts intact (that list is what the edge is based on)
+        return [_reduce_nested(e, path, cut) for e in lst] if kin else lst
+    return lst
+
+
+def _nodes(nodes, cut: dict) -> list:
+    """Graph nodes (incl. web-reported spouses and whether each is in the system)."""
+    if not isinstance(nodes, list):
+        return []
+    return [{k: n[k] for k in _NODE_KEYS if k in n}
+            for n in _cap(nodes, "nodes", cut) if isinstance(n, dict)]
 
 
 def _strip_bytes(obj):
@@ -99,6 +135,9 @@ async def run_people_op(session: AsyncSession, *, user_id: uuid.UUID,
     # work in the caller's session. `session` is therefore unused here.
     try:
         async with async_session_maker() as own:
+            limited = await check_investigation_rate(own, user_id, web=req.web)
+            if limited:
+                return {"ok": False, "error": limited}
             try:
                 out = await run_investigation(own, user_id, req, _noop)
                 await own.commit()
@@ -110,13 +149,15 @@ async def run_people_op(session: AsyncSession, *, user_id: uuid.UUID,
 
     cut: dict = {}
     rel = out.get("relations") or {}
-    relations = {k: _trim(rel.get(k), k, cut)
+    relations = {k: _trim(rel.get(k), k, cut, kin=k == "kin")
                  for k in ("kin", "associates", "weak_associates")}
+    relations["nodes"] = _nodes(rel.get("nodes"), cut)
     relations["truncated"] = cut or False
     person = out.get("person")
     people = list(out.get("people") or ([person] if person else []))
+    count = int(out.get("candidate_count") or len(people))
     exact = bool(req.nid or req.phone)
-    ambiguous = (not exact) and len(people) > 1
+    ambiguous = bool(out.get("ambiguous")) or ((not exact) and count > 1)
     notes = list(out.get("notes") or [])
     if ambiguous:
         notes.append("multiple people match this name \u2014 ask the operator which one "
@@ -127,7 +168,7 @@ async def run_people_op(session: AsyncSession, *, user_id: uuid.UUID,
     res = {
         "ok": True,
         "match": "exact" if exact else "fuzzy",
-        "candidate_count": len(people),
+        "candidate_count": count,
         "ambiguous": ambiguous,
         "other_candidates": others,
         "person": person,
@@ -135,6 +176,9 @@ async def run_people_op(session: AsyncSession, *, user_id: uuid.UUID,
         "web_findings": list(out.get("web_findings") or [])[:MAX_WEB],
         "spouse_candidates": out.get("spouse_candidates") or [],
         "analysis": out.get("analysis"),
+        # count only: removed sentences are ungrounded and never forwarded
+        "analysis_dropped_count": int(out.get("analysis_dropped_count") or 0),
+        "name_collision_warning": bool(out.get("name_collision_warning")),
         "notes": notes,
         "agents_run": list(out.get("agents_run") or []),
         "confidence_note": "kin, associate and web results are inferred/unconfirmed leads",

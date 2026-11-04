@@ -255,3 +255,60 @@ async def test_externally_cancelled_run_emits_no_result(monkeypatch):
             t.cancel()
     rest = _parse("".join([c async for c in gen]))
     assert "result" not in [e for e, _ in rest]
+
+
+# ---- final fix wave ------------------------------------------------------- #
+
+async def _op_id():
+    async with _session_maker() as s:
+        return (await s.execute(select(User.id).where(User.email == "op@example.com"))).scalar_one()
+
+
+async def _seed_audit(uid, n, web=False):
+    async with _session_maker() as s:
+        for _ in range(n):
+            s.add(AuditLog(actor_id=uid, action="people.investigate",
+                           detail={"query": {"nid": "1", "web": web}}))
+        await s.commit()
+
+
+async def test_unknown_nid_404_is_still_audited(client, auth_headers):
+    nid = _num()
+    r = await client.get(f"/enrich/people/{nid}/investigate", headers=auth_headers)
+    assert r.status_code == 404
+    rows = await _audit_rows()
+    assert len(rows) == 1 and rows[0].detail["query"]["nid"] == nid
+    assert rows[0].detail["found"] is False
+
+
+async def test_post_rate_limited_before_streaming(client, auth_headers, seeded):
+    await _seed_audit(await _op_id(), 10)
+    r = await client.post("/enrich/people/investigate", json={"nid": seeded}, headers=auth_headers)
+    assert r.status_code == 429
+    assert r.json() == {"detail": "rate limited: too many investigations, retry in a minute"}
+    assert len(await _audit_rows()) == 10  # nothing ran
+
+
+async def test_post_web_rate_limit_only_for_web(client, auth_headers, seeded, monkeypatch):
+    import app.agents.web_agent as wa
+    monkeypatch.setattr(wa, "search_available", lambda *a, **k: False)
+    await _seed_audit(await _op_id(), 5, web=True)
+    r = await client.post("/enrich/people/investigate", json={"nid": seeded, "web": True},
+                          headers=auth_headers)
+    assert r.status_code == 429
+    r = await client.post("/enrich/people/investigate", json={"nid": seeded}, headers=auth_headers)
+    assert r.status_code == 200 and _parse(r.text)[-1][0] == "result"
+
+
+async def test_get_click_through_rate_limited(client, auth_headers, seeded):
+    await _seed_audit(await _op_id(), 10)
+    r = await client.get(f"/enrich/people/{seeded}/investigate", headers=auth_headers)
+    assert r.status_code == 429
+    r = await client.get("/enrich/people/web:Jean%20Paul/investigate", headers=auth_headers)
+    assert r.status_code == 429
+
+
+async def test_get_click_through_forwards_ambiguity_fields(client, auth_headers, seeded):
+    r = await client.get(f"/enrich/people/{seeded}/investigate", headers=auth_headers)
+    b = r.json()
+    assert b["ambiguous"] is False and b["candidate_count"] == 1

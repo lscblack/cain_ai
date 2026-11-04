@@ -190,3 +190,72 @@ async def test_fuzzy_name_ambiguous_and_nid_exact(db_session):
                              params={"nid": n1})
     assert ex["match"] == "exact" and ex["ambiguous"] is False
     assert ex["candidate_count"] == 1 and ex["other_candidates"] == []
+
+
+# ---- final fix wave ------------------------------------------------------- #
+
+async def test_passes_counts_and_ambiguity_through(db_session, monkeypatch):
+    async def fake(session, user_id, req, emit, **kw):
+        return {"person": {"nid": "1", "name": "A B"},
+                "people": [{"nid": str(i), "name": "A B"} for i in range(1, 6)],
+                "candidate_count": 9, "ambiguous": True, "analysis": "x",
+                "analysis_dropped_count": 2, "name_collision_warning": True,
+                "relations": None, "notes": [], "agents_run": ["db"]}
+    monkeypatch.setattr(people_ops, "run_investigation", fake)
+    out = await run_people_op(db_session, user_id=uuid.uuid4(), op_key=PEOPLE_INVESTIGATE,
+                              params={"name": "A B"})
+    assert out["candidate_count"] == 9 and out["ambiguous"] is True
+    assert out["analysis_dropped_count"] == 2
+    assert out["name_collision_warning"] is True
+    assert "dropped" not in out
+
+
+async def test_relations_nodes_included_and_nested_kin_reduced(db_session, monkeypatch):
+    parent = {"nid": "P", "name": "Pa", "label": "father", "confidence": 80, "sex": "M",
+              "phones": ["0788"], "children": [
+                  {"nid": f"c{i}", "name": f"Kid {i}", "sex": "F", "date_of_birth": "2000",
+                   "district": "D", "recorded_as": "father", "is_subject": False}
+                  for i in range(14)]}
+    nodes = [{"nid": None, "name": f"N{i}", "in_system": False, "source_ref": "https://w/1",
+              "ambiguous": i == 0, "relation": "reported spouse", "fact_id": "F9", "extra": 1}
+             for i in range(12)]
+
+    async def fake(session, user_id, req, emit, **kw):
+        return {"person": {"nid": "1"}, "relations": {
+            "kin": {"parents": [parent], "siblings": [], "children": [], "partners": []},
+            "associates": [{"person_b": "9", "name_b": "Z", "confidence": 70, "confirmed": False,
+                            "shared": [{"what": "phone", "value": "0788", "source": "db"}]}],
+            "weak_associates": [], "nodes": nodes},
+            "notes": [], "agents_run": ["db", "relations"]}
+    monkeypatch.setattr(people_ops, "run_investigation", fake)
+    out = await run_people_op(db_session, user_id=uuid.uuid4(), op_key=PEOPLE_INVESTIGATE,
+                              params={"nid": "1"})
+    rel = out["relations"]
+    assert len(rel["nodes"]) == 10 and rel["truncated"]["nodes"] is True
+    assert rel["nodes"][0] == {"nid": None, "name": "N0", "in_system": False,
+                               "ambiguous": True, "source_ref": "https://w/1"}
+    assert set(rel["nodes"][1]) <= {"nid", "name", "in_system", "ambiguous", "source_ref"}
+    p = rel["kin"]["parents"][0]
+    assert p["label"] == "father" and p["phones"] == ["0788"]
+    assert len(p["children"]) == 10
+    assert p["children"][0] == {"nid": "c0", "name": "Kid 0"}
+    assert rel["truncated"]["kin.parents.children"] is True
+    assert rel["associates"][0]["shared"] == [{"what": "phone", "value": "0788", "source": "db"}]
+
+
+async def test_rate_limited_chat_op(db_session, monkeypatch):
+    called = {}
+
+    async def fake(*a, **k):
+        called["yes"] = True
+        return {"person": None, "notes": [], "agents_run": []}
+    monkeypatch.setattr(people_ops, "run_investigation", fake)
+    uid = uuid.uuid4()
+    for _ in range(10):
+        db_session.add(AuditLog(actor_id=uid, action="people.investigate",
+                                detail={"query": {"nid": "1", "web": False}}))
+    await db_session.commit()
+    out = await run_people_op(db_session, user_id=uid, op_key=PEOPLE_INVESTIGATE,
+                              params={"nid": "1"})
+    assert out == {"ok": False, "error": "rate limited: too many investigations, retry in a minute"}
+    assert not called
