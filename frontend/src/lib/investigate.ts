@@ -211,31 +211,15 @@ export async function personOneHop(nid: string, signal?: AbortSignal): Promise<O
   return (await resp.json()) as OneHopResult | WebOnlyResult;
 }
 
-/** Remove markdown/HTML images so model text cannot make the browser load a remote URL. */
+/**
+ * Neutralise images in model text so it cannot make the browser load a remote URL.
+ * Nothing is removed, so nothing can be reassembled and citations such as
+ * "[F1]: born 1980" stay intact: a "!" before "[" gets a space ("! [a](u)" parses
+ * as the text "!" plus a link, never an image) and "<img" is escaped. react-markdown
+ * without rehype-raw never renders HTML; the escape is belt and braces. Single linear passes.
+ */
 export function stripMarkdownImages(text: string): string {
-  const imgTag = /<img\b[^>]*>?/gi;
-  const labels = new Set<string>();
-  const pass = (t: string): string => {
-    t = t.replace(imgTag, "");
-    // remember labels of reference-style images before removing them
-    for (const m of t.matchAll(/!\[[^\]]*\]\s*\[([^\]]*)\]/g)) labels.add(m[1].trim().toLowerCase());
-    for (const m of t.matchAll(/!\[([^\]]*)\](?![(\[])/g)) labels.add(m[1].trim().toLowerCase());
-    return t
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // ![alt](url)
-      .replace(/!\[[^\]]*\]\s*\[[^\]]*\]/g, "") // ![alt][ref]
-      .replace(/!\[[^\]]*\](?!\()/g, ""); // ![ref]
-  };
-  let out = text;
-  let changed = true;
-  for (let i = 0; i < 20 && changed; i++) {
-    const next = pass(out);
-    changed = next !== out;
-    out = next;
-  }
-  if (changed) out = out.replace(/!\[/g, "["); // still changing at the cap: drop every remaining "!["
-  // only definitions that fed a removed image, and only URL-like targets
-  out = out.replace(/^[ \t]*\[([^\]]+)\]:[ \t]*(?:https?:\/\/|\/\/|data:|javascript:|<)\S*.*$/gim, (line, label: string) =>
-    labels.has(label.trim().toLowerCase()) ? "" : line);
-  // final guard: nothing shaped like an image may survive
-  return out.replace(/!(\[[^\]]*\]\s*[(\[])/g, "$1");
+  return text
+    .replace(/!(?=[\s​-‍⁠﻿]*\[)/g, "! ")
+    .replace(/<(?=\s*img)/gi, "&lt;");
 }
