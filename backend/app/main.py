@@ -9,6 +9,7 @@ from app.api import (
     maps, phones, powerup, public, search, settings as settings_api, sources, system,
     timeline, tools, usernames,
 )
+from app.api import investigate
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from sqlmodel import SQLModel
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_api.router)
     app.include_router(chat.router)
     app.include_router(tools.router)
+    app.include_router(investigate.router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:
