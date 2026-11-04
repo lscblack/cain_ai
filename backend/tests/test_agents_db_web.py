@@ -103,7 +103,7 @@ async def test_web_agent_facts_carry_url(db_session, monkeypatch):
         assert f.source == "web" and f.source_ref.startswith("http") and f.confidence <= 40
     claims = {f.claim for f in res.facts}
     assert {"organisation", "title", "location", "page mention", "possible web mention"} <= claims
-    assert "name_collision_warning" not in res.data
+    assert res.data["name_collision_warning"] is True
 
 
 async def test_web_agent_spouse_names_from_page_text(db_session, monkeypatch):
@@ -132,3 +132,59 @@ async def test_web_agent_can_handle_rules(db_session):
 async def test_web_agent_no_name_is_empty_ok(db_session):
     res = await WebAgent().run(mkctx(db_session, web=True))
     assert res.ok and res.facts == []
+
+
+_TWO_PAGES = {
+    "faces": [],
+    "pages": [{"url": "https://a.example/1", "title": "Jean Nzeyimana", "description": "nothing"},
+              {"url": "https://b.example/2", "title": "Profil",
+               "description": "Jean works at ACME Ltd. in Kigali"}],
+    "titles": [], "orgs": ["Acme Ltd"], "locations": [],
+}
+
+
+async def test_org_cites_page_containing_it(db_session, monkeypatch):
+    _patch_web(monkeypatch, dossier=_TWO_PAGES)
+    res = await WebAgent().run(mkctx(db_session, name="Jean Nzeyimana"))
+    f = [x for x in res.facts if x.claim == "organisation"]
+    assert len(f) == 1 and f[0].source_ref == "https://b.example/2"
+    assert f[0].value == "Acme Ltd" and f[0].confidence == 40
+    fd = [x for x in res.data["findings"] if x["type"] == "organisation"][0]
+    assert fd["sources"] == ["https://b.example/2"]
+
+
+async def test_org_not_in_any_text_is_downgraded(db_session, monkeypatch):
+    d = dict(_TWO_PAGES, orgs=["Zeta Corp"])
+    _patch_web(monkeypatch, dossier=d)
+    res = await WebAgent().run(mkctx(db_session, name="Jean Nzeyimana"))
+    f = [x for x in res.facts if x.claim == "organisation"][0]
+    assert f.confidence == 20 and f.source_ref == "https://a.example/1"
+    assert f.value == "Zeta Corp [aggregated across 2 sources, origin not isolated]"
+
+
+async def test_search_facts_confidence_30_and_district_query(db_session, monkeypatch):
+    _patch_web(monkeypatch)
+    seen = {}
+
+    async def fake_search(queries, **kw):
+        seen["q"] = queries
+        return {"https://s.example/1": "t"}
+    monkeypatch.setattr(wa, "search_candidates_free", fake_search)
+    ctx = mkctx(db_session, name="Jean Nzeyimana", web=True)
+    ctx.person = Person(nid=_num(), raw={}, forenames="JEAN", surnames="NZEYIMANA",
+                        district="GASABO")
+    res = await WebAgent().run(ctx)
+    assert [f.confidence for f in res.facts if f.claim == "possible web mention"] == [30]
+    assert seen["q"][0] == '"JEAN NZEYIMANA" GASABO'
+
+
+async def test_db_agent_by_phone(db_session):
+    from app.database.models.enrich import PhoneNumber
+    n, msisdn = _num(), "07" + _num()[:8]
+    db_session.add(Person(nid=n, raw={}, forenames="A", surnames=f"B{_tag()}"))
+    db_session.add(PhoneNumber(msisdn=msisdn, nid=n))
+    await db_session.commit()
+    ctx = mkctx(db_session, phone=msisdn)
+    res = await DbAgent().run(ctx)
+    assert res.ok and res.data["person_nid"] == n and ctx.person.nid == n
+    assert all(f.confidence == 90 for f in res.facts)

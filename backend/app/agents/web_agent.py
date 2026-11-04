@@ -1,6 +1,7 @@
 """WebAgent: corpus dossier + free web search, URL-only (no page fetching)."""
 from __future__ import annotations
 
+import unicodedata
 from datetime import datetime, timezone
 
 from app.agents.base import AgentResult, Ctx, Fact
@@ -11,6 +12,11 @@ from app.enrich.family import person_name
 
 _NAME_ONLY_CONF = 40
 _SEARCH_CONF = 30
+
+
+def _fold(t: str) -> str:
+    t = unicodedata.normalize("NFKD", t or "")
+    return "".join(c for c in t if not unicodedata.combining(c)).casefold()
 
 
 def _now() -> str:
@@ -36,8 +42,8 @@ class WebAgent:
         findings: list[dict] = []
         spouses: list[str] = []
         data: dict = {"findings": findings, "spouse_names": spouses}
-        if len(name.split()) <= 2:
-            data["name_collision_warning"] = True
+        # web hits are name-only matches (never NID-confirmed), so always warn
+        data["name_collision_warning"] = True
         now = _now()
 
         def add(claim: str, value: str, url: str, conf: int) -> None:
@@ -48,6 +54,7 @@ class WebAgent:
             dossier = await gather_dossier(ctx.session, name, as_name=True)
             urls: list[str] = []
             texts: list[tuple[str, str]] = []
+            src_text: list[tuple[str, str]] = []  # (url, folded text) for provenance
             for pg in dossier.get("pages") or []:
                 url = pg.get("url")
                 if not url:
@@ -56,7 +63,9 @@ class WebAgent:
                 title = pg.get("title") or url
                 add("page mention", title, url, _NAME_ONLY_CONF)
                 findings.append({"type": "page", "url": url, "title": pg.get("title")})
-                texts.append((url, f"{pg.get('title') or ''}. {pg.get('description') or ''}"))
+                ptxt = f"{pg.get('title') or ''}. {pg.get('description') or ''}"
+                texts.append((url, ptxt))
+                src_text.append((url, _fold(ptxt)))
             for fa in dossier.get("faces") or []:
                 url = fa.get("source_url")
                 if not url:
@@ -66,13 +75,25 @@ class WebAgent:
                 findings.append({"type": "face", "url": url, "face_id": fa.get("face_id")})
                 if fa.get("description"):
                     texts.append((url, fa["description"]))
-            # aggregated attributes carry no per-item URL: cite the first source URL
+                src_text.append((url, _fold(fa.get("description") or "")))
+            # aggregated attributes: cite only sources whose text contains the value
             if urls:
                 for key, claim in (("orgs", "organisation"), ("titles", "title"),
                                    ("locations", "location")):
                     for v in dossier.get(key) or []:
-                        add(claim, str(v), urls[0], _NAME_ONLY_CONF)
-                        findings.append({"type": claim, "value": v, "url": urls[0]})
+                        needle = _fold(str(v))
+                        srcs = [u for u, t in src_text if needle and needle in t]
+                        srcs = list(dict.fromkeys(srcs))
+                        if srcs:
+                            add(claim, str(v), srcs[0], _NAME_ONLY_CONF)
+                            findings.append({"type": claim, "value": v, "url": srcs[0],
+                                             "sources": srcs})
+                        else:
+                            n = len(set(urls))
+                            add(claim, f"{v} [aggregated across {n} sources, origin not isolated]",
+                                urls[0], 20)
+                            findings.append({"type": claim, "value": v, "url": urls[0],
+                                             "sources": []})
 
             for url, text in texts:
                 for sp in extract_spouse_names(text):
