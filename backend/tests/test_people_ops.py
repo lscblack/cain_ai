@@ -251,7 +251,7 @@ async def test_rate_limited_chat_op(db_session, monkeypatch):
         return {"person": None, "notes": [], "agents_run": []}
     monkeypatch.setattr(people_ops, "run_investigation", fake)
     uid = uuid.uuid4()
-    for _ in range(10):
+    for _ in range(30):
         db_session.add(AuditLog(actor_id=uid, action="people.investigate",
                                 detail={"query": {"nid": "1", "web": False}}))
     await db_session.commit()
@@ -259,3 +259,32 @@ async def test_rate_limited_chat_op(db_session, monkeypatch):
                               params={"nid": "1"})
     assert out == {"ok": False, "error": "rate limited: too many investigations, retry in a minute"}
     assert not called
+
+
+# ---- follow-up -------------------------------------------------------------- #
+
+async def test_busy_chat_op_and_slot_released(db_session, monkeypatch):
+    from app.agents import ratelimit as rl
+    rl._active.clear()
+    uid = uuid.uuid4()
+
+    async def boom(*a, **k):
+        raise RuntimeError("x")
+    monkeypatch.setattr(people_ops, "run_investigation", boom)
+    a, b = rl.acquire_slot(uid), rl.acquire_slot(uid)
+    out = await run_people_op(db_session, user_id=uid, op_key=PEOPLE_INVESTIGATE, params={"nid": "1"})
+    assert out == {"ok": False, "error": rl.BUSY}
+    a.release(); b.release()
+    out = await run_people_op(db_session, user_id=uid, op_key=PEOPLE_INVESTIGATE, params={"nid": "1"})
+    assert out == {"ok": False, "error": "RuntimeError"}
+    assert uid not in rl._active  # released after the exception
+
+
+async def test_omitted_facts_and_spouse_cap(db_session, monkeypatch):
+    async def fake(session, user_id, req, emit, **kw):
+        return {"person": {"nid": "1"}, "relations": None, "omitted_facts": 4,
+                "spouse_candidates": [f"S{i}" for i in range(14)], "notes": [], "agents_run": ["db"]}
+    monkeypatch.setattr(people_ops, "run_investigation", fake)
+    out = await run_people_op(db_session, user_id=uuid.uuid4(), op_key=PEOPLE_INVESTIGATE,
+                              params={"nid": "1"})
+    assert out["omitted_facts"] == 4 and out["spouse_candidates"] == [f"S{i}" for i in range(10)]

@@ -146,6 +146,7 @@ export function InvestigatePanel({ nid, name }: { nid: string; name: string }) {
     const key = targetNid ?? `web:${targetName}`;
     const my = supersede();
     setNavErr(null);
+    setError(null); // a stale stream error's Retry must not retarget to this open
     const hit = cache.current.get(key);
     if (hit) {
       setStack((s) => [...s, hit]);

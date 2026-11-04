@@ -11,12 +11,13 @@ from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import router as agent_router
 from app.agents.base import Ctx, Request
-from app.agents.ratelimit import check_investigation_rate
+from app.agents.ratelimit import RateLimited, Slot, acquire_slot, check_investigation_rate
 from app.agents.router import investigate_nid, run_investigation
 from app.agents.web_agent import WebAgent
 from app.api.deps import get_current_operator
@@ -50,11 +51,14 @@ def _clean(v: str | None) -> str | None:
     return v or None
 
 
-async def _stream(user_id: uuid.UUID, req: Request) -> AsyncGenerator[str, None]:
+async def _stream(user_id: uuid.UUID, req: Request,
+                  slot: Slot | None = None) -> AsyncGenerator[str, None]:
     """Run the investigation in a background task on its OWN session and relay events.
 
     The audit row is committed BEFORE the result event is yielded, so a client
-    that disconnects right after `result` cannot lose it.
+    that disconnects right after `result` cannot lose it. ``slot`` (the
+    operator's concurrency slot) is released when the generator ends, however
+    it ends (result, error, client disconnect / aclose, cancellation).
     """
     queue: asyncio.Queue = asyncio.Queue()
     task: asyncio.Task | None = None
@@ -105,6 +109,8 @@ async def _stream(user_id: uuid.UUID, req: Request) -> AsyncGenerator[str, None]
             if not committed:
                 with contextlib.suppress(Exception):
                     await session.rollback()
+            if slot is not None:
+                slot.release()
 
 
 @router.post("/people/investigate")
@@ -118,10 +124,17 @@ async def investigate(body: InvestigateBody, operator: User = Depends(get_curren
         limited = await check_investigation_rate(s, operator.id, web=bool(body.web))
     if limited:
         raise HTTPException(status_code=429, detail=limited)
+    try:
+        slot = acquire_slot(operator.id)
+    except RateLimited as e:
+        raise HTTPException(status_code=429, detail=str(e)) from None
+    # Released by the generator's finally; the background task is a backstop
+    # for a body that is never iterated (release is idempotent).
     return StreamingResponse(
-        _stream(operator.id, req),
+        _stream(operator.id, req, slot),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        background=BackgroundTask(slot.release),
     )
 
 
@@ -187,9 +200,16 @@ async def investigate_click(nid: str, operator: User = Depends(get_current_opera
     limited = await check_investigation_rate(session, operator.id, web=web_only)
     if limited:
         raise HTTPException(status_code=429, detail=limited)
-    if web_only:
-        return await investigate_web_only(session, operator.id, name)
-    out = await investigate_nid(session, operator.id, nid)
+    try:
+        slot = acquire_slot(operator.id)
+    except RateLimited as e:
+        raise HTTPException(status_code=429, detail=str(e)) from None
+    try:
+        if web_only:
+            return await investigate_web_only(session, operator.id, name)
+        out = await investigate_nid(session, operator.id, nid)
+    finally:
+        slot.release()
     if not out.get("person"):
         # commit the audit row first: the request session rolls back on the
         # HTTPException, and an unknown-NID probe must still be audited

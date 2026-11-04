@@ -10,7 +10,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import Request
-from app.agents.ratelimit import check_investigation_rate
+from app.agents.ratelimit import RateLimited, acquire_slot, check_investigation_rate
 from app.agents.router import run_investigation
 from app.database.session import async_session_maker
 
@@ -139,11 +139,17 @@ async def run_people_op(session: AsyncSession, *, user_id: uuid.UUID,
             if limited:
                 return {"ok": False, "error": limited}
             try:
+                slot = acquire_slot(user_id)
+            except RateLimited as e:
+                return {"ok": False, "error": str(e)}
+            try:
                 out = await run_investigation(own, user_id, req, _noop)
                 await own.commit()
             except Exception:
                 await own.rollback()
                 raise
+            finally:
+                slot.release()
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": type(e).__name__}
 
@@ -174,10 +180,11 @@ async def run_people_op(session: AsyncSession, *, user_id: uuid.UUID,
         "person": person,
         "relations": relations,
         "web_findings": list(out.get("web_findings") or [])[:MAX_WEB],
-        "spouse_candidates": out.get("spouse_candidates") or [],
+        "spouse_candidates": list(out.get("spouse_candidates") or [])[:MAX_REL],
         "analysis": out.get("analysis"),
         # count only: removed sentences are ungrounded and never forwarded
         "analysis_dropped_count": int(out.get("analysis_dropped_count") or 0),
+        "omitted_facts": int(out.get("omitted_facts") or 0),
         "name_collision_warning": bool(out.get("name_collision_warning")),
         "notes": notes,
         "agents_run": list(out.get("agents_run") or []),

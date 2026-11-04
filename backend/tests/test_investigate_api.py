@@ -36,6 +36,14 @@ async def _patch_maker(client, monkeypatch):
     monkeypatch.setattr(inv, "async_session_maker", _session_maker)
 
 
+@pytest.fixture(autouse=True)
+def _no_slot_leak():
+    from app.agents import ratelimit as rl
+    rl._active.clear()
+    yield
+    assert rl._active == {}, "an investigation slot leaked"
+
+
 @pytest_asyncio.fixture
 async def seeded():
     nid = _num()
@@ -282,11 +290,11 @@ async def test_unknown_nid_404_is_still_audited(client, auth_headers):
 
 
 async def test_post_rate_limited_before_streaming(client, auth_headers, seeded):
-    await _seed_audit(await _op_id(), 10)
+    await _seed_audit(await _op_id(), 30)
     r = await client.post("/enrich/people/investigate", json={"nid": seeded}, headers=auth_headers)
     assert r.status_code == 429
     assert r.json() == {"detail": "rate limited: too many investigations, retry in a minute"}
-    assert len(await _audit_rows()) == 10  # nothing ran
+    assert len(await _audit_rows()) == 30  # nothing ran
 
 
 async def test_post_web_rate_limit_only_for_web(client, auth_headers, seeded, monkeypatch):
@@ -301,7 +309,7 @@ async def test_post_web_rate_limit_only_for_web(client, auth_headers, seeded, mo
 
 
 async def test_get_click_through_rate_limited(client, auth_headers, seeded):
-    await _seed_audit(await _op_id(), 10)
+    await _seed_audit(await _op_id(), 30)
     r = await client.get(f"/enrich/people/{seeded}/investigate", headers=auth_headers)
     assert r.status_code == 429
     r = await client.get("/enrich/people/web:Jean%20Paul/investigate", headers=auth_headers)
@@ -312,3 +320,81 @@ async def test_get_click_through_forwards_ambiguity_fields(client, auth_headers,
     r = await client.get(f"/enrich/people/{seeded}/investigate", headers=auth_headers)
     b = r.json()
     assert b["ambiguous"] is False and b["candidate_count"] == 1
+
+
+# ---- follow-up: concurrency slots ------------------------------------------ #
+
+from app.agents import ratelimit as rl  # noqa: E402
+
+
+async def test_post_and_get_429_while_two_runs_held(client, auth_headers, seeded):
+    uid = await _op_id()
+    a, b = rl.acquire_slot(uid), rl.acquire_slot(uid)
+    try:
+        r = await client.post("/enrich/people/investigate", json={"nid": seeded}, headers=auth_headers)
+        assert r.status_code == 429 and r.json() == {"detail": rl.BUSY}
+        r = await client.get(f"/enrich/people/{seeded}/investigate", headers=auth_headers)
+        assert r.status_code == 429
+        r = await client.get("/enrich/people/web:Jean%20Paul/investigate", headers=auth_headers)
+        assert r.status_code == 429
+        assert rl._active[uid] == 2
+    finally:
+        a.release()
+        b.release()
+    r = await client.post("/enrich/people/investigate", json={"nid": seeded}, headers=auth_headers)
+    assert r.status_code == 200 and _parse(r.text)[-1][0] == "result"
+    r = await client.get(f"/enrich/people/{seeded}/investigate", headers=auth_headers)
+    assert r.status_code == 200
+
+
+async def test_get_404_and_error_release_slot(client, auth_headers, monkeypatch):
+    r = await client.get(f"/enrich/people/{_num()}/investigate", headers=auth_headers)
+    assert r.status_code == 404  # fixture asserts no slot leaked
+
+
+async def test_stream_releases_slot_on_disconnect(monkeypatch):
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return None
+        async def commit(self):
+            return None
+        async def rollback(self):
+            return None
+
+    async def slow(session, user_id, req, emit, **kw):
+        await emit("agent_start", {"agent": "db"})
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(inv, "async_session_maker", lambda: FakeSession())
+    monkeypatch.setattr(inv, "run_investigation", slow)
+    uid = uuid.uuid4()
+    slot = rl.acquire_slot(uid)
+    gen = inv._stream(uid, Request(nid="1"), slot)
+    assert (await gen.__anext__()).startswith("event: agent_start")
+    assert rl._active[uid] == 1
+    await gen.aclose()
+    assert uid not in rl._active
+
+
+async def test_stream_releases_slot_after_error(monkeypatch):
+    async def bad(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(inv, "run_investigation", bad)
+    uid = uuid.uuid4()
+    out = await _drain(inv._stream(uid, Request(nid="1"), rl.acquire_slot(uid)))
+    assert "investigation failed" in "".join(out)
+    assert uid not in rl._active
+
+
+async def test_unstarted_stream_slot_released_by_background(client, auth_headers, seeded):
+    # the endpoint also releases the slot in a background task, so a response
+    # whose body is never iterated cannot leak it (release is idempotent)
+    from app.api.investigate import InvestigateBody, investigate
+    uid = await _op_id()
+    resp = await investigate(InvestigateBody(nid=seeded), operator=User(id=uid, email="x@y.z",
+                                                                         password_hash="x"))
+    assert rl._active[uid] == 1
+    await resp.background()
+    assert uid not in rl._active

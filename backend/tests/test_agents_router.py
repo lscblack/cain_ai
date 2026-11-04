@@ -373,3 +373,33 @@ async def test_reported_spouse_fact_not_duplicated(db_session, monkeypatch):
     node = next(n for n in out["relations"]["nodes"] if n["nid"] == f"g{t}")
     assert node["in_system"] is True and node["source_ref"] == "https://a.example/p"
     assert node["fact_id"] == sp[0]["id"] and node["relation"] == "reported spouse"
+
+
+async def test_auto_web_skipped_when_web_budget_exhausted(db_session):
+    # R2b: the web step is skipped (not failed) for ANY reason once the budget is spent
+    from datetime import datetime, timezone
+    uid = uuid.uuid4()
+    for _ in range(5):
+        db_session.add(AuditLog(actor_id=uid, action="people.investigate",
+                                created_at=datetime.now(timezone.utc),
+                                detail={"query": {"nid": "1", "web": False}, "agents": ["db", "web"]}))
+    await db_session.commit()
+    web = Fake("web", [_f("w", "web")], {"findings": [{"x": 1}]})
+    ag = _fakes(web=web)
+    out = await run_investigation(db_session, uid, Request(nid="1", web=True), _emit_none, agents=ag)
+    assert out["person"] == {"nid": "1"} and out["relations"] is not None
+    assert "web search skipped: rate limited (try again in a minute)" in out["notes"]
+    assert "web" not in out["agents_run"] and out["web_findings"] == []
+    assert web.seen_ids is None  # never ran
+    # auto-web (person not found) is skipped too
+    out = await run_investigation(db_session, uid, Request(nid="2"), _emit_none,
+                                  agents=_fakes(db=Fake("db", data={"people": [], "person_nid": None})))
+    assert "web search skipped: rate limited (try again in a minute)" in out["notes"]
+    assert out["agents_run"] == ["db"]
+
+
+async def test_web_runs_when_budget_left(db_session):
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid="1", web=True),
+                                  _emit_none, agents=_fakes())
+    assert "web" in out["agents_run"]
+    assert not any("rate limited" in n for n in out["notes"])

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.analyst_agent import AnalystAgent
 from app.agents.base import Agent, AgentResult, Ctx, Request, new_fact_id
 from app.agents.db_agent import DbAgent
+from app.agents.ratelimit import WEB_SKIPPED_NOTE, web_budget_exhausted
 from app.agents.relations_agent import RelationsAgent
 from app.agents.web_agent import WebAgent
 from app.database.models.enrich import Person
@@ -86,6 +87,18 @@ async def _reload_subject(ctx: Ctx) -> None:
         ctx.person = None
 
 
+async def _web_budget_spent(ctx: Ctx) -> bool:
+    """True if the operator's web budget is spent (checked before EVERY web step,
+    explicit or automatic). Fails open: a failed check never blocks the run."""
+    try:
+        return await web_budget_exhausted(ctx.session, ctx.user_id)
+    except Exception:  # noqa: BLE001
+        log.exception("web budget check failed")
+        await _rollback(ctx)
+        await _reload_subject(ctx)
+        return False
+
+
 async def _run_one(agent: Agent, name: str, ctx: Ctx, emit: Emit,
                    notes: list[str]) -> AgentResult:
     await emit("agent_start", {"agent": name})
@@ -156,6 +169,11 @@ async def run_investigation(session: AsyncSession, user_id: uuid.UUID, req: Requ
         if not found and db_res is not None and db_res.ok:
             notes.append("no matching person found in the saved database")
         for name in select_agents(req, found)[1:]:
+            if name == "web" and await _web_budget_spent(ctx):
+                # degrade, don't fail: the rest of the investigation still runs
+                notes.append(WEB_SKIPPED_NOTE)
+                await emit("agent_error", {"agent": name})
+                continue
             await step(name)
 
     def data(name: str) -> dict | None:
