@@ -98,3 +98,32 @@ async def test_partner_name_not_in_db(db_session):
     assert links[0].partner_name == mum
     assert links[0].ambiguous is False
     assert links[0].confidence == 40
+
+
+# ---- F11: implausible partner age gap ------------------------------------- #
+
+async def _partner_case(db_session, subject_dob, partner_dob):
+    t = _tag()
+    dad, mum = f"JEAN NZEYIMANA{t}", f"MARIE UWASE{t}"
+    subject = P(f"s{t}", forenames="JEAN", surnames=f"NZEYIMANA{t}", sex="M", date_of_birth=subject_dob)
+    partner = P(f"p{t}", forenames="MARIE", surnames=f"UWASE{t}", sex="F", date_of_birth=partner_dob)
+    kids = [P(f"c{i}{t}", forenames="K", surnames="X", father_names=dad, mother_names=mum,
+              date_of_birth="2000") for i in range(2)]
+    await _seed(db_session, subject, partner, *kids)
+    return subject, partner, await infer_partners(db_session, subject)
+
+
+async def test_partner_with_49_year_gap_is_dropped(db_session):
+    subject, partner, links = await _partner_case(db_session, "1950", "1999")
+    assert all(l.partner is None or l.partner.nid != partner.nid for l in links)
+    assert links and links[0].partner is None and links[0].confidence == 40
+
+
+async def test_partner_with_10_year_gap_is_kept(db_session):
+    subject, partner, links = await _partner_case(db_session, "1960", "15/03/1970")
+    assert [l.partner.nid for l in links] == [partner.nid]
+
+
+async def test_partner_with_unknown_birth_year_is_kept(db_session):
+    subject, partner, links = await _partner_case(db_session, "1950", None)
+    assert [l.partner.nid for l in links] == [partner.nid]

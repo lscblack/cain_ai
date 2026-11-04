@@ -1,6 +1,7 @@
 """WebAgent: corpus dossier + free web search, URL-only (no page fetching)."""
 from __future__ import annotations
 
+import re
 import unicodedata
 from datetime import datetime, timezone
 
@@ -17,6 +18,15 @@ _SEARCH_CONF = 30
 def _fold(t: str) -> str:
     t = unicodedata.normalize("NFKD", t or "")
     return "".join(c for c in t if not unicodedata.combining(c)).casefold()
+
+
+def _mentions(text: str, needle: str) -> bool:
+    """Whole-word/phrase match on folded text ("actor" does not match "factory")."""
+    toks = needle.split()
+    if not toks:
+        return False
+    pat = r"(?<!\w)" + r"\s+".join(re.escape(t) for t in toks) + r"(?!\w)"
+    return re.search(pat, text) is not None
 
 
 def _now() -> str:
@@ -82,7 +92,7 @@ class WebAgent:
                                    ("locations", "location")):
                     for v in dossier.get(key) or []:
                         needle = _fold(str(v))
-                        srcs = [u for u, t in src_text if needle and needle in t]
+                        srcs = [u for u, t in src_text if _mentions(t, needle)]
                         srcs = list(dict.fromkeys(srcs))
                         if srcs:
                             add(claim, str(v), srcs[0], _NAME_ONLY_CONF)

@@ -7,6 +7,7 @@ import logging
 import uuid
 from typing import Awaitable, Callable
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.analyst_agent import AnalystAgent
@@ -14,11 +15,16 @@ from app.agents.base import Agent, AgentResult, Ctx, Request, new_fact_id
 from app.agents.db_agent import DbAgent
 from app.agents.relations_agent import RelationsAgent
 from app.agents.web_agent import WebAgent
+from app.database.models.enrich import Person
 from app.database.repositories.audit_repo import AuditRepository
 
 log = logging.getLogger(__name__)
 
 PER_AGENT_TIMEOUT = 25.0
+MAX_PEOPLE = 5  # candidate cards returned; candidate_count keeps the true total
+# Agents that legitimately need longer than PER_AGENT_TIMEOUT: the analyst runs
+# a local (often CPU-only) model. The SSE heartbeat keeps the stream alive.
+AGENT_TIMEOUTS: dict[str, float] = {"analyst": 180.0}
 
 Emit = Callable[[str, dict], Awaitable[None]]
 
@@ -42,9 +48,8 @@ def _default_agents() -> dict[str, Agent]:
     return {a.name: a for a in (DbAgent(), WebAgent(), RelationsAgent(), AnalystAgent())}
 
 
-def _timeout_label() -> str:
-    t = PER_AGENT_TIMEOUT
-    return f"{t:g}s"
+def _timeout_for(name: str) -> float:
+    return AGENT_TIMEOUTS.get(name, PER_AGENT_TIMEOUT)
 
 
 async def _rollback(ctx: Ctx) -> None:
@@ -62,21 +67,43 @@ async def _rollback(ctx: Ctx) -> None:
         log.exception("session rollback after agent failure failed")
 
 
+async def _reload_subject(ctx: Ctx) -> None:
+    """Re-load the subject after a rollback.
+
+    ``session.rollback()`` expires every ORM instance, so the next attribute
+    access on ``ctx.person`` would lazy-load outside the async greenlet
+    (MissingGreenlet) and kill the relations agent. Costs one query.
+    """
+    db = ctx.results.get("db")
+    nid = (db.data or {}).get("person_nid") if db is not None else None
+    if not nid:
+        return
+    try:
+        ctx.person = (await ctx.session.execute(
+            select(Person).where(Person.nid == nid))).scalars().first()
+    except Exception:  # noqa: BLE001 - never propagate
+        log.exception("re-loading the subject after rollback failed")
+        ctx.person = None
+
+
 async def _run_one(agent: Agent, name: str, ctx: Ctx, emit: Emit,
                    notes: list[str]) -> AgentResult:
     await emit("agent_start", {"agent": name})
     try:
-        res = await asyncio.wait_for(agent.run(ctx), PER_AGENT_TIMEOUT)
+        timeout = _timeout_for(name)
+        res = await asyncio.wait_for(agent.run(ctx), timeout)
     except asyncio.TimeoutError:
         # Note: an agent's own internal TimeoutError is indistinguishable here
         # from the wait_for timeout; both are reported as a timeout.
         res = AgentResult(agent=name, ok=False, facts=[], data={},
-                          error=f"timed out after {_timeout_label()}")
+                          error=f"timed out after {timeout:g}s")
         await _rollback(ctx)
+        await _reload_subject(ctx)
     except Exception as e:  # noqa: BLE001 - agents must never break the run
         res = AgentResult(agent=name, ok=False, facts=[], data={},
                           error=str(e) or type(e).__name__)
         await _rollback(ctx)
+        await _reload_subject(ctx)
     if not res.ok:
         notes.append(f"{name}: {res.error}")
         await emit("agent_error", {"agent": name})
@@ -137,13 +164,21 @@ async def run_investigation(session: AsyncSession, user_id: uuid.UUID, req: Requ
 
     web = data("web") or {}
     analyst = data("analyst") or {}
+    db = data("db") or {}
     out = {
         "person": people[0] if people else None,
-        "people": people,
+        "people": people[:MAX_PEOPLE],
+        "candidate_count": len(people),
+        "ambiguous": bool(db.get("ambiguous")),
         "relations": data("relations"),
         "web_findings": list(web.get("findings") or []),
         "spouse_candidates": list(web.get("spouse_names") or []),
         "analysis": analyst.get("analysis"),
+        # only the COUNT of removed sentences: the sentences themselves are
+        # ungrounded model text and must never reach the client
+        "analysis_dropped_count": len(analyst.get("dropped") or []),
+        "omitted_facts": int(analyst.get("omitted_facts") or 0),
+        "name_collision_warning": bool(web.get("name_collision_warning")),
         "facts": [dataclasses.asdict(f) for f in all_facts],
         "notes": notes,
         "agents_run": run,

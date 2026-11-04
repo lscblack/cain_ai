@@ -130,3 +130,50 @@ def test_merge_edges_keys_web_only_by_normalised_name():
     e2 = Edge("A", None, "jean pierre", "coworker", [f], 60)
     e3 = Edge("A", None, "Marie", "coworker", [f], 60)
     assert len(merge_edges([e1, e2, e3])) == 2
+
+
+# ---- final fix wave ------------------------------------------------------- #
+
+def test_village_only_edge_capped_below_min_confidence():
+    # realistic district ratios that used to clear MIN_EDGE_CONFIDENCE
+    for count, total in ((300, 300_000), (100, 300_000), (20, 1000), (5, 200), (60, 3000)):
+        assert rarity_score(count, total) > 40  # would have been the edge score
+        c = edge_confidence([SF("village", "d/c/v", count, total)])
+        assert c <= 40 < MIN_EDGE_CONFIDENCE, (count, total, c)
+
+
+def test_village_adds_bonus_but_is_never_the_max():
+    phone = SF("phone", "p", 2, 1000)
+    village = SF("village", "d/c/v", 5, 200)  # rarity 70
+    weak_org = SharedFact("organisation", "o", "web", "u", 200, 1000)  # rarity ~23
+    assert edge_confidence([phone, village]) == edge_confidence([phone]) + 5
+    assert edge_confidence([weak_org, village]) == rarity_score(200, 1000) + 5
+    assert edge_confidence([weak_org, village]) < MIN_EDGE_CONFIDENCE
+
+
+async def test_all_shared_phones_kept_on_one_edge(db_session):
+    t = _tag()
+    a = P(f"a{t}", forenames="ANNE", surnames=f"A{t}")
+    b = P(f"b{t}", forenames="BOB", surnames=f"B{t}")
+    await _seed(db_session, a, b)
+    await _fillers(db_session, t)
+    await _seed(db_session,
+                *[PhoneNumber(msisdn=f"07{k}{t}", nid=n) for k in ("1", "2") for n in (a.nid, b.nid)])
+    edges = await find_db_edges(db_session, a)
+    assert len(edges) == 1
+    e = edges[0]
+    assert sorted((f.what, f.value) for f in e.shared) == [("phone", f"071{t}"), ("phone", f"072{t}")]
+    assert e.confidence == edge_confidence([e.shared[0]]) + 5
+
+
+async def test_phone_holder_query_is_bounded_but_count_is_true(db_session, monkeypatch):
+    from app.agents import shared_facts
+    monkeypatch.setattr(shared_facts, "_HOLDER_LIMIT", 2)
+    t = _tag()
+    people = [P(f"h{i}{t}", forenames="H", surnames=f"H{i}{t}") for i in range(5)]
+    await _seed(db_session, *people)
+    await _seed(db_session, *[PhoneNumber(msisdn=f"0790{t}", nid=p.nid) for p in people])
+    edges = await find_db_edges(db_session, people[0])
+    # ORDER BY nid LIMIT 2 -> h0 (self, skipped) and h1
+    assert [e.person_b for e in edges] == [people[1].nid]
+    assert edges[0].shared[0].count == 5

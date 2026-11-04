@@ -18,6 +18,12 @@ MIN_EDGE_CONFIDENCE = 50
 _EXTRA_FACT_BONUS = 5
 _CONFIDENCE_CAP = 95
 _VILLAGE_NEIGHBOUR_LIMIT = 500  # bound the work for very large villages
+_HOLDER_LIMIT = 200  # bound the holders listed per phone (the count stays exact)
+# "Same village" is measured inside the district, so even large villages score
+# 50-70 there; living in the same village is never, on its own, evidence of a
+# link. A village-only edge is therefore capped below MIN_EDGE_CONFIDENCE.
+_VILLAGE_ONLY_CAP = 40
+_VILLAGE = "village"
 
 
 @dataclass
@@ -50,10 +56,21 @@ def rarity_score(count: int, total: int) -> int:
 
 
 def edge_confidence(shared: list[SharedFact]) -> int:
+    """Rarity of the strongest shared fact, +5 per extra independent fact.
+
+    A "village" fact is never the strongest fact when any other fact is
+    shared (it only adds the +5 bonus), and a village-only edge is capped at
+    ``_VILLAGE_ONLY_CAP`` so it always stays a weak link.
+    """
     if not shared:
         return 0
-    best = max(rarity_score(f.count, f.total) for f in shared)
-    return min(_CONFIDENCE_CAP, best + _EXTRA_FACT_BONUS * (len(shared) - 1))
+    strong = [f for f in shared if f.what != _VILLAGE]
+    bonus = _EXTRA_FACT_BONUS * (len(shared) - 1)
+    if not strong:
+        best = max(rarity_score(f.count, f.total) for f in shared)
+        return min(_VILLAGE_ONLY_CAP, best + bonus)
+    best = max(rarity_score(f.count, f.total) for f in strong)
+    return min(_CONFIDENCE_CAP, best + bonus)
 
 
 def _full_name(p: Person) -> str:
@@ -77,23 +94,29 @@ async def find_db_edges(session: AsyncSession, person: Person) -> list[Edge]:
     """All DB-backed edges for ``person`` (weak ones included; callers filter)."""
     me = person.nid
     total = await _scalar(session, select(func.count()).select_from(Person))
-    # other nid -> {relation: SharedFact}
-    found: dict[str, dict[str, SharedFact]] = {}
+    # other nid -> {relation: [SharedFact, ...]} -- ALL shared facts are kept
+    # (deduped by what/value), so an edge states exactly what is shared
+    found: dict[str, dict[str, list[SharedFact]]] = {}
 
     def add(nid: str, relation: str, fact: SharedFact) -> None:
         if nid and nid != me:
-            found.setdefault(nid, {}).setdefault(relation, fact)
+            facts = found.setdefault(nid, {}).setdefault(relation, [])
+            if all((f.what, f.value) != (fact.what, fact.value) for f in facts):
+                facts.append(fact)
 
     # shared phone
     mine = (await session.execute(
         select(distinct(PhoneNumber.msisdn)).where(PhoneNumber.nid == me)
     )).scalars().all()
     for msisdn in mine:
+        holder_filter = (PhoneNumber.msisdn == msisdn, PhoneNumber.nid.is_not(None))
+        count = await _scalar(session, select(func.count(distinct(PhoneNumber.nid)))
+                              .where(*holder_filter))
         holders = (await session.execute(
-            select(distinct(PhoneNumber.nid)).where(
-                PhoneNumber.msisdn == msisdn, PhoneNumber.nid.is_not(None))
+            select(distinct(PhoneNumber.nid)).where(*holder_filter)
+            .order_by(PhoneNumber.nid).limit(_HOLDER_LIMIT)
         )).scalars().all()
-        fact = SharedFact("phone", msisdn, "db", f"enrich_phones:{msisdn}", len(holders), total)
+        fact = SharedFact("phone", msisdn, "db", f"enrich_phones:{msisdn}", count, total)
         for nid in holders:
             add(nid, "shared phone", fact)
 
@@ -136,9 +159,11 @@ async def find_db_edges(session: AsyncSession, person: Person) -> list[Edge]:
     }
     edges: list[Edge] = []
     for nid, rels in found.items():
-        shared = [rels[r] for r in _RELATION_ORDER if r in rels]
-        strongest = max(shared, key=lambda f: rarity_score(f.count, f.total))
-        relation = next(r for r in _RELATION_ORDER if rels.get(r) is strongest)
+        shared = [f for r in _RELATION_ORDER for f in rels.get(r, [])]
+        best = {r: max(rarity_score(f.count, f.total) for f in rels[r]) for r in rels}
+        # the label names the strongest NON-village relation when there is one
+        ranked = [r for r in _RELATION_ORDER if r in rels and r != "same village"] or ["same village"]
+        relation = max(ranked, key=lambda r: best[r])
         other = people.get(nid)
         edges.append(Edge(me, nid, _full_name(other) if other else "", relation,
                           shared, edge_confidence(shared)))

@@ -98,6 +98,9 @@ async def test_weak_links_separated(db_session):
                 PhoneNumber(msisdn=f"0788{t}", nid=strong.nid))
     res = await RelationsAgent().run(_ctx(db_session, s))
     assert strong.nid in [e["person_b"] for e in res.data["associates"]]
+    # F2: every derived associate edge is an inference, never "confirmed"
+    assert all(e["confirmed"] is False
+               for e in res.data["associates"] + res.data["weak_associates"])
     assert all(e["confidence"] >= MIN_EDGE_CONFIDENCE for e in res.data["associates"])
     assert all(e["confidence"] < MIN_EDGE_CONFIDENCE for e in res.data["weak_associates"])
     assert weak.nid in [e["person_b"] for e in res.data["weak_associates"]]
@@ -111,8 +114,9 @@ async def test_web_spouse_in_system_becomes_clickable_node(db_session):
     res = await RelationsAgent().run(_ctx(db_session, s, _web([f"Grace Mukamana{t}"])))
     node = next(n for n in res.data["nodes"] if n["nid"] == sp.nid)
     assert node["in_system"] is True
-    f = next(f for f in res.facts if f.claim == "reported spouse")
-    assert f.source == "web" and f.confidence <= 40 and f.source_ref == "http://w.test/0"
+    assert node["source_ref"] == "http://w.test/0" and node["relation"] == "reported spouse"
+    # F9: the web agent owns the "reported spouse" fact; relations never re-emits it
+    assert not [f for f in res.facts if f.claim == "reported spouse"]
 
 
 async def test_web_only_spouse_is_marked_not_in_system(db_session):
@@ -221,3 +225,22 @@ async def test_runs_without_web_result(db_session):
         res = await RelationsAgent().run(_ctx(db_session, rows[0], web))
         assert res.ok and res.data["kin"]["partners"]
         assert not [f for f in res.facts if f.claim == "reported spouse"]
+
+
+async def test_small_village_in_small_district_stays_weak(db_session):
+    # F2: 5 villagers in a district of 200 has rarity ~70 inside the district,
+    # but "same village" alone is capped below MIN_EDGE_CONFIDENCE.
+    t = _tag()
+    place = dict(district=f"D{t}", cell=f"C{t}", village=f"V{t}")
+    s = P(f"s{t}", forenames="ANNE", surnames=f"A{t}", **place)
+    villagers = [P(f"v{i}{t}", forenames="VIL", surnames=f"L{i}{t}", **place) for i in range(4)]
+    others = [P(f"o{i}{t}", forenames="OTH", surnames=f"R{i}{t}", district=f"D{t}",
+                cell=f"C{t}", village=f"W{i % 7}{t}") for i in range(195)]
+    await _seed(db_session, s, *villagers, *others)
+    res = await RelationsAgent().run(_ctx(db_session, s))
+    assert res.data["associates"] == []
+    weak = {e["person_b"]: e for e in res.data["weak_associates"]}
+    assert set(weak) == {v.nid for v in villagers}
+    for e in weak.values():
+        assert e["confidence"] <= 40 and e["confirmed"] is False
+        assert [f["what"] for f in e["shared"]] == ["village"]

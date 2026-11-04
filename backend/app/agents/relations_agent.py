@@ -21,7 +21,6 @@ from app.database.models.enrich import Person
 from app.database.models.face import Face
 from app.enrich import family
 
-_WEB_SPOUSE_CONF = 40
 _COWORKER_CAP = 60
 
 
@@ -68,8 +67,11 @@ class RelationsAgent:
             if key not in nodes:
                 nodes[key] = {"nid": nid, "name": name, "in_system": in_system,
                               "source_ref": source_ref, **extra}
-            elif nid and not nodes[key]["in_system"]:
-                nodes[key].update(in_system=True)
+            else:
+                if nid and not nodes[key]["in_system"]:
+                    nodes[key].update(in_system=True)
+                for k, v in extra.items():  # e.g. a kin node also reported as spouse
+                    nodes[key].setdefault(k, v)
 
         # ---- kin
         rel = await family.find_relatives(session, person)
@@ -110,25 +112,29 @@ class RelationsAgent:
         web = web if web is not None and web.ok else None
 
         if web is not None:
-            urls = {}
+            # The web agent already emitted one "reported spouse" fact per name;
+            # this agent only REFERENCES it (source_ref + fact_id) on the node and
+            # never re-emits it, so each reported spouse is stated exactly once.
+            spouse_facts: dict[str, Fact] = {}
             for f in web.facts:
                 if f.claim == "reported spouse":
-                    urls.setdefault(f.value, f.source_ref)
+                    spouse_facts.setdefault(f.value, f)
             me = family.person_name(person)
             seen_sp: set[str] = set()
             for sp in web.data.get("spouse_names", []):
                 if family.same_name(sp, me) or _norm(sp) in seen_sp:
                     continue
                 seen_sp.add(_norm(sp))
-                url = urls.get(sp, "")
-                facts.append(Fact("", "reported spouse", sp, "web", url, now, _WEB_SPOUSE_CONF))
+                wf = spouse_facts.get(sp)
+                url = wf.source_ref if wf is not None else ""
+                ref = {"relation": "reported spouse", "fact_id": wf.id if wf is not None else None}
                 found = [p for p in await family._people_named(session, sp) if p.nid != person.nid]
                 if len(found) == 1:
-                    add_node(found[0].nid, family.person_name(found[0]), True, url)
+                    add_node(found[0].nid, family.person_name(found[0]), True, url, **ref)
                 elif found:
-                    add_node(None, sp, False, url, ambiguous=True)
+                    add_node(None, sp, False, url, ambiguous=True, **ref)
                 else:
-                    add_node(None, sp, False, url)
+                    add_node(None, sp, False, url, **ref)
 
         # ---- associates
         edges: list[Edge] = list(await find_db_edges(session, person))
@@ -149,7 +155,9 @@ class RelationsAgent:
         for e in merged:
             add_node(e.person_b, e.name_b, e.person_b is not None, None)
             d = asdict(e)
-            d["confirmed"] = any(f.source == "db" for f in e.shared)
+            # every associate edge is DERIVED from shared facts: an inference,
+            # never a confirmed relationship (the UI labels it "inferred")
+            d["confirmed"] = False
             key = "associates" if e.confidence >= MIN_EDGE_CONFIDENCE else "weak_associates"
             data[key].append(d)
         data["nodes"] = list(nodes.values())

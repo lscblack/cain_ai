@@ -11,10 +11,18 @@ Rules (the load-bearing requirement: no invented data passes this check):
   punctuation) and every id cited anywhere in it exists in ``facts``.
 * A "<label>: not found" placeholder is kept only if it passes the
   no-new-facts filter below; a bare "Not found." is regenerated anyway.
-* In **Confidence & gaps** a sentence is kept if it is validly cited as above,
-  or if it passes a conservative *no-new-facts* filter: no digits and no
-  capitalised word other than the sentence's first word, section-title words
-  and a small whitelist (Web, NID, DB, ID, KAI).
+* In **Confidence & gaps** a sentence is kept if it is validly cited as above.
+  An UNCITED sentence is kept only if BOTH
+  (a) it matches the narrow gap vocabulary ``_GAP_VOCAB`` (case-insensitive):
+      "not found"; "no ... found/recorded/available/evidence/matching";
+      "unconfirmed" / "not confirmed"; "may (also) refer to" / "could refer to"
+      / "different person" / "same name" / "name collision"; "inferred" /
+      "inference"; "conflict(s/ing)"; "limited" / "thin" evidence;
+      "based on"; "only ... source/record/page"; "not enough"; and
+  (b) it passes the *no-new-facts* filter: no digits and no capitalised word
+      other than the sentence's first word, section-title words and a small
+      whitelist (Web, NID, DB, ID, KAI).
+  Everything else uncited in the gaps section is dropped.
 * Cited sentences found before any recognised heading, or under an
   unrecognised heading, are not placed: they go to ``dropped`` prefixed
   ``"[unplaced] "``.
@@ -25,10 +33,14 @@ Limits / residual risk:
 * The check verifies that each cited id is well-formed and EXISTS in the
   bundle. It does NOT verify that the fact semantically supports the claim;
   a sentence can still misstate a cited fact.
-* The no-new-facts filter is lexical. An uncited gaps sentence can still
-  carry an invented detail in lowercase words or in its first word
-  (e.g. "Kigali records are thin."). It cannot carry digits or other
-  proper nouns.
+* The gaps filter is lexical. An uncited gaps sentence that uses the gap
+  vocabulary can still carry an invented lowercase detail alongside it
+  (e.g. "He is probably a smuggler, based on nothing."), or an invented first
+  word ("Kigali records were not found."). It cannot carry digits or other
+  proper nouns, and a sentence without gap vocabulary (e.g. "The subject
+  likely has hidden assets abroad.") is always dropped.
+* A cited sentence anywhere can still misuse a valid citation (semantic
+  misuse is not detected; see the first point).
 """
 from __future__ import annotations
 
@@ -97,6 +109,27 @@ def _validly_cited(sentence: str, known: set[str]) -> bool:
     return bool(ids) and all(i in known for i in ids)
 
 
+_GAP_VOCAB = re.compile(
+    r"\bnot found\b"
+    r"|\bno\b.{0,60}?\b(?:found|recorded|available|evidence|matching)\b"
+    r"|\bunconfirmed\b|\bnot confirmed\b"
+    r"|\bmay (?:also )?refer to\b|\bcould refer to\b|\bdifferent person\b"
+    r"|\bsame name\b|\bname collision\b"
+    r"|\binferred\b|\binference\b"
+    r"|\bconflict(?:s|ing)?\b"
+    r"|\b(?:limited|thin)\b.{0,30}?\bevidence\b|\bevidence\b.{0,30}?\b(?:limited|thin)\b"
+    r"|\bbased on\b"
+    r"|\bonly\b.{0,40}?\b(?:sources?|records?|pages?)\b"
+    r"|\bnot enough\b",
+    re.IGNORECASE,
+)
+
+
+def _allowed_gap(sentence: str) -> bool:
+    """Uncited gaps sentence: gap vocabulary AND no new names/numbers."""
+    return _GAP_VOCAB.search(sentence) is not None and _no_new_facts(sentence)
+
+
 def _no_new_facts(sentence: str) -> bool:
     if re.search(r"\d", sentence):
         return False
@@ -144,7 +177,7 @@ def ground_detail(text: str, facts: list[Fact]) -> GroundResult:
                 else:
                     good.append(sent)
                     kept += 1
-            elif section == GAPS and _no_new_facts(sent):
+            elif section == GAPS and _allowed_gap(sent):
                 good.append(sent)
             else:
                 dropped.append(sent)

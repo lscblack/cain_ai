@@ -255,3 +255,121 @@ async def test_cancelled_error_propagates(db_session):
     with pytest.raises(asyncio.CancelledError):
         await run_investigation(db_session, uuid.uuid4(), Request(nid="1", web=True),
                                 _emit_none, agents=ag)
+
+
+# ---- final fix wave ------------------------------------------------------- #
+
+def _letters() -> str:
+    return "".join(chr(65 + int(c, 16)) for c in uuid.uuid4().hex[:8])
+
+
+async def _seed_family(db_session):
+    t = _letters()
+    sid = str(uuid.uuid4().int)[:16]
+    dad, mum = f"JEAN NZEYIMANA{t}", f"MARIE UWASE{t}"
+    rows = [
+        Person(nid=sid, raw={}, forenames="JEAN", surnames=f"NZEYIMANA{t}", sex="M",
+               date_of_birth="1970"),
+        Person(nid=f"p{t}", raw={}, forenames="MARIE", surnames=f"UWASE{t}", sex="F",
+               date_of_birth="1972"),
+    ] + [Person(nid=f"c{i}{t}", raw={}, forenames="K", surnames="X", father_names=dad,
+                mother_names=mum, date_of_birth="2000") for i in range(2)]
+    for r in rows:
+        db_session.add(r)
+    await db_session.commit()
+    return sid, t
+
+
+@pytest.mark.parametrize("web_sql", ["select pg_sleep(2)", "select * from definitely_missing_table"])
+async def test_real_relations_survive_web_failure(db_session, monkeypatch, web_sql):
+    # F1: the rollback after a failed web agent expires ctx.person; the router
+    # must re-load it so the REAL RelationsAgent still produces kin.
+    monkeypatch.setitem(router.AGENT_TIMEOUTS, "web", 0.3)
+    sid, t = await _seed_family(db_session)
+    ag = {"db": DbAgent(), "web": SqlAgent("web", web_sql), "relations": RelationsAgent()}
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid=sid, web=True),
+                                  _emit_none, agents=ag)
+    assert any(n.startswith("web:") for n in out["notes"])
+    assert not any(n.startswith("relations:") for n in out["notes"]), out["notes"]
+    assert "greenlet" not in repr(out["notes"]).lower()
+    rel = out["relations"]
+    assert rel is not None
+    assert [p["nid"] for p in rel["kin"]["partners"]] == [f"p{t}"]
+    assert {c["nid"] for c in rel["kin"]["children"]} == {f"c0{t}", f"c1{t}"}
+
+
+async def test_result_forwards_counts_and_flags(db_session):
+    people = [{"nid": str(i)} for i in range(7)]
+    ag = _fakes(
+        db=Fake("db", [_f("a")], {"people": people, "person_nid": "0", "ambiguous": True}),
+        web=Fake("web", [], {"findings": [], "spouse_names": [], "name_collision_warning": True}),
+        analyst=Fake("analyst", [], {"analysis": "x", "dropped": ["SMEAR one.", "SMEAR two."],
+                                      "omitted_facts": 3}))
+    out = await run_investigation(db_session, uuid.uuid4(),
+                                  Request(name="X Y", web=True, analyse=True), _emit_none, agents=ag)
+    assert out["candidate_count"] == 7 and out["people"] == people[:5]
+    assert out["person"] == {"nid": "0"}
+    assert out["ambiguous"] is True and out["name_collision_warning"] is True
+    assert out["analysis_dropped_count"] == 2 and out["omitted_facts"] == 3
+    assert "SMEAR" not in repr(out)
+
+
+async def test_result_flag_defaults(db_session):
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid="1"), _emit_none,
+                                  agents=_fakes())
+    assert out["ambiguous"] is False and out["name_collision_warning"] is False
+    assert out["analysis_dropped_count"] == 0 and out["omitted_facts"] == 0
+    assert out["candidate_count"] == 1
+
+
+def test_default_timeouts():
+    assert router.PER_AGENT_TIMEOUT == 25.0
+    assert router.AGENT_TIMEOUTS["analyst"] == 180.0
+    assert router._timeout_for("web") == router.PER_AGENT_TIMEOUT
+    assert router._timeout_for("analyst") == 180.0
+
+
+async def test_analyst_uses_its_own_timeout(db_session, monkeypatch):
+    monkeypatch.setattr(router, "PER_AGENT_TIMEOUT", 0.05)
+    monkeypatch.setitem(router.AGENT_TIMEOUTS, "analyst", 2.0)
+    ag = _fakes(analyst=Fake("analyst", [], {"analysis": "slow"}, sleep=0.3))
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid="1", analyse=True),
+                                  _emit_none, agents=ag)
+    assert out["analysis"] == "slow"
+    assert not any(n.startswith("analyst:") for n in out["notes"])
+
+
+async def test_analyst_timeout_label_uses_its_timeout(db_session, monkeypatch):
+    monkeypatch.setitem(router.AGENT_TIMEOUTS, "analyst", 0.05)
+    ag = _fakes(analyst=Fake("analyst", [], {"analysis": "slow"}, sleep=1))
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid="1", analyse=True),
+                                  _emit_none, agents=ag)
+    assert "analyst: timed out after 0.05s" in out["notes"]
+    assert out["analysis"] is None
+
+
+async def test_reported_spouse_fact_not_duplicated(db_session, monkeypatch):
+    # F9: the web agent emits the "reported spouse" fact; relations must not re-emit it.
+    import app.agents.web_agent as wa
+    from app.agents.web_agent import WebAgent
+    t = _letters()
+    sid = str(uuid.uuid4().int)[:16]
+    db_session.add(Person(nid=sid, raw={}, forenames="JEAN", surnames=f"NZEYIMANA{t}"))
+    db_session.add(Person(nid=f"g{t}", raw={}, forenames="GRACE", surnames=f"MUKAMANA{t}"))
+    await db_session.commit()
+
+    async def fake_dossier(session, term, *, public=False, as_name=False):
+        return {"faces": [], "titles": [], "orgs": [], "locations": [], "pages": [
+            {"url": "https://a.example/p", "title": "Profile",
+             "description": f"Jean Nzeyimana{t} is married to Grace Mukamana{t}."}]}
+    monkeypatch.setattr(wa, "gather_dossier", fake_dossier)
+    monkeypatch.setattr(wa, "search_available", lambda: False)
+    ag = {"db": DbAgent(), "web": WebAgent(), "relations": RelationsAgent()}
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid=sid, web=True),
+                                  _emit_none, agents=ag)
+    sp = [f for f in out["facts"] if f["claim"] == "reported spouse"]
+    assert [f["value"] for f in sp] == [f"Grace Mukamana{t}"]
+    assert sp[0]["source"] == "web" and sp[0]["source_ref"] == "https://a.example/p"
+    node = next(n for n in out["relations"]["nodes"] if n["nid"] == f"g{t}")
+    assert node["in_system"] is True and node["source_ref"] == "https://a.example/p"
+    assert node["fact_id"] == sp[0]["id"] and node["relation"] == "reported spouse"

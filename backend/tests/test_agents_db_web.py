@@ -188,3 +188,16 @@ async def test_db_agent_by_phone(db_session):
     res = await DbAgent().run(ctx)
     assert res.ok and res.data["person_nid"] == n and ctx.person.nid == n
     assert all(f.confidence == 90 for f in res.facts)
+
+
+async def test_provenance_match_is_word_bounded(db_session, monkeypatch):
+    # F8: "actor" must not be cited to a page that only says "factory"
+    d = {"faces": [], "titles": ["Actor"], "orgs": ["Acme"], "locations": [],
+         "pages": [{"url": "https://a.example/1", "title": "Jean", "description": "works in a factory"},
+                   {"url": "https://b.example/2", "title": "Jean", "description": "joined ACME, Ltd."}]}
+    _patch_web(monkeypatch, dossier=d)
+    res = await WebAgent().run(mkctx(db_session, name="Jean Nzeyimana"))
+    title = [x for x in res.facts if x.claim == "title"][0]
+    assert title.confidence == 20 and "origin not isolated" in title.value
+    org = [x for x in res.facts if x.claim == "organisation"][0]
+    assert org.confidence == 40 and org.source_ref == "https://b.example/2"

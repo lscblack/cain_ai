@@ -148,11 +148,52 @@ def test_ground_gaps_legit_lines_kept():
     lines = ["No employer was found.",
              "Web hits may refer to a different person with the same name.",
              "Spouse link is inferred, not confirmed.",
-             "Identity rests on NID records; Online presence is thin."]
+             "Identity is based on NID records; online presence evidence is thin."]
     kept, dropped = ground("## Confidence & gaps\n" + "\n".join(lines), FACTS)
     assert dropped == []
     for line in lines:
         assert line in kept
+
+
+def test_ground_gaps_uncited_smear_dropped():
+    # F3: lowercase invented claims used to pass the lexical no-new-facts filter
+    smear = ["he is probably involved in smuggling and drinks heavily.",
+             "The subject likely has hidden assets abroad."]
+    kept, dropped = ground("## Confidence & gaps\n" + "\n".join(f"- {x}" for x in smear), FACTS)
+    assert dropped == smear
+    assert "smuggling" not in kept and "assets" not in kept
+    assert kept.endswith("## Confidence & gaps\nNot found.")
+
+
+def test_ground_gaps_allow_list_vocabulary_kept():
+    lines = ["No phone number was recorded.",
+             "Marital status is unconfirmed.",
+             "Two records conflict on the date of birth.",
+             "Evidence is limited.",
+             "The partner link is an inference.",
+             "Occupation rests on only one web page.",
+             "There is not enough evidence to describe an employer.",
+             "Web hits could refer to another person; name collision is possible."]
+    kept, dropped = ground("## Confidence & gaps\n" + "\n".join(lines), FACTS)
+    assert dropped == []
+    for line in lines:
+        assert line in kept
+
+
+def test_ground_gaps_allow_list_still_rejects_new_proper_nouns():
+    kept, dropped = ground("## Confidence & gaps\nNo records were found for Kagame Holdings.", FACTS)
+    assert dropped == ["No records were found for Kagame Holdings."]
+
+
+def test_skill_example_gap_lines_kept():
+    skill = load_skill()
+    example = skill.split("Correct output:\n```\n")[1].split("```")[0].strip()
+    gaps = example.split("## Confidence & gaps\n")[1].splitlines()
+    assert len(gaps) >= 3
+    kept, dropped = ground("## Confidence & gaps\n" + "\n".join(gaps), [F(i) for i in range(1, 7)])
+    assert dropped == []
+    for g in gaps:
+        assert g in kept
 
 
 def test_ground_gaps_cited_line_kept():
