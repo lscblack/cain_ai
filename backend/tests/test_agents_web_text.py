@@ -59,3 +59,9 @@ def test_stops_at_sentence_words_and_caps_tokens():
 def test_newline_separated():
     assert extract_spouse_names("wife of Jean Paul\nNzeyimana Marie") == ["Jean Paul"]
     assert extract_spouse_names("Name: X\nmarried to Marie Uwase\nKigali") == ["Marie Uwase"]
+
+
+def test_place_names_end_the_name():
+    assert extract_spouse_names("married to Jean Paul Kigali Rwanda") == ["Jean Paul"]
+    assert extract_spouse_names("wife of Marie Uwase Gasabo") == ["Marie Uwase"]
+    assert extract_spouse_names("wife of Kigali Rwanda") == []

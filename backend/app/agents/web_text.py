@@ -18,6 +18,15 @@ _INSTITUTIONS = {
     "district", "republic",
 }
 _STOP = {"the", "a", "an", "in", "at", "on", "of", "and", "for", "to", "by", "with"}
+_PLACES = {
+    "rwanda", "kigali", "africa", "uganda", "kenya", "tanzania", "burundi", "congo",
+    "province",
+    "gasabo", "kicukiro", "nyarugenge", "bugesera", "gatsibo", "kayonza", "kirehe",
+    "ngoma", "nyagatare", "rwamagana", "burera", "gakenke", "gicumbi", "musanze",
+    "rulindo", "gisagara", "huye", "kamonyi", "muhanga", "nyamagabe", "nyanza",
+    "nyaruguru", "ruhango", "karongi", "ngororero", "nyabihu", "nyamasheke",
+    "rubavu", "rusizi", "rutsiro",
+}
 _DOTTED_TITLE = re.compile(r"\b(Dr|Mr|Mrs|Ms|Hon|Prof)\.(?=\s)")
 _MAX_TOKENS = 4
 
@@ -38,6 +47,8 @@ def extract_spouse_names(text: str) -> list[str]:
                 break
             if not tokens and w.casefold() in _HONORIFICS:
                 continue
+            if tokens and w.casefold() in _PLACES:
+                break
             tokens.append(w)
             if len(tokens) == _MAX_TOKENS:
                 break
