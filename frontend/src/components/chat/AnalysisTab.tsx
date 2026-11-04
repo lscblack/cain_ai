@@ -1,6 +1,6 @@
 import { Markdown } from "@/components/Markdown";
 import type { Fact } from "@/lib/investigate";
-import { splitCitations } from "@/lib/investigate";
+import { splitCitations, stripMarkdownImages } from "@/lib/investigate";
 
 const isUrl = (s: string) => /^https?:\/\//i.test(s);
 
@@ -30,17 +30,19 @@ export function AnalysisTab({ analysis, facts, notes, dropped }: {
   notes: string[];
   dropped?: string[];
 }) {
+  const safeAnalysis = analysis ? stripMarkdownImages(analysis) : analysis;
   const byId = new Map(facts.map((f) => [f.id, f]));
-  const hasMarkers = !!analysis && /\[F\d+\]/.test(analysis);
+  const hasMarkers = !!safeAnalysis && /\[F\d+\]/.test(safeAnalysis);
   return (
     <div>
-      {analysis ? (
+      {safeAnalysis ? (
+        // Markers need inline chips, which Markdown cannot render, so marked text is plain pre-wrap.
         hasMarkers ? (
           <div className="whitespace-pre-wrap text-xs leading-relaxed">
-            {splitCitations(analysis).map((p, i) =>
+            {splitCitations(safeAnalysis).map((p, i) =>
               p.type === "cite" ? <Cite key={i} id={p.value} fact={byId.get(p.value)} /> : <span key={i}>{p.value}</span>)}
           </div>
-        ) : <Markdown>{analysis}</Markdown>
+        ) : <Markdown>{safeAnalysis}</Markdown>
       ) : (
         <div className="kai-metadata">No analysis.</div>
       )}
@@ -49,7 +51,7 @@ export function AnalysisTab({ analysis, facts, notes, dropped }: {
       )}
       {notes.length > 0 && (
         <div className="mt-2 grid gap-0.5">
-          {notes.map((n, i) => <div key={i} className="kai-metadata">{n}</div>)}
+          {notes.map((n, i) => <div key={i} className="kai-metadata">{stripMarkdownImages(n)}</div>)}
         </div>
       )}
     </div>

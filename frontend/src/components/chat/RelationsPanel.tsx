@@ -34,7 +34,7 @@ function SharedChip({ s }: { s: SharedFact }) {
 
 type Open = (nid: string | null, name: string) => void;
 
-function PersonRow({ name, sub, nid, webOnly, ambiguous, confidence, unconfirmed, onOpen, children }: {
+function PersonRow({ disabled, name, sub, nid, webOnly, ambiguous, confidence, unconfirmed, onOpen, children }: {
   name: string;
   sub?: string;
   nid: string | null;
@@ -43,6 +43,7 @@ function PersonRow({ name, sub, nid, webOnly, ambiguous, confidence, unconfirmed
   confidence?: number;
   unconfirmed?: boolean;
   onOpen: Open;
+  disabled: boolean;
   children?: React.ReactNode;
 }) {
   const head = (
@@ -63,7 +64,8 @@ function PersonRow({ name, sub, nid, webOnly, ambiguous, confidence, unconfirmed
   return (
     <div className="rounded border border-line bg-panel p-1.5">
       {clickable ? (
-        <button type="button" className="block w-full text-left hover:bg-panel-2" title="Open this person"
+        <button type="button" disabled={disabled} aria-disabled={disabled}
+          className="block w-full text-left hover:bg-panel-2 disabled:opacity-40" title="Open this person"
           onClick={() => onOpen(nid, name)}>
           {head}
         </button>
@@ -81,7 +83,7 @@ function kinSub(k: KinEntry) {
   return [k.label || k.relation, k.date_of_birth].filter(Boolean).join(" · ");
 }
 
-export function RelationsPanel({ relations, onOpen }: { relations: Relations | null; onOpen: Open }) {
+export function RelationsPanel({ relations, onOpen, disabled = false }: { relations: Relations | null; onOpen: Open; disabled?: boolean }) {
   const [showWeak, setShowWeak] = useState(false);
   if (!relations) return <div className="kai-metadata">No connections found.</div>;
   const { kin, nodes } = relations;
@@ -117,7 +119,7 @@ export function RelationsPanel({ relations, onOpen }: { relations: Relations | n
                   return (
                     <PersonRow key={`${k.nid ?? k.name}-${i}`} name={k.name} sub={kinSub(k)} nid={k.nid}
                       webOnly={!inSystem && !ambiguous} ambiguous={ambiguous}
-                      confidence={k.confidence} onOpen={onOpen} />
+                      confidence={k.confidence} onOpen={onOpen} disabled={disabled} />
                   );
                 })}
               </div>
@@ -138,7 +140,7 @@ export function RelationsPanel({ relations, onOpen }: { relations: Relations | n
               return (
                 <PersonRow key={`${e.person_b ?? e.name_b}-${i}`} name={e.name_b} sub={e.relation}
                   nid={e.person_b} webOnly={e.person_b == null && !ambiguous} ambiguous={ambiguous}
-                  confidence={e.confidence} unconfirmed={!e.confirmed} onOpen={onOpen}>
+                  confidence={e.confidence} unconfirmed={!e.confirmed} onOpen={onOpen} disabled={disabled}>
                   {e.shared.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {e.shared.map((s, j) => <SharedChip key={j} s={s} />)}

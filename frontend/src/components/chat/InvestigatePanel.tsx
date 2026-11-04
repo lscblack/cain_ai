@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Search } from "lucide-react";
 import { Spinner } from "@/components/Async";
 import { AnalysisTab } from "@/components/chat/AnalysisTab";
@@ -15,6 +15,7 @@ interface View {
   analysis: string | null;
   dropped?: string[];
   webOnly?: WebOnlyResult;
+  noMatch?: boolean;
 }
 
 type AgentState = "running" | "done" | "error";
@@ -43,18 +44,42 @@ export function InvestigatePanel({ nid, name }: { nid: string; name: string }) {
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [navErr, setNavErr] = useState<string | null>(null);
   const cache = useRef(new Map<string, View>());
-  const abort = useRef<AbortController | null>(null);
+  const streamAbort = useRef<AbortController | null>(null);
+  const hopAbort = useRef<AbortController | null>(null);
+  const token = useRef(0); // bumped by every run / open / breadcrumb jump; older responses are discarded
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      streamAbort.current?.abort();
+      hopAbort.current?.abort();
+    };
+  }, []);
+
+  /** Invalidate anything in flight and return the new token. */
+  const supersede = () => {
+    hopAbort.current?.abort();
+    hopAbort.current = null;
+    setLoadingKey(null);
+    return ++token.current;
+  };
 
   const run = async (body: { nid?: string; name?: string }, replace: boolean) => {
-    abort.current?.abort();
+    streamAbort.current?.abort();
+    const my = supersede();
+    const live = () => mounted.current && token.current === my;
     const ac = new AbortController();
-    abort.current = ac;
+    streamAbort.current = ac;
     setRunning(true);
     setError(null);
+    setNavErr(null);
     setAgents({});
     let got = false;
     try {
       await investigateStream({ ...body, web, analyse }, (e) => {
+        if (!live()) return;
         if (e.event === "agent_start") setAgents((a) => ({ ...a, [e.data.agent]: "running" }));
         else if (e.event === "agent_done") setAgents((a) => ({ ...a, [e.data.agent]: "done" }));
         else if (e.event === "agent_error") setAgents((a) => ({ ...a, [e.data.agent]: "error" }));
@@ -62,39 +87,52 @@ export function InvestigatePanel({ nid, name }: { nid: string; name: string }) {
         else if (e.event === "result") {
           got = true;
           const v = fromResult(e.data, e.data.person?.nid ?? body.nid ?? `name:${body.name}`, e.data.person?.name ?? body.name ?? name);
-          if (v.key && e.data.person) cache.current.set(v.key, v);
+          if (e.data.person) cache.current.set(v.key, v);
+          else v.noMatch = true;
           setStack((s) => (replace ? [v] : [...s, v]));
           setTab("relations");
-          if (!e.data.person) setError(null);
         }
       }, ac.signal);
-      if (!got) setError((cur) => cur ?? "no result");
+      if (!got && live()) setError((cur) => cur ?? "no result");
     } catch (err: any) {
-      if (err?.name !== "AbortError") setError(err?.message || "failed to load");
+      if (live() && err?.name !== "AbortError") setError(err?.message || "failed to load");
     } finally {
-      if (abort.current === ac) setRunning(false);
+      if (mounted.current && streamAbort.current === ac) setRunning(false);
     }
   };
 
   const open = async (targetNid: string | null, targetName: string) => {
+    if (loadingKey) return;
     const key = targetNid ?? `web:${targetName}`;
+    const my = supersede();
     setNavErr(null);
     const hit = cache.current.get(key);
     if (hit) {
       setStack((s) => [...s, hit]);
       return;
     }
+    const ac = new AbortController();
+    hopAbort.current = ac;
     setLoadingKey(key);
     try {
-      const v = fromOneHop(await personOneHop(key), key, targetName);
+      const v = fromOneHop(await personOneHop(key, ac.signal), key, targetName);
+      if (!mounted.current || token.current !== my) return;
       cache.current.set(key, v);
       setStack((s) => [...s, v]);
       setTab("relations");
     } catch (err: any) {
-      setNavErr(err?.message || "failed to load");
+      if (mounted.current && token.current === my && err?.name !== "AbortError") {
+        setNavErr(err?.message || "failed to load");
+      }
     } finally {
-      setLoadingKey(null);
+      if (mounted.current && token.current === my) setLoadingKey(null);
     }
+  };
+
+  const jumpTo = (i: number) => {
+    supersede();
+    setNavErr(null);
+    setStack((s) => s.slice(0, i + 1));
   };
 
   const current = stack[stack.length - 1];
@@ -148,7 +186,7 @@ export function InvestigatePanel({ nid, name }: { nid: string; name: string }) {
               <span key={`${v.key}-${i}`} className="flex items-center gap-1">
                 {i > 0 && <ChevronRight size={11} className="text-muted" />}
                 {i < stack.length - 1
-                  ? <button type="button" className="hover:underline" onClick={() => setStack((s) => s.slice(0, i + 1))}>{v.label}</button>
+                  ? <button type="button" className="hover:underline" onClick={() => jumpTo(i)}>{v.label}</button>
                   : <span className="text-ink">{v.label}</span>}
               </span>
             ))}
@@ -176,6 +214,8 @@ export function InvestigatePanel({ nid, name }: { nid: string; name: string }) {
               )}
               {current.notes.map((n, i) => <div key={i} className="kai-metadata mt-1">{n}</div>)}
             </div>
+          ) : current.noMatch ? (
+            <div className="kai-metadata">No match found in the system.</div>
           ) : (
             <>
               <div className="mb-2 flex gap-1">
@@ -190,7 +230,7 @@ export function InvestigatePanel({ nid, name }: { nid: string; name: string }) {
                 ))}
               </div>
               {tab === "relations"
-                ? <RelationsPanel key={current.key} relations={current.relations} onOpen={open} />
+                ? <RelationsPanel key={current.key} relations={current.relations} onOpen={open} disabled={loadingKey !== null} />
                 : <AnalysisTab analysis={current.analysis} facts={current.facts} notes={current.notes} dropped={current.dropped} />}
             </>
           )}

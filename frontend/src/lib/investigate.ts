@@ -1,4 +1,4 @@
-import { API_BASE, api, getToken } from "@/lib/api";
+import { API_BASE, getToken } from "@/lib/api";
 
 export interface Fact {
   id: string;
@@ -201,6 +201,22 @@ export async function investigateStream(
   for (const ev of events) onEvent({ event: ev.event, data: ev.data } as InvestigateEvent);
 }
 
-export function personOneHop(nid: string): Promise<OneHopResult | WebOnlyResult> {
-  return api.get<OneHopResult | WebOnlyResult>(`/enrich/people/${encodeURIComponent(nid)}/investigate`);
+export async function personOneHop(nid: string, signal?: AbortSignal): Promise<OneHopResult | WebOnlyResult> {
+  const token = getToken();
+  const resp = await fetch(`${API_BASE}/enrich/people/${encodeURIComponent(nid)}/investigate`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal,
+  });
+  if (!resp.ok) throw new Error(await errorText(resp));
+  return (await resp.json()) as OneHopResult | WebOnlyResult;
+}
+
+/** Remove markdown/HTML images so model text cannot make the browser load a remote URL. */
+export function stripMarkdownImages(text: string): string {
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // ![alt](url)
+    .replace(/!\[[^\]]*\]\[[^\]]*\]/g, "") // ![alt][ref]
+    .replace(/!\[[^\]]*\](?!\()/g, "") // ![ref]
+    .replace(/^[ \t]*\[[^\]]+\]:[ \t]*\S+.*$/gm, "") // [ref]: url
+    .replace(/<img\b[^>]*>?/gi, "");
 }
