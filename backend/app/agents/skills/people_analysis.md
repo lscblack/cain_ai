@@ -62,12 +62,22 @@ Employer, organisation, job title, land holdings, other activity. Reported web i
 Web pages, articles, profiles and accounts in the bundle, with what each says about the person.
 
 ## Confidence & gaps
-Write two to five short bullets: how strong the evidence is overall; which important items were not found; any conflicts; any possible name collisions. This is the only section where a sentence may go without a citation, and then it must follow BOTH rules below, or it is deleted automatically:
-- It uses one of these gap phrases: "not found", "no ... found / recorded / available / evidence / matching", "unconfirmed" or "not confirmed", "may refer to" / "could refer to" / "a different person" / "the same name" / "name collision", "inferred" / "inference", "conflict" / "conflicting", "limited evidence" / "thin evidence", "based on", "only ... source / record / page", "not enough".
-- It contains no new facts: no names, no places, no numbers or dates, and no capitalised words except the first word, section names, Web, NID and DB.
-Any other sentence here (for example a guess about what the person "probably" does) needs a citation. If a gap sentence needs a name or number, cite the fact it comes from.
+Write two to five short bullets about how strong the evidence is, what was not found, conflicts and possible name collisions. Each bullet must either end with a [F#] citation, or be EXACTLY one of the sentence forms below, with nothing added. Any other uncited sentence is deleted automatically.
 
-Style: short sentences, one statement per sentence, bullets allowed. Write "Not found." on its own line under any heading with no supporting facts. You may also write a short "<item>: not found." line (for example "Spouse: not found."); it must contain no names or numbers. No introduction before the first heading and no closing remarks after the last section.
+Sentence forms ({field} is one of: employer, occupation, job title, phone number, phone numbers, email address, email addresses, address, location, date of birth, national ID, nationality, education, spouse, partner, children, parents, siblings, relatives, associates, online presence, social media profile(s), photo(s), web mention(s), organisation(s)):
+- "No {field} was found." / "No {field} were found." / "No {field} found."
+- "{Field} not found." / "{Field} was not found." / "{Field}: not found."
+- "{Field} is unconfirmed." / "{Field} are unconfirmed."
+- "The {field} link is inferred, not confirmed."
+- "The {field} is inferred from shared children, not confirmed."
+- "Web results may refer to a different person with the same name."
+- "Evidence is limited." / "Evidence is limited to the saved database." / "Evidence is limited to web results."
+- "Only one source was found."
+- "Sources conflict."
+
+Use one field per sentence. Never add reasons, guesses, opinions, names, places or numbers to these forms. Anything more needs a citation.
+
+Style: short sentences, one statement per sentence, bullets allowed. Write "Not found." on its own line under any heading with no supporting facts. You may also write a short "{Field}: not found." line using a field from the list in Confidence & gaps (for example "Spouse: not found."); nothing else. No introduction before the first heading and no closing remarks after the last section.
 
 ## Worked example
 This example uses fictional data. Never copy its names or values into a real answer.
@@ -101,9 +111,12 @@ Correct output:
 - One web page reports the name in a staff list (reported, unconfirmed) [F6].
 
 ## Confidence & gaps
-- Identity and location are based on official records; occupation is based on only one web page, matched on the name only.
-- Date of birth, phone number and employer confirmation were not found.
-- The web page may refer to a different person with the same name.
+- Occupation rests on a single name-only web page [F5, F6].
+- Evidence is limited.
+- No date of birth was found.
+- No phone number was found.
+- Employer is unconfirmed.
+- Web results may refer to a different person with the same name.
 ```
 
 A correct gap statement, when a section has no facts:
@@ -122,7 +135,7 @@ Wrong (never do this):
 ## Self-check before answering
 Run through this list and fix any failure before you reply:
 1. Are there exactly six headings, in the order Identity, Location, Family & associates, Occupation & activity, Online presence, Confidence & gaps?
-2. Does every sentence outside Confidence & gaps end with at least one [F#] citation, and does every uncited sentence in Confidence & gaps use one of the listed gap phrases and stay free of names, places and numbers?
+2. Does every sentence outside Confidence & gaps end with at least one [F#] citation, and is every uncited sentence in Confidence & gaps exactly one of the listed sentence forms?
 3. Does every cited id appear in the bundle, and does the sentence say only what that fact says?
 4. Is each statement labelled correctly as confirmed (db), reported (web) or inferred (inference), with the right confidence word?
 5. Is every kin or associate link from an inference described as inferred, with its basis?

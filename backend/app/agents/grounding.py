@@ -9,20 +9,18 @@ Rules (the load-bearing requirement: no invented data passes this check):
 * In the five content sections a sentence is kept only if it **ends** with a
   citation (``[F3]``, ``[F3][F4]`` or ``[F3, F4]``, optionally followed by
   punctuation) and every id cited anywhere in it exists in ``facts``.
-* A "<label>: not found" placeholder is kept only if it passes the
-  no-new-facts filter below; a bare "Not found." is regenerated anyway.
+* A "<field>: not found" placeholder (in any section) is kept only if it is
+  one of the closed gap templates below; a bare "Not found." is regenerated.
 * In **Confidence & gaps** a sentence is kept if it is validly cited as above.
-  An UNCITED sentence is kept only if BOTH
-  (a) it matches the narrow gap vocabulary ``_GAP_VOCAB`` (case-insensitive):
-      "not found"; "no ... found/recorded/available/evidence/matching";
-      "unconfirmed" / "not confirmed"; "may (also) refer to" / "could refer to"
-      / "different person" / "same name" / "name collision"; "inferred" /
-      "inference"; "conflict(s/ing)"; "limited" / "thin" evidence;
-      "based on"; "only ... source/record/page"; "not enough"; and
-  (b) it passes the *no-new-facts* filter: no digits and no capitalised word
-      other than the sentence's first word, section-title words and a small
-      whitelist (Web, NID, DB, ID, KAI).
-  Everything else uncited in the gaps section is dropped.
+  An UNCITED sentence is kept only if, after trimming a leading bullet and the
+  trailing full stop and lower-casing, it FULLY matches one of the closed
+  ``GAP_TEMPLATES`` (e.g. "No {field} was found.", "{Field} is unconfirmed.",
+  "Evidence is limited.", "Sources conflict."), whose only variable slot is a
+  field name from the closed ``GAP_FIELDS`` list. Defence in depth: it is
+  still dropped if it contains a speculation/sensitive marker (``_SPECULATION``:
+  probably, likely, rumour, but, criminal, ethnic, wealth, ...), a digit, more
+  than 20 words, or a capitalised word other than the first word (and the
+  ID/NID/DB acronyms).
 * Cited sentences found before any recognised heading, or under an
   unrecognised heading, are not placed: they go to ``dropped`` prefixed
   ``"[unplaced] "``.
@@ -33,14 +31,11 @@ Limits / residual risk:
 * The check verifies that each cited id is well-formed and EXISTS in the
   bundle. It does NOT verify that the fact semantically supports the claim;
   a sentence can still misstate a cited fact.
-* The gaps filter is lexical. An uncited gaps sentence that uses the gap
-  vocabulary can still carry an invented lowercase detail alongside it
-  (e.g. "He is probably a smuggler, based on nothing."), or an invented first
-  word ("Kigali records were not found."). It cannot carry digits or other
-  proper nouns, and a sentence without gap vocabulary (e.g. "The subject
-  likely has hidden assets abroad.") is always dropped.
-* A cited sentence anywhere can still misuse a valid citation (semantic
-  misuse is not detected; see the first point).
+* Uncited gaps text can only take the fixed template forms, so it cannot
+  carry an invented detail; a template can at most state a wrong gap (e.g.
+  "No employer was found." when one exists in the bundle).
+* A cited sentence anywhere can still attach a valid id to a misstatement
+  (semantic misuse of a citation is not detected; see the first point).
 """
 from __future__ import annotations
 
@@ -73,10 +68,6 @@ _BULLET = re.compile(r"^(\s*(?:[-*•]|\d+[.)])\s+)")
 _BARE_NOT_FOUND = re.compile(r"^not found\.?$", re.IGNORECASE)
 _LABEL_NOT_FOUND = re.compile(r"^[^:]{1,60}:\s*not found\.?$", re.IGNORECASE)
 _WORD = re.compile(r"[A-Za-z][A-Za-z'\-]*")
-_ALLOWED_CAPS = {w for s in SECTIONS for w in _WORD.findall(s)} | {
-    w.capitalize() for s in SECTIONS for w in _WORD.findall(s)
-} | {"Web", "NID", "DB", "ID", "KAI"}
-
 
 @dataclass
 class GroundResult:
@@ -109,32 +100,64 @@ def _validly_cited(sentence: str, known: set[str]) -> bool:
     return bool(ids) and all(i in known for i in ids)
 
 
-_GAP_VOCAB = re.compile(
-    r"\bnot found\b"
-    r"|\bno\b.{0,60}?\b(?:found|recorded|available|evidence|matching)\b"
-    r"|\bunconfirmed\b|\bnot confirmed\b"
-    r"|\bmay (?:also )?refer to\b|\bcould refer to\b|\bdifferent person\b"
-    r"|\bsame name\b|\bname collision\b"
-    r"|\binferred\b|\binference\b"
-    r"|\bconflict(?:s|ing)?\b"
-    r"|\b(?:limited|thin)\b.{0,30}?\bevidence\b|\bevidence\b.{0,30}?\b(?:limited|thin)\b"
-    r"|\bbased on\b"
-    r"|\bonly\b.{0,40}?\b(?:sources?|records?|pages?)\b"
-    r"|\bnot enough\b",
+# Closed list of field names: the ONLY variable slot in a gap template.
+GAP_FIELDS = (
+    "employer", "occupation", "job title", "phone number", "phone numbers",
+    "email address", "email addresses", "address", "location", "date of birth",
+    "national id", "nationality", "education", "spouse", "partner", "children",
+    "parents", "siblings", "relatives", "associates", "online presence",
+    "social media profile", "social media profiles", "photo", "photos",
+    "web mention", "web mentions", "organisation", "organisations",
+)
+_F = "(?:" + "|".join(re.escape(f) for f in sorted(GAP_FIELDS, key=len, reverse=True)) + ")"
+# Closed sentence forms, matched against the normalised line (lowercase, single
+# spaces, no leading bullet, no trailing full stop). Nothing else uncited is kept.
+GAP_TEMPLATES = (
+    "no {F} (?:was |were )?found",
+    "{F} (?:was |were )?not found",
+    "{F}: not found",
+    "not found",
+    "(?:the )?{F} (?:is|are) unconfirmed",
+    "the {F} link is inferred, not confirmed",
+    "the {F} is inferred from shared children, not confirmed",
+    "web results may refer to a different person with the same name",
+    "evidence is limited",
+    "evidence is limited to (?:the saved database|web results)",
+    "only one source was found",
+    "sources conflict",
+)
+_GAP_RES = tuple(re.compile("^" + t.replace("{F}", _F) + "$") for t in GAP_TEMPLATES)
+# Defence in depth: a template line is still dropped if it carries any of these.
+_SPECULATION = re.compile(
+    r"\b(?:probably|likely|unlikely|possibly|perhaps|appears?|seems?|suggest\w*|impl\w+"
+    r"|rumou?rs?|reportedly|allegedly|alleged|describe\w*|claim\w*|whether|but|though"
+    r"|although|yet|however|criminal|crime|convict\w*|fraud\w*|smuggl\w*|violen\w*"
+    r"|abus\w*|corrupt\w*|ethnic\w*|religio\w*|tribe|race|health|disease|hiv|illness"
+    r"|sexual\w*|gay|lesbian|wealth\w*|rich|drug\w*|drunk\w*|drink\w*|hidden)\b",
     re.IGNORECASE,
 )
+_GAP_MAX_WORDS = 20
+_GAP_ACRONYMS = {"ID", "NID", "DB"}  # "national ID" is a listed field
+
+
+def _normalise_gap(sentence: str) -> str:
+    s = _BULLET.sub("", sentence.strip()).strip()
+    s = re.sub(r"\s+", " ", s).rstrip(".").strip()
+    return s.casefold()
 
 
 def _allowed_gap(sentence: str) -> bool:
-    """Uncited gaps sentence: gap vocabulary AND no new names/numbers."""
-    return _GAP_VOCAB.search(sentence) is not None and _no_new_facts(sentence)
-
-
-def _no_new_facts(sentence: str) -> bool:
-    if re.search(r"\d", sentence):
+    """An uncited gaps line (or a "<field>: not found" placeholder) is kept only
+    if it FULLY matches one of the closed GAP_TEMPLATES and carries no
+    speculation marker, digit, extra capitalised word or more than 20 words."""
+    if (_SPECULATION.search(sentence) or re.search(r"\d", sentence)
+            or len(sentence.split()) > _GAP_MAX_WORDS):
         return False
     words = _WORD.findall(sentence)
-    return all(not w[0].isupper() or w in _ALLOWED_CAPS for w in words[1:])
+    if any(w[0].isupper() and w not in _GAP_ACRONYMS for w in words[1:]):
+        return False
+    norm = _normalise_gap(sentence)
+    return any(r.match(norm) for r in _GAP_RES)
 
 
 def ground_detail(text: str, facts: list[Fact]) -> GroundResult:
@@ -163,7 +186,7 @@ def ground_detail(text: str, facts: list[Fact]) -> GroundResult:
         if _BARE_NOT_FOUND.match(body):
             continue  # regenerated for empty sections
         if section is not None and _LABEL_NOT_FOUND.match(body):
-            if _no_new_facts(body):
+            if _allowed_gap(body):
                 placed[section].append(prefix + body)
             else:
                 dropped.append(body)

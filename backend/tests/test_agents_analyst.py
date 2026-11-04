@@ -1,3 +1,4 @@
+import pytest
 import uuid
 
 import re
@@ -79,10 +80,10 @@ def test_ground_drops_unknown_fact_id():
 
 def test_ground_exempts_gaps_section():
     text = ("## Identity\nUncited claim here.\n\n## Confidence & gaps\n"
-            "Date of birth was not found.\nWeb hits may be a different person.")
+            "Date of birth was not found.\nWeb results may refer to a different person with the same name.")
     kept, dropped = ground(text, FACTS)
     assert "Date of birth was not found." in kept
-    assert "Web hits may be a different person." in kept
+    assert "Web results may refer to a different person with the same name." in kept
     assert dropped == ["Uncited claim here."]
 
 
@@ -96,7 +97,7 @@ def test_ground_recognises_heading_variants():
 
 
 def test_ground_rebuilds_six_sections_in_order():
-    text = ("## Confidence & gaps\nEvidence is thin.\n\n## Location\n- Gasabo [F2].\n"
+    text = ("## Confidence & gaps\nEvidence is limited.\n\n## Location\n- Gasabo [F2].\n"
             "## Identity\n- Ana Example [F1].")
     kept, dropped = ground(text, FACTS)
     assert dropped == []
@@ -106,7 +107,7 @@ def test_ground_rebuilds_six_sections_in_order():
         "## Family & associates\nNot found.\n\n"
         "## Occupation & activity\nNot found.\n\n"
         "## Online presence\nNot found.\n\n"
-        "## Confidence & gaps\nEvidence is thin."
+        "## Confidence & gaps\nEvidence is limited."
     )
 
 
@@ -144,45 +145,72 @@ def test_ground_gaps_smuggled_claim_dropped():
     assert kept.endswith("## Confidence & gaps\nNot found.")
 
 
-def test_ground_gaps_legit_lines_kept():
-    lines = ["No employer was found.",
-             "Web hits may refer to a different person with the same name.",
-             "Spouse link is inferred, not confirmed.",
-             "Identity is based on NID records; online presence evidence is thin."]
-    kept, dropped = ground("## Confidence & gaps\n" + "\n".join(lines), FACTS)
-    assert dropped == []
-    for line in lines:
-        assert line in kept
+BYPASS = [
+    "No evidence was found that he is not a criminal, but he likely is.",
+    "Based on his lifestyle he is probably wealthy.",
+    "Unconfirmed reports suggest he drinks heavily.",
+    "He may refer to himself as a pastor but is likely a fraudster; this is unconfirmed.",
+    "His wealth is likely inferred from corruption.",
+    "There are conflicting rumours that he beat his wife.",
+    "Not enough evidence, but he is probably a smuggler.",
+    "No criminal record was found, though neighbours describe him as violent.",
+    "Evidence is limited, yet he appears to have hidden assets abroad.",
+    "It is not confirmed whether he is gay.",
+    "Rwanda records were not found.",
+    "Kigali sources conflict on his ethnicity.",
+    "he is probably involved in smuggling and drinks heavily.",
+    "The subject likely has hidden assets abroad.",
+]
 
 
-def test_ground_gaps_uncited_smear_dropped():
-    # F3: lowercase invented claims used to pass the lexical no-new-facts filter
-    smear = ["he is probably involved in smuggling and drinks heavily.",
-             "The subject likely has hidden assets abroad."]
-    kept, dropped = ground("## Confidence & gaps\n" + "\n".join(f"- {x}" for x in smear), FACTS)
-    assert dropped == smear
-    assert "smuggling" not in kept and "assets" not in kept
-    assert kept.endswith("## Confidence & gaps\nNot found.")
+@pytest.mark.parametrize("line", BYPASS)
+def test_ground_gaps_bypass_sentences_dropped(line):
+    kept, dropped = ground("## Confidence & gaps\n- " + line, FACTS)
+    assert kept.endswith("## Confidence & gaps\nNot found."), kept
+    assert dropped and line.rstrip(".") in " ".join(dropped)
 
 
-def test_ground_gaps_allow_list_vocabulary_kept():
-    lines = ["No phone number was recorded.",
-             "Marital status is unconfirmed.",
-             "Two records conflict on the date of birth.",
-             "Evidence is limited.",
-             "The partner link is an inference.",
-             "Occupation rests on only one web page.",
-             "There is not enough evidence to describe an employer.",
-             "Web hits could refer to another person; name collision is possible."]
-    kept, dropped = ground("## Confidence & gaps\n" + "\n".join(lines), FACTS)
-    assert dropped == []
-    for line in lines:
-        assert line in kept
+TEMPLATES = [
+    "No employer was found.",
+    "No phone numbers were found.",
+    "No email address found.",
+    "Date of birth not found.",
+    "Spouse was not found.",
+    "Children: not found.",
+    "National ID: not found.",
+    "Occupation is unconfirmed.",
+    "Siblings are unconfirmed.",
+    "The partner link is inferred, not confirmed.",
+    "The partner is inferred from shared children, not confirmed.",
+    "Web results may refer to a different person with the same name.",
+    "Evidence is limited.",
+    "Evidence is limited to the saved database.",
+    "Evidence is limited to web results.",
+    "Only one source was found.",
+    "Sources conflict.",
+]
 
 
-def test_ground_gaps_allow_list_still_rejects_new_proper_nouns():
-    kept, dropped = ground("## Confidence & gaps\nNo records were found for Kagame Holdings.", FACTS)
-    assert dropped == ["No records were found for Kagame Holdings."]
+@pytest.mark.parametrize("line", TEMPLATES)
+def test_ground_gaps_templates_kept(line):
+    kept, dropped = ground("## Confidence & gaps\n- " + line, FACTS)
+    assert dropped == [] and f"- {line}" in kept
+
+
+def test_ground_gaps_template_with_unlisted_field_dropped():
+    for line in ("No criminal record was found.", "Ethnicity: not found.", "Religion is unconfirmed."):
+        kept, dropped = ground("## Confidence & gaps\n" + line, FACTS)
+        assert dropped == [line], line
+
+
+def test_ground_label_not_found_outside_gaps_needs_listed_field():
+    kept, dropped = ground("## Family & associates\nSpouse: not found.\nCriminal record: not found.", FACTS)
+    assert "Spouse: not found." in kept and dropped == ["Criminal record: not found."]
+
+
+def test_ground_gaps_cited_speculation_still_follows_cited_rule():
+    kept, dropped = ground("## Confidence & gaps\nThe partner link rests on one shared child [F2].", FACTS)
+    assert dropped == [] and "[F2]" in kept
 
 
 def test_skill_example_gap_lines_kept():
@@ -225,7 +253,7 @@ def test_skill_worked_example_passes_grounding_unchanged():
     example = skill.split("Correct output:\n```\n")[1].split("```")[0].strip()
     facts = [F(i) for i in range(1, 7)]
     r = ground_detail(example, facts)
-    assert r.dropped == [] and r.kept == 6
+    assert r.dropped == [] and r.kept == 7  # six content sentences + one cited gap line
     assert r.text == example
 
 
