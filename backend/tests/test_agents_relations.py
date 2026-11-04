@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from app.agents.base import AgentResult, Ctx, Fact, Request
 from app.agents.relations_agent import RelationsAgent
-from app.agents.shared_facts import MIN_EDGE_CONFIDENCE
+from app.agents.shared_facts import MIN_EDGE_CONFIDENCE, Edge
 from app.database.models.enrich import Person, PhoneNumber
 from app.database.models.face import Face
 
@@ -155,17 +155,22 @@ async def test_coworker_edge_is_web_sourced_unconfirmed(db_session):
     res = await RelationsAgent().run(_ctx(db_session, s, _web(orgs=[f"academie ltd {t}"])))
     edges = res.data["associates"] + res.data["weak_associates"]
     e = next(e for e in edges if e["person_b"] == o.nid)
-    assert e["relation"] == "coworker" and e["confidence"] <= 60
+    assert e in res.data["associates"]
+    assert e["relation"] == "coworker" and e["confidence"] == 60 and e["confirmed"] is False
     assert e["shared"][0]["source"] == "web" and e["shared"][0]["source_ref"] == "http://w.test/org"
     assert all(e["person_b"] != s.nid for e in edges)
 
 
+def _sibs(t, vil_a, vil_b):
+    kw = dict(father_names=f"PAUL KAMANZI{t}", mother_names=f"ROSE INGABIRE{t}")
+    s = P(f"s{t}", forenames="ANNE", surnames=f"A{t}", date_of_birth="2000", **kw, **vil_a)
+    sib = P(f"sib{t}", forenames="ABEL", surnames=f"A{t}", date_of_birth="2002", **kw, **vil_b)
+    return s, sib
+
+
 async def test_sibling_and_coworker_merge_into_one_edge(db_session):
     t = _tag()
-    kw = dict(father_names=f"PAUL KAMANZI{t}", mother_names=f"ROSE INGABIRE{t}",
-              district=f"D{t}", cell=f"C{t}", village=f"V{t}")
-    s = P(f"s{t}", forenames="ANNE", surnames=f"A{t}", date_of_birth="2000", **kw)
-    sib = P(f"sib{t}", forenames="ABEL", surnames=f"A{t}", date_of_birth="2002", **kw)
+    s, sib = _sibs(t, {}, {})
     await _seed(db_session, s, sib)
     await _fillers(db_session, t, 30)
     await _seed(db_session, _face(sib.nid, [f"Acme {t}"]))
@@ -173,9 +178,39 @@ async def test_sibling_and_coworker_merge_into_one_edge(db_session):
     assert [x["nid"] for x in res.data["kin"]["siblings"]] == [sib.nid]
     edges = [e for e in res.data["associates"] + res.data["weak_associates"] if e["person_b"] == sib.nid]
     assert len(edges) == 1
-    whats = {f["what"] for f in edges[0]["shared"]}
-    assert {"organisation", "village", "kin"} <= whats
-    assert "coworker" in edges[0]["relation"]
+    e = edges[0]
+    assert "sibling" in e["relation"] and "coworker" in e["relation"]
+    assert not [f for f in e["shared"] if f["what"] == "kin"]
+    assert [f["what"] for f in e["shared"]] == ["organisation"]
+    assert e["confidence"] <= 60 and e["confirmed"] is False
+
+
+async def test_sibling_sharing_only_common_village_stays_weak(db_session):
+    t = _tag()
+    place = dict(district=f"D{t}", cell=f"C{t}", village=f"V{t}")
+    s, sib = _sibs(t, place, place)
+    await _seed(db_session, s, sib, *[P(f"v{i}{t}", forenames="FILL", surnames=f"ER{t}", **place)
+                                       for i in range(30)])
+    res = await RelationsAgent().run(_ctx(db_session, s))
+    assert not [e for e in res.data["associates"] if e["person_b"] == sib.nid]
+    e = next(e for e in res.data["weak_associates"] if e["person_b"] == sib.nid)
+    assert "sibling" in e["relation"] and "same village" in e["relation"]
+    assert e["confidence"] < MIN_EDGE_CONFIDENCE
+    assert not [f for f in e["shared"] if f["what"] == "kin"]
+
+
+async def test_resolve_web_only_edges(db_session):
+    t = _tag()
+    s = P(f"s{t}", forenames="JEAN", surnames=f"NZEYIMANA{t}")
+    one = P(f"o{t}", forenames="OLI", surnames=f"ONE{t}")
+    d1 = P(f"d1{t}", forenames="DUP", surnames=f"LICATE{t}")
+    d2 = P(f"d2{t}", forenames="DUP", surnames=f"LICATE{t}")
+    await _seed(db_session, s, one, d1, d2)
+    mk = lambda name: Edge(s.nid, None, name, "coworker", [], 0)
+    out = await RelationsAgent()._resolve_web_only(
+        db_session, s, [mk(f"Jean Nzeyimana{t}"), mk(f"Oli One{t}"), mk(f"Dup Licate{t}"), mk(f"No Body{t}")])
+    assert [(e.person_b, e.name_b if e.person_b is None else e.name_b.upper()) for e in out] == [
+        (one.nid, f"OLI ONE{t}"), (None, f"Dup Licate{t}"), (None, f"No Body{t}")]
 
 
 async def test_runs_without_web_result(db_session):

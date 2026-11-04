@@ -115,9 +115,11 @@ class RelationsAgent:
                 if f.claim == "reported spouse":
                     urls.setdefault(f.value, f.source_ref)
             me = family.person_name(person)
+            seen_sp: set[str] = set()
             for sp in web.data.get("spouse_names", []):
-                if family.same_name(sp, me):
+                if family.same_name(sp, me) or _norm(sp) in seen_sp:
                     continue
+                seen_sp.add(_norm(sp))
                 url = urls.get(sp, "")
                 facts.append(Fact("", "reported spouse", sp, "web", url, now, _WEB_SPOUSE_CONF))
                 found = [p for p in await family._people_named(session, sp) if p.nid != person.nid]
@@ -136,16 +138,18 @@ class RelationsAgent:
         existing = {e.person_b for e in edges if e.person_b}
         for nid in existing & set(kin_by_nid):
             r = kin_by_nid[nid]
-            edges.append(Edge(person.nid, nid, family.person_name(r["person"]), r["relation"],
-                              [SharedFact("kin", r["label"], "db", f"person:{nid}", 2, 1_000_000)], 0))
+            # kinship is a relation LABEL only; it never enters Edge.shared, so
+            # confidence is derived from real shared facts alone.
+            edges.append(Edge(person.nid, nid, family.person_name(r["person"]), r["label"], [], 0))
         merged = [e for e in merge_edges(edges) if e.person_b != person.nid]
         for e in merged:
-            if all(f.source == "web" for f in e.shared):
+            if e.shared and all(f.source == "web" for f in e.shared):
                 e.confidence = min(e.confidence, _COWORKER_CAP)
         merged.sort(key=lambda e: -e.confidence)
         for e in merged:
             add_node(e.person_b, e.name_b, e.person_b is not None, None)
             d = asdict(e)
+            d["confirmed"] = any(f.source == "db" for f in e.shared)
             key = "associates" if e.confidence >= MIN_EDGE_CONFIDENCE else "weak_associates"
             data[key].append(d)
         data["nodes"] = list(nodes.values())
@@ -159,7 +163,8 @@ class RelationsAgent:
             return []
         nid_col = Face.extra["nid"].astext
         rows = (await session.execute(
-            select(nid_col, Face.extra).where(nid_col.is_not(None), nid_col != person.nid)
+            select(nid_col, Face.extra).where(nid_col.is_not(None), nid_col != person.nid).limit(2000)
+            # bounded scan of the face index (orgs live in JSON, so no SQL filter)
         )).all()
         total = int((await session.execute(select(func.count()).select_from(Person))).scalar() or 0)
         holders: dict[str, set[str]] = {}
