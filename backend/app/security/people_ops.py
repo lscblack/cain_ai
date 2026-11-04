@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import Request
 from app.agents.router import run_investigation
+from app.database.session import async_session_maker
 
 PEOPLE_INVESTIGATE = "people.investigate"
 PEOPLE_OP_KEYS = frozenset({PEOPLE_INVESTIGATE})
 
 MAX_REL = 10
 MAX_WEB = 5
+MAX_LEN = 200
 _ALLOWED = {"nid", "phone", "name", "web", "analyse"}
 _STR = ("nid", "phone", "name")
 _BOOL = ("web", "analyse")
@@ -42,8 +44,15 @@ def _validate(params: dict) -> tuple[Request | None, str | None]:
             continue
         if not isinstance(v, str):
             return None, f"{k} must be a string"
-        if v.strip():
-            vals[k] = v.strip()
+        v = v.strip()
+        if len(v) > MAX_LEN:
+            return None, "parameter too long"
+        if k == "nid" and v:
+            v = v.replace(" ", "").replace("-", "")
+            if not v.isdigit():
+                return None, "nid must contain digits only (spaces and dashes are ignored)"
+        if v:
+            vals[k] = v
     for k in _BOOL:
         v = params.get(k, False)
         if not isinstance(v, bool):
@@ -54,11 +63,11 @@ def _validate(params: dict) -> tuple[Request | None, str | None]:
     return Request(**vals), None
 
 
-def _trim(lst, truncated: list[bool]):
+def _trim(lst, path: str, cut: dict):
     if isinstance(lst, dict):  # kin: {"parents": [...], ...}
-        return {k: _trim(v, truncated) for k, v in lst.items()}
+        return {k: _trim(v, f"{path}.{k}", cut) for k, v in lst.items()}
     if isinstance(lst, list) and len(lst) > MAX_REL:
-        truncated.append(True)
+        cut[path] = True
         return lst[:MAX_REL]
     return lst
 
@@ -85,23 +94,49 @@ async def run_people_op(session: AsyncSession, *, user_id: uuid.UUID,
     async def _noop(event: str, payload: dict) -> None:
         return None
 
+    # The investigation runs in its OWN session: run_investigation may roll back
+    # on an agent failure, which must never discard the chat turn's uncommitted
+    # work in the caller's session. `session` is therefore unused here.
     try:
-        out = await run_investigation(session, user_id, req, _noop)
+        async with async_session_maker() as own:
+            try:
+                out = await run_investigation(own, user_id, req, _noop)
+                await own.commit()
+            except Exception:
+                await own.rollback()
+                raise
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"investigation failed: {type(e).__name__}"}
+        return {"ok": False, "error": type(e).__name__}
 
-    truncated: list[bool] = []
+    cut: dict = {}
     rel = out.get("relations") or {}
-    relations = {k: _trim(rel.get(k), truncated)
+    relations = {k: _trim(rel.get(k), k, cut)
                  for k in ("kin", "associates", "weak_associates")}
+    relations["truncated"] = cut or False
+    person = out.get("person")
+    people = list(out.get("people") or ([person] if person else []))
+    exact = bool(req.nid or req.phone)
+    ambiguous = (not exact) and len(people) > 1
+    notes = list(out.get("notes") or [])
+    if ambiguous:
+        notes.append("multiple people match this name \u2014 ask the operator which one "
+                     "before treating results as about a specific person")
+    shown = person.get("nid") if isinstance(person, dict) else None
+    others = [{"nid": c.get("nid"), "name": c.get("name")} for c in people
+              if isinstance(c, dict) and c.get("nid") != shown][:5]
     res = {
         "ok": True,
-        "person": out.get("person"),
-        "relations": {**relations, **({"truncated": True} if truncated else {})},
+        "match": "exact" if exact else "fuzzy",
+        "candidate_count": len(people),
+        "ambiguous": ambiguous,
+        "other_candidates": others,
+        "person": person,
+        "relations": relations,
         "web_findings": list(out.get("web_findings") or [])[:MAX_WEB],
         "spouse_candidates": out.get("spouse_candidates") or [],
         "analysis": out.get("analysis"),
-        "notes": list(out.get("notes") or []),
+        "notes": notes,
         "agents_run": list(out.get("agents_run") or []),
+        "confidence_note": "kin, associate and web results are inferred/unconfirmed leads",
     }
     return _strip_bytes(res)
