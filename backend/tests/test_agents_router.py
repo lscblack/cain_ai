@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.agents import router
 from app.agents.base import AgentResult, Fact, Request
@@ -102,15 +102,21 @@ async def test_facts_renumbered_globally_in_order(db_session):
 async def test_audit_written_without_image_bytes(db_session):
     uid = uuid.uuid4()
     tag = uuid.uuid4().hex
-    await run_investigation(db_session, uid, Request(nid=tag, image=b"\x89PNG" * 10),
-                            _emit_none, agents=_fakes())
+    events = []
+
+    async def emit(ev, payload):
+        events.append((ev, payload))
+    res = await run_investigation(db_session, uid,
+                                  Request(nid=tag, image=b"\xff\xd8SENTINEL" * 10),
+                                  emit, agents=_fakes())
+    assert "SENTINEL" not in repr(res) and "SENTINEL" not in repr(events)
     rows = (await db_session.execute(
         select(AuditLog).where(AuditLog.action == "people.investigate",
                                AuditLog.actor_id == uid))).scalars().all()
     assert len(rows) == 1
     d = rows[0].detail
     assert d["query"]["has_image"] is True and d["query"]["nid"] == tag
-    assert "image" not in d["query"] and "PNG" not in str(d)
+    assert "image" not in d["query"] and "SENTINEL" not in repr(d)
     assert d["agents"][0] == "db"
 
 
@@ -179,3 +185,73 @@ async def test_integration_real_agents(db_session):
     assert out["agents_run"] == ["db", "relations"]
     ids = [f["id"] for f in out["facts"]]
     assert len(ids) == len(set(ids)) and ids[0] == "F1"
+
+
+class SqlAgent(Fake):
+    def __init__(self, name, sql, **kw):
+        super().__init__(name, **kw)
+        self.sql = sql
+
+    async def run(self, ctx):
+        await ctx.session.execute(text(self.sql))
+        return AgentResult(self.name, True, [_f("ok")], {"ok": 1})
+
+
+async def _audit_count(db_session, uid):
+    return len((await db_session.execute(select(AuditLog).where(
+        AuditLog.action == "people.investigate", AuditLog.actor_id == uid))).scalars().all())
+
+
+async def test_session_usable_after_timeout(db_session, monkeypatch):
+    monkeypatch.setattr(router, "PER_AGENT_TIMEOUT", 0.2)
+    uid = uuid.uuid4()
+    ag = _fakes(web=SqlAgent("web", "select pg_sleep(2)"),
+                relations=SqlAgent("relations", "select 1"))
+    out = await run_investigation(db_session, uid, Request(nid="1", web=True),
+                                  _emit_none, agents=ag)
+    assert any(n.startswith("web: timed out") for n in out["notes"])
+    assert out["relations"] == {"ok": 1}
+    assert "audit failed" not in out["notes"]
+    assert await _audit_count(db_session, uid) == 1
+
+
+async def test_session_usable_after_sql_error(db_session):
+    uid = uuid.uuid4()
+    ag = _fakes(web=SqlAgent("web", "select * from definitely_missing_table"),
+                relations=SqlAgent("relations", "select 1"))
+    out = await run_investigation(db_session, uid, Request(nid="1", web=True),
+                                  _emit_none, agents=ag)
+    assert any(n.startswith("web:") for n in out["notes"])
+    assert out["relations"] == {"ok": 1}
+    assert "audit failed" not in out["notes"]
+    assert await _audit_count(db_session, uid) == 1
+
+
+async def test_failed_agent_facts_renumbered_unique(db_session):
+    ag = _fakes(web=Fake("web", [_f("w1", "web"), _f("w2", "web")], ok=False, error="partial"))
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid="1", web=True),
+                                  _emit_none, agents=ag)
+    ids = [f["id"] for f in out["facts"]]
+    assert ids == ["F1", "F2", "F3", "F4", "F5"] and len(set(ids)) == 5
+    assert "web: partial" in out["notes"]
+
+
+async def test_missing_agent_noted(db_session):
+    events = []
+
+    async def emit(ev, payload):
+        events.append((ev, payload["agent"]))
+    ag = _fakes()
+    del ag["web"]
+    out = await run_investigation(db_session, uuid.uuid4(), Request(nid="1", web=True),
+                                  emit, agents=ag)
+    assert "web: agent unavailable" in out["notes"]
+    assert ("agent_error", "web") in events
+    assert out["relations"] is not None
+
+
+async def test_cancelled_error_propagates(db_session):
+    ag = _fakes(web=Fake("web", exc=asyncio.CancelledError()))
+    with pytest.raises(asyncio.CancelledError):
+        await run_investigation(db_session, uuid.uuid4(), Request(nid="1", web=True),
+                                _emit_none, agents=ag)

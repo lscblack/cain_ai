@@ -47,17 +47,36 @@ def _timeout_label() -> str:
     return f"{t:g}s"
 
 
+async def _rollback(ctx: Ctx) -> None:
+    """Reset the shared session after a failed/cancelled agent.
+
+    A cancelled or failed query leaves the AsyncSession needing a rollback,
+    which would break later agents and the audit write. Cost: anything
+    flushed but not yet committed earlier in this run (e.g. a newly fetched
+    record persisted by resolve_identity) can be rolled back when a LATER
+    agent fails.
+    """
+    try:
+        await ctx.session.rollback()
+    except Exception:  # noqa: BLE001 - never propagate
+        log.exception("session rollback after agent failure failed")
+
+
 async def _run_one(agent: Agent, name: str, ctx: Ctx, emit: Emit,
                    notes: list[str]) -> AgentResult:
     await emit("agent_start", {"agent": name})
     try:
         res = await asyncio.wait_for(agent.run(ctx), PER_AGENT_TIMEOUT)
     except asyncio.TimeoutError:
+        # Note: an agent's own internal TimeoutError is indistinguishable here
+        # from the wait_for timeout; both are reported as a timeout.
         res = AgentResult(agent=name, ok=False, facts=[], data={},
                           error=f"timed out after {_timeout_label()}")
+        await _rollback(ctx)
     except Exception as e:  # noqa: BLE001 - agents must never break the run
         res = AgentResult(agent=name, ok=False, facts=[], data={},
                           error=str(e) or type(e).__name__)
+        await _rollback(ctx)
     if not res.ok:
         notes.append(f"{name}: {res.error}")
         await emit("agent_error", {"agent": name})
@@ -68,6 +87,12 @@ async def _run_one(agent: Agent, name: str, ctx: Ctx, emit: Emit,
 
 async def run_investigation(session: AsyncSession, user_id: uuid.UUID, req: Request,
                             emit: Emit, *, agents: dict[str, Agent] | None = None) -> dict:
+    """Run db -> web -> relations -> analyst and return the combined result.
+
+    The audit entry is only flushed; the caller owns the commit. A streaming
+    caller must use its own session (not a request-scoped dependency session)
+    and commit explicitly after this returns.
+    """
     agents = agents or _default_agents()
     ctx = Ctx(session=session, user_id=user_id, request=req, person=None,
               results={}, emit=emit)
@@ -80,6 +105,8 @@ async def run_investigation(session: AsyncSession, user_id: uuid.UUID, req: Requ
         nonlocal counter
         agent = agents.get(name)
         if agent is None:
+            notes.append(f"{name}: agent unavailable")
+            await emit("agent_error", {"agent": name})
             return None
         res = await _run_one(agent, name, ctx, emit, notes)
         renum = []
