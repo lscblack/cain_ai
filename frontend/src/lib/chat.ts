@@ -169,12 +169,12 @@ export async function streamMessage(
   signal?: AbortSignal,
   autoApprove = false,
   think = false,
-  mode: "auto" | "multi" = "auto",
+  agent?: string,
 ): Promise<void> {
   const resp = await fetch(`${BASE}/chat/conversations/${conversationId}/messages`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ content, use_tools: useTools, auto_approve: autoApprove, think, mode }),
+    body: JSON.stringify({ content, use_tools: useTools, auto_approve: autoApprove, think, agent }),
     signal,
   });
   if (!resp.ok || !resp.body) {

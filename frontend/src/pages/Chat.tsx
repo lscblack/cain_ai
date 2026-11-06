@@ -14,7 +14,7 @@ import { PageLoading, Spinner } from "@/components/Async";
 import { toolsApi } from "@/lib/tools";
 import { Markdown } from "@/components/Markdown";
 import { JsonView } from "@/components/JsonView";
-import { ActionDeck } from "@/components/chat/ActionDeck";
+import { ActionDeck, AGENT_LABELS } from "@/components/chat/ActionDeck";
 import { MapCard } from "@/components/chat/MapCard";
 import { humanSize, downloadKaiFile, toolGeoPoints, parseMapQuery } from "@/components/chat/util";
 import { useVoice, speak, stopSpeaking } from "@/components/chat/useVoice";
@@ -56,6 +56,7 @@ interface LiveTurn {
   error: string | null;
   thinking: boolean;
   pending: PendingApproval | null;
+  agentInfo: { agent: string; reason: string }[] | null;
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -65,6 +66,7 @@ const SEV_COLOR: Record<string, string> = {
 
 function applyEvent(turn: LiveTurn, e: SseEvent) {
   if (e.event === "thinking") turn.thinking = true;
+  else if (e.event === "agent_selected") { (turn.agentInfo ||= []).push({ agent: e.data.agent, reason: e.data.reason }); }
   else if (e.event === "tool_proposed") {
     turn.pending = { operation: e.data.operation, params: e.data.params, preview: e.data.preview, step: e.data.step };
     turn.thinking = false;
@@ -416,8 +418,8 @@ export function Chat() {
   const [autoApprove, setAutoApprove] = useState(() => LS.getBool("kai.autoApprove", true));
   // Qwen3-style reasoning: slower on CPU. Remembered per conversation (kai.think.<id>).
   const [think, setThink] = useState(false);
-  // Multi-agent: decompose a big task into subtasks, run a sub-agent per subtask.
-  const [multi, setMulti] = useState(() => LS.getBool("kai.multi", false));
+  // Agent: "auto" lets the backend route each turn; otherwise force a specialist.
+  const [agent, setAgent] = useState(() => LS.getStr("kai.agent", "auto"));
   // Voice: hands-free. wake = require "KAI …" before acting; speak = read replies aloud.
   const [wakeOn, setWakeOn] = useState(() => LS.getBool("kai.wake", false));
   const [speakOn, setSpeakOn] = useState(() => LS.getBool("kai.speak", false));
@@ -427,7 +429,7 @@ export function Chat() {
   const [scopeWeb, setScopeWeb] = useState(() => LS.getBool("kai.scopeWeb", true));
   useEffect(() => { LS.setBool("kai.useTools", useTools); }, [useTools]);
   useEffect(() => { LS.setBool("kai.autoApprove", autoApprove); }, [autoApprove]);
-  useEffect(() => { LS.setBool("kai.multi", multi); }, [multi]);
+  useEffect(() => { LS.setStr("kai.agent", agent); }, [agent]);
   useEffect(() => { LS.setBool("kai.wake", wakeOn); }, [wakeOn]);
   useEffect(() => { LS.setBool("kai.speak", speakOn); }, [speakOn]);
   useEffect(() => { LS.setBool("kai.scopeDb", scopeDb); }, [scopeDb]);
@@ -507,7 +509,7 @@ export function Chat() {
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    const turn: LiveTurn = { content: "", tools: [], findings: [], error: null, thinking: true, pending: null };
+    const turn: LiveTurn = { content: "", tools: [], findings: [], error: null, thinking: true, pending: null, agentInfo: null };
     setLive({ ...turn });
     setStreaming(true);
     try {
@@ -676,7 +678,7 @@ export function Chat() {
       id: `local-${Date.now()}`, role: "user", content, tool_calls: null,
       tool_results: null, meta: {}, created_at: new Date().toISOString(),
     }]);
-    const turn: LiveTurn = { content: "", tools: [], findings: [], error: null, thinking: true, pending: null };
+    const turn: LiveTurn = { content: "", tools: [], findings: [], error: null, thinking: true, pending: null, agentInfo: null };
     setLive({ ...turn });
     setStreaming(true);
     const ctrl = new AbortController();
@@ -686,7 +688,7 @@ export function Chat() {
       await streamMessage(convId!, content, useTools, (e) => {
         applyEvent(turn, e);
         setLive({ ...turn, tools: [...turn.tools], findings: [...turn.findings] });
-      }, ctrl.signal, autoApprove, think, multi ? "multi" : "auto");
+      }, ctrl.signal, autoApprove, think, agent === "auto" ? undefined : agent);
     } catch (err: any) {
       if (ctrl.signal.aborted) return;   // navigated away: the turn continues server-side
       // connection dropped mid-turn: if KAI is still on it, re-attach instead of failing
@@ -849,6 +851,11 @@ export function Chat() {
           {live && (
             <div className="mb-4">
               <div className="kai-metadata mb-1">KAI</div>
+              {live.agentInfo?.map((a, i) => (
+                <div key={i} className="kai-metadata mb-1">
+                  {AGENT_LABELS[a.agent] ?? a.agent} · {a.reason}
+                </div>
+              ))}
               {live.tools.map((t, i) => <ToolCard key={i} t={t} />)}
               {live.pending && <ApprovalCard pending={live.pending} onDecide={decide} busy={deciding} />}
               {live.content && (
@@ -942,8 +949,8 @@ export function Chat() {
             setThink(v);
             try { if (activeId) localStorage.setItem(`kai.think.${activeId}`, v ? "1" : "0"); } catch { /* storage blocked */ }
           }}
-          multi={multi}
-          onMultiChange={setMulti}
+          agent={agent}
+          onAgentChange={setAgent}
           voiceSupported={voice.supported}
           wake={wakeOn}
           onWakeChange={changeWake}

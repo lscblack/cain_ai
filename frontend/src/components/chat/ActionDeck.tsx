@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   Cpu, Wrench, Zap, Brain, ChevronDown, Activity, FolderOpen, Download, Trash2,
-  RefreshCw, Square, Command, ScrollText, Loader2, Network, Radio, Volume2, GraduationCap,
+  RefreshCw, Square, Command, ScrollText, Loader2, Radio, Volume2, GraduationCap,
 } from "lucide-react";
 import {
   chatApi, type ModelStatus, type Conversation, type ActiveRun, type KaiAsset,
@@ -9,6 +9,16 @@ import {
 import { CapabilityPalette } from "@/components/chat/CapabilityPalette";
 import { humanSize, downloadKaiFile } from "@/components/chat/util";
 import { Markdown } from "@/components/Markdown";
+
+export const AGENT_LABELS: Record<string, string> = {
+  auto: "Auto",
+  shell_network: "Shell & Network",
+  web_research: "Web Research",
+  map_geo: "Map & Geo",
+  people_identity: "People & Identity",
+  investigations_files: "Investigations & Files",
+  general: "General",
+};
 
 interface Props {
   status: ModelStatus | null;
@@ -20,8 +30,8 @@ interface Props {
   onAutoApproveChange: (v: boolean) => void;
   think: boolean;
   onThinkChange: (v: boolean) => void;
-  multi: boolean;
-  onMultiChange: (v: boolean) => void;
+  agent: string;
+  onAgentChange: (v: string) => void;
   voiceSupported: boolean;
   wake: boolean;
   onWakeChange: (v: boolean) => void;
@@ -148,6 +158,17 @@ export function ActionDeck(p: Props) {
             })}
           </select>
         </label>
+        <label className="mb-2 flex flex-col gap-1">
+          <span className="kai-metadata">agent</span>
+          <select
+            value={p.agent}
+            onChange={(e) => p.onAgentChange(e.target.value)}
+            className="rounded border border-line bg-panel-2 px-2 py-1 text-xs outline-none focus:border-current"
+            style={{ color: "inherit" }}
+          >
+            {Object.entries(AGENT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
         <div className="grid gap-1.5">
           <Toggle checked={p.useTools} onChange={p.onUseToolsChange} icon={Wrench}
             label="Tools" hint="Let KAI select and run real tools" />
@@ -157,8 +178,6 @@ export function ActionDeck(p: Props) {
           )}
           <Toggle checked={p.think} onChange={p.onThinkChange} icon={Brain}
             label="Think" hint="Qwen3 reasoning: more accurate, slower on CPU" />
-          <Toggle checked={p.multi} onChange={p.onMultiChange} icon={Network}
-            label="Multi-agent" hint="Split a big task into subtasks and run a focused sub-agent on each (sequential)" />
           {p.voiceSupported && <>
             <Toggle checked={p.wake} onChange={p.onWakeChange} icon={Radio}
               label="Wake word" hint="When listening, only act on utterances that start with “KAI …”" />
