@@ -28,7 +28,8 @@ from app.ai.ollama import GenParams, OllamaError, OllamaProvider
 from app.ai.router import AIMessage
 from app.core.config import get_settings
 from app.security import registry, service
-from app.security.agents.profiles import AgentProfile
+from app.security.agents.profiles import PROFILES, AgentProfile
+from app.security.agents.router import route
 
 FINDING_FIELDS = (
     "title", "description", "severity", "confidence", "status", "asset",
@@ -1106,6 +1107,7 @@ async def run_multi(
     approve: "ApproveFn | None" = None,
     confirm: "ApproveFn | None" = None,
     think: bool = False,
+    agent: str | None = None,
 ) -> AsyncIterator[dict]:
     """Multi-agent mode: decompose the objective, run each subtask as its own
     focused turn (sequentially, to stay within the host's RAM budget), then
@@ -1118,9 +1120,13 @@ async def run_multi(
     plan = await _plan_subtasks(provider, objective, think) if objective else []
     # Nothing to split → behave exactly like a normal turn.
     if len(plan) < 2:
+        result = await route(objective, forced=agent)
+        yield {"type": "agent_selected", "agent": result["agent"],
+               "reason": result["reason"], "confidence": result["confidence"]}
         async for ev in run_turn(
             session, user_id=user_id, conversation_id=conversation_id, history=history,
             provider=provider, approve=approve, confirm=confirm, think=think,
+            agent=PROFILES[result["agent"]],
         ):
             yield ev
         return
@@ -1136,12 +1142,16 @@ async def run_multi(
     results: list[dict] = []
 
     for i, st in enumerate(plan, 1):
+        result = await route(st["task"], forced=agent)
+        yield {"type": "agent_selected", "agent": result["agent"],
+               "reason": result["reason"], "confidence": result["confidence"], "subtask": i}
         yield {"type": "token", "text": f"\n\n### ▸ Subtask {i}/{total}: {st['title']}\n"}
         sub_hist = [AIMessage(role="user", content=_subtask_prompt(objective, i, total, results, st))]
         sub_answer = ""
         async for ev in run_turn(
             session, user_id=user_id, conversation_id=conversation_id, history=sub_hist,
             provider=provider, approve=approve, confirm=confirm, think=think,
+            agent=PROFILES[result["agent"]],
         ):
             if ev.get("type") == "final":
                 sub_answer = ev.get("answer", "") or ""

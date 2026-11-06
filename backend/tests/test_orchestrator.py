@@ -210,3 +210,48 @@ async def test_run_turn_agent_allows_tool_inside_allowlist(db_session, monkeypat
     assert [e for e in events if e["type"] == "tool_call" and e["operation"] == "web.search"]
     assert [e for e in events if e["type"] == "tool_result" and e["operation"] == "web.search"]
     assert not [e for e in events if e["type"] == "tool_denied"]
+
+
+class FakeMultiProvider(FakeProvider):
+    """Adds ``chat`` (planner first, synthesis last) on top of the streamed
+    ``chat_stream`` queue (one scripted run_turn reply per subtask)."""
+
+    def __init__(self, chat_replies, stream_replies):
+        super().__init__(stream_replies)
+        self._chat = list(chat_replies)
+
+    async def chat(self, msgs, *, params=None):
+        return self._chat.pop(0)
+
+
+async def test_run_multi_single_subtask_emits_one_agent_selected(db_session):
+    plan = json.dumps([{"title": "Answer", "task": "search the web for X"}])
+    final = json.dumps({"action": "final", "answer": "done", "findings": []})
+    events = await _drain(orch.run_multi(
+        db_session, user_id=uuid.uuid4(), conversation_id=None,
+        history=[AIMessage(role="user", content="search the web for X")],
+        provider=FakeMultiProvider([plan], [final]),
+    ))
+    selected = [e for e in events if e["type"] == "agent_selected"]
+    assert len(selected) == 1
+    assert selected[0]["agent"] == "web_research"
+    assert events[-1]["type"] == "final"
+
+
+async def test_run_multi_forced_agent_overrides_routing_for_every_subtask(db_session):
+    plan = json.dumps([
+        {"title": "A", "task": "run shell command id"},
+        {"title": "B", "task": "search the web"},
+    ])
+    finals = [json.dumps({"action": "final", "answer": f"{x} done", "findings": []}) for x in "ab"]
+    events = await _drain(orch.run_multi(
+        db_session, user_id=uuid.uuid4(), conversation_id=None,
+        history=[AIMessage(role="user", content="do A then B")],
+        provider=FakeMultiProvider([plan, "final synthesis text"], finals),
+        agent="general",
+    ))
+    selected = [e for e in events if e["type"] == "agent_selected"]
+    assert len(selected) == 2
+    assert all(e["agent"] == "general" and e["reason"] == "manual" for e in selected)
+    assert [e["subtask"] for e in selected] == [1, 2]
+    assert events[-1]["type"] == "final"
