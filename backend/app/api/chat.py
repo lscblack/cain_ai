@@ -33,6 +33,7 @@ from app.database.models.user import User
 from app import chat_runs
 from app.database.session import async_session_maker, get_session
 from app.security import orchestrator
+from app.security.agents.profiles import AGENT_IDS
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -100,6 +101,8 @@ class NewMessage(BaseModel):
     # "auto" = one agent turn (default). "multi" = decompose into subtasks and
     # run a focused sub-agent per subtask (sequential), then synthesize.
     mode: str = Field(default="auto", pattern="^(auto|multi)$")
+    # Force a specific agent for every subtask; None = auto-route.
+    agent: str | None = None
 
 
 def _conv_out(c: Conversation) -> dict:
@@ -497,6 +500,7 @@ async def _drive_turn(
     run: chat_runs.ChatRun, *, operator_id: uuid.UUID, conv_id: uuid.UUID,
     history: list[AIMessage], use_tools: bool, auto_approve: bool, provider: OllamaProvider,
     requested_model: str | None = None, think: bool = False, mode: str = "auto",
+    agent: str | None = None,
 ) -> None:
     """Runs one turn to completion in the background, independent of any client.
     Frames are recorded on ``run``; the assistant message is always persisted.
@@ -537,7 +541,7 @@ async def _drive_turn(
 
         try:
             if use_tools:
-                driver = orchestrator.run_multi if mode == "multi" else orchestrator.run_turn
+                driver = orchestrator.run_multi
                 turn = driver(
                     session, user_id=operator_id, conversation_id=conv_id,
                     history=history, provider=provider,
@@ -545,7 +549,7 @@ async def _drive_turn(
                     # confirm is ALWAYS available (even in auto-run) so pip/go/github
                     # installs can prompt the operator to confirm now-vs-later.
                     confirm=approve_cb,
-                    think=think,
+                    think=think, agent=agent,
                 )
                 async for kind, ev in _with_heartbeat(turn):
                     if kind == "ping":
@@ -614,6 +618,8 @@ async def post_message(
     session: AsyncSession = Depends(get_session),
     provider: OllamaProvider = Depends(get_chat_provider),
 ) -> StreamingResponse:
+    if body.agent is not None and body.agent not in AGENT_IDS:
+        raise HTTPException(status_code=422, detail=f"Unknown agent '{body.agent}'")
     conv = await _get_conv_or_404(conv_id, operator.id, session)
     run = chat_runs.start_run(conv.id, operator.id)
     if run is None:
@@ -633,7 +639,7 @@ async def post_message(
     run.task = asyncio.create_task(_drive_turn(
         run, operator_id=operator.id, conv_id=conv.id, history=history,
         use_tools=body.use_tools, auto_approve=body.auto_approve, provider=provider,
-        requested_model=conv.model, think=body.think, mode=body.mode,
+        requested_model=conv.model, think=body.think, mode=body.mode, agent=body.agent,
     ))
     return StreamingResponse(run.tail(0), media_type="text/event-stream")
 

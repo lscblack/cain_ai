@@ -28,6 +28,10 @@ class FakeOllama:
     async def list_models(self):
         return ["kai-security:latest", "llama3:latest"]
 
+    async def chat(self, messages, *, params=None):
+        # Used by run_multi's planner; "[]" = no plan -> single-subtask path.
+        return "[]"
+
     async def chat_stream(self, messages, *, params=None):
         # Orchestrator (tool mode) consumes one scripted reply per call; the
         # plain path consumes the stream chunks.
@@ -198,7 +202,8 @@ async def test_tool_call_pauses_for_approval_and_runs_after_approve(client, auth
     cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
     task = asyncio.ensure_future(client.post(
         f"/chat/conversations/{cid}/messages",
-        json={"content": "check requests for known CVEs", "use_tools": True}, headers=auth_headers,
+        json={"content": "check requests for known CVEs", "use_tools": True,
+              "agent": "shell_network"}, headers=auth_headers,
     ))
     run = await _wait_for_pending(cid)
     assert not calls, "must not run before the operator approves it"
@@ -233,7 +238,8 @@ async def test_declining_a_proposed_tool_call_skips_it(client, auth_headers, mon
     cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
     task = asyncio.ensure_future(client.post(
         f"/chat/conversations/{cid}/messages",
-        json={"content": "check requests for known CVEs", "use_tools": True}, headers=auth_headers,
+        json={"content": "check requests for known CVEs", "use_tools": True,
+              "agent": "shell_network"}, headers=auth_headers,
     ))
     await _wait_for_pending(cid)
     appr = await client.post(f"/chat/conversations/{cid}/approve", json={"approved": False}, headers=auth_headers)
@@ -266,3 +272,28 @@ async def test_approve_with_nothing_pending_is_a_conflict(client, auth_headers):
     cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
     r = await client.post(f"/chat/conversations/{cid}/approve", json={"approved": True}, headers=auth_headers)
     assert r.status_code == 404  # no run at all for this conversation yet
+
+
+async def test_post_message_forwards_agent_field_and_emits_agent_selected(client, auth_headers):
+    final = json.dumps({"action": "final", "answer": "done", "findings": []})
+    _use_fake(client, FakeOllama(replies=[final]))
+    cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
+    resp = await client.post(
+        f"/chat/conversations/{cid}/messages",
+        json={"content": "search the web for X", "use_tools": True, "agent": "web_research"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    sel = [e for e in events if e["event"] == "agent_selected"]
+    assert sel and sel[0]["data"]["agent"] == "web_research"
+
+
+async def test_post_message_rejects_unknown_agent(client, auth_headers):
+    _use_fake(client, FakeOllama())
+    cid = (await client.post("/chat/conversations", json={}, headers=auth_headers)).json()["id"]
+    resp = await client.post(
+        f"/chat/conversations/{cid}/messages",
+        json={"content": "x", "agent": "bogus"}, headers=auth_headers,
+    )
+    assert resp.status_code == 422
