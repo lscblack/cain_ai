@@ -174,18 +174,19 @@ async def test_run_turn_agent_blocks_tool_outside_allowlist(db_session, monkeypa
         return {"ok": True, "status": "ok", "stdout": "x", "operation": kw["op_key"]}
 
     monkeypatch.setattr(orch.service, "run_operation", fake_run_operation)
-    tool_reply = json.dumps({"action": "tool", "operation": "shell.run", "params": {"command": "id"}})
+    tool_reply = json.dumps({"action": "tool", "operation": "dns.records", "params": {"domain": "example.com"}})
     final_reply = json.dumps({"action": "final", "answer": "done", "findings": []})
 
     events = await _drain(orch.run_turn(
         db_session, user_id=uuid.uuid4(), conversation_id=None,
-        history=[AIMessage(role="user", content="run id")],
+        history=[AIMessage(role="user", content="resolve example.com")],
         provider=FakeProvider([tool_reply, final_reply]),
         agent=PROFILES["web_research"],
     ))
     denied = [e for e in events if e["type"] == "tool_denied"]
-    assert denied and denied[0]["operation"] == "shell.run"
-    assert not [e for e in events if e["type"] == "tool_call" and e["operation"] == "shell.run"]
+    assert denied and denied[0]["operation"] == "dns.records"
+    assert not [e for e in events if e["type"] in ("tool_call", "tool_result")
+                and e["operation"] == "dns.records"]
     assert ran == []
 
 
@@ -207,4 +208,5 @@ async def test_run_turn_agent_allows_tool_inside_allowlist(db_session, monkeypat
         agent=PROFILES["web_research"],
     ))
     assert [e for e in events if e["type"] == "tool_call" and e["operation"] == "web.search"]
+    assert [e for e in events if e["type"] == "tool_result" and e["operation"] == "web.search"]
     assert not [e for e in events if e["type"] == "tool_denied"]
