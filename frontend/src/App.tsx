@@ -27,6 +27,7 @@ import { System } from "@/pages/System";
 import { Chat } from "@/pages/Chat";
 import { Security } from "@/pages/Security";
 import { Home } from "@/pages/Home";
+import { Voice } from "@/pages/Voice";
 
 export default function App() {
   const { operator, loading } = useAuth();
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/security" element={<Security />} />
+            <Route path="/voice" element={<Voice />} />
             <Route path="/search" element={<Search />} />
             <Route path="/phone" element={<Phone />} />
             <Route path="/email" element={<Email />} />

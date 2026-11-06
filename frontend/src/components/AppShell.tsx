@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -23,6 +23,7 @@ import {
   LogOut,
   MessageSquare,
   ShieldCheck,
+  AudioLines,
 } from "lucide-react";
 
 import { StatusIndicator } from "@/components/StatusIndicator";
@@ -30,6 +31,7 @@ import { PairMobile } from "@/components/PairMobile";
 import { PowerControl } from "@/components/PowerControl";
 import { useAuth } from "@/lib/auth";
 import { useActiveRuns } from "@/lib/kaiWork";
+import { liveConversion } from "@/lib/liveConversion";
 
 const BASE_TITLE = document.title;
 
@@ -37,6 +39,7 @@ const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: LayoutDashboard, label: "Dashboard", to: "/" },
   { icon: MessageSquare, label: "KAI Chat", to: "/chat" },
   { icon: ShieldCheck, label: "Security", to: "/security" },
+  { icon: AudioLines, label: "Voice Intelligence", to: "/voice" },
   { icon: Search, label: "Search", to: "/search" },
   { icon: FolderSearch, label: "Investigations", to: "/investigations" },
   { icon: Users, label: "Faces", to: "/face" },
@@ -61,12 +64,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [pairOpen, setPairOpen] = useState(false);
   const runs = useActiveRuns();
   const navigate = useNavigate();
+  // Selecting primitives: level meters update the snapshot many times a second.
+  const liveState = useSyncExternalStore(liveConversion.subscribe, () => liveConversion.getSnapshot().state);
+  const liveDelayed = useSyncExternalStore(liveConversion.subscribe, () => liveConversion.getSnapshot().delayed);
+  const liveNear = useSyncExternalStore(liveConversion.subscribe, () => liveConversion.getSnapshot().nearLive);
+  const voiceLive = liveState === "live" || liveState === "starting" || liveState === "reconnecting";
+  const voiceLabel = liveState === "starting" ? "Voice conversion starting"
+    : liveState === "reconnecting" ? "Voice conversion reconnecting"
+    : liveDelayed ? "Voice conversion delayed"
+    : liveNear ? "Voice conversion on (seconds behind)" : "Voice conversion live";
 
   // Visible even from another browser tab: "⏳ KAI working…" in the tab title.
   useEffect(() => {
-    document.title = runs.length ? `⏳ KAI working… · ${BASE_TITLE}` : BASE_TITLE;
+    document.title = voiceLive ? `🔴 Voice conversion · ${BASE_TITLE}`
+      : runs.length ? `⏳ KAI working… · ${BASE_TITLE}` : BASE_TITLE;
     return () => { document.title = BASE_TITLE; };
-  }, [runs.length]);
+  }, [runs.length, voiceLive]);
 
   return (
     <div className="flex min-h-screen bg-base text-ink">
@@ -109,7 +122,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {!(window as any).kaiDesktop && (
         <div className="border-t border-line p-3">
           <button
-            onClick={logout}
+            onClick={() => { void liveConversion.stop(); logout(); }}
             className="flex w-full items-center gap-2 px-3 py-2 hud-mono text-[13px] text-muted hover:bg-panel hover:text-ink"
           >
             <LogOut size={16} /> Sign out
@@ -135,6 +148,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--kai-hud)" }} />
                 KAI working · {runs[0].activity}{runs.length > 1 ? ` (+${runs.length - 1})` : ""} · {runs[0].seconds}s
+              </button>
+            )}
+            {voiceLive && (
+              <button
+                onClick={() => navigate("/voice?tab=live")}
+                title="Your microphone is being converted. Click to open."
+                className="flex items-center gap-2 rounded border px-2 py-1 text-xs hud-mono"
+                style={{ borderColor: "var(--kai-accent)", color: "var(--kai-accent)" }}
+              >
+                <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--kai-accent)" }} />
+                {voiceLabel}
               </button>
             )}
             <button

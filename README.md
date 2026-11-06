@@ -37,6 +37,10 @@ Built phase by phase. See `docs/superpowers/specs/` (designs) and
   the model can select and run under strict controls, a controlled apt install
   approval workflow, and a Security Console UI. ✅
 
+- **Voice Intelligence:** local voice cloning, text-to-speech and live voice conversion with a
+  PipeWire virtual microphone. See [docs/VOICE_INTELLIGENCE.md](docs/VOICE_INTELLIGENCE.md). On a CPU
+  live conversion runs a few seconds behind; real-time speed on a GPU is not yet verified. ✅
+
 External providers (reverse-image, AI, map tiles) report **UNAVAILABLE** until
 their API keys are set in `.env` — KAI never fabricates results.
 

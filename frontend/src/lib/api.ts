@@ -4,6 +4,8 @@ import { beginRequest, endRequest } from "@/lib/activity";
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 const TOKEN_KEY = "kai.token";
 
+export const API_BASE = BASE;
+
 export function getToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_KEY);
@@ -91,6 +93,7 @@ export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
+  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
   del: <T>(path: string) => request<T>("DELETE", path),
   postForm,
 };

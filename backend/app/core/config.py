@@ -135,6 +135,21 @@ class Settings(BaseSettings):
     # shown in the Targets list. Set false to require explicit authorization.
     tool_auto_authorize_targets: bool = Field(default=True)
 
+    # ── Voice Intelligence (local models, isolated environments) ──
+    voice_home: str = Field(default="~/.local/share/kai-voice")  # audio + model weights; ~ is expanded
+    voice_envs_dir: str = Field(default="")   # conda envs live here; empty = conda's default envs dir
+    voice_conda_bin: str = Field(default="")  # empty = locate via CONDA_EXE / PATH
+    voice_device: str = Field(default="auto")  # auto | cuda | cpu
+    voice_tts_model: str = Field(default="qwen3-tts-0.6b")
+    voice_upload_max_mb: int = Field(default=100)
+    voice_tts_max_chars: int = Field(default=20_000)
+    voice_rate_limit_per_min: int = Field(default=30)  # expensive voice operations, per operator
+    voice_idle_unload_s: int = Field(default=600)  # free a worker's memory after this long idle
+    # Voice recordings are biometric data. KAI's backend is commonly reachable through a
+    # public tunnel with open access enabled, so proxied requests are refused unless this
+    # is deliberately enabled (and real authentication is in place).
+    voice_allow_remote: bool = Field(default=False)
+
     # Maps / geo
     tomtom_api_key: str = Field(default="")
     cesium_ion_token: str = Field(default="")

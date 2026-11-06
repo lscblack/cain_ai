@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     analyst, auth, chat, contacts, discovery, emails, export, faces, geo, health, investigations,
     maps, phones, powerup, public, search, settings as settings_api, sources, system,
-    timeline, tools, usernames,
+    timeline, tools, usernames, voice,
 )
 from app.api import investigate
 from app.core.config import get_settings
@@ -77,6 +77,13 @@ def create_app() -> FastAPI:
             await conn.run_sync(SQLModel.metadata.create_all)
 
         try:
+            from app.voice.services import reset_interrupted as _voice_reset
+
+            await _voice_reset()
+        except Exception:  # never block startup on the voice module
+            get_logger("kai.startup").exception("voice startup cleanup failed")
+
+        try:
             await seed_admin()
             await seed_default_sources(only_if_empty=True)
             # Reset sources left 'crawling' by a prior process that was killed
@@ -116,10 +123,18 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(tools.router)
     app.include_router(investigate.router)
+    app.include_router(voice.router)
+    app.include_router(voice.ws_router)
 
     @app.get("/", tags=["meta"])
     async def root() -> dict:
         return {"name": "KAI", "tagline": "Knowledge • Analysis • Intelligence"}
+
+    @app.on_event("shutdown")
+    async def _shutdown() -> None:
+        from app.voice.manager import get_manager as _voice_manager
+
+        await _voice_manager().shutdown()
 
     return app
 

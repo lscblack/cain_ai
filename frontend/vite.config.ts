@@ -7,7 +7,17 @@ import { fileURLToPath, URL } from "node:url";
 // localhost, a LAN IP, or the public Tailscale URL with no per-host API config.
 const API_TARGET = "http://127.0.0.1:8001";
 
+// Voice traffic never leaves this machine: recordings are biometric data and live
+// audio cannot afford a round trip through a public tunnel. Longest prefix first.
+const VOICE_TARGET = process.env.VITE_VOICE_API_URL || "http://127.0.0.1:8008";
+
 const proxy = {
+  "/api/voice": {
+    target: VOICE_TARGET,
+    changeOrigin: true,
+    ws: true,
+    rewrite: (path: string) => path.replace(/^\/api/, ""),
+  },
   "/api": {
     target: API_TARGET,
     changeOrigin: true,

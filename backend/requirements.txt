@@ -25,3 +25,6 @@ numpy
 psutil==5.9.8
 httpx[socks]
 socksio==1.0.0
+
+# Voice Intelligence. Models run in their own environments, see app/voice/catalog.py.
+websockets>=13

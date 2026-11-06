@@ -15,6 +15,13 @@ from app.database.models.security import (
 )
 from app.database.models.source import Image, Page, Source
 from app.database.models.user import User
+from app.database.models.voice import (
+    VoiceAsset,
+    VoiceConversionSession,
+    VoiceGeneration,
+    VoiceModelRegistry,
+    VoiceProfile,
+)
 
 __all__ = [
     "User",
@@ -34,4 +41,9 @@ __all__ = [
     "InstallRequest",
     "AuthorizedTarget",
     "SecurityFinding",
+    "VoiceProfile",
+    "VoiceAsset",
+    "VoiceGeneration",
+    "VoiceConversionSession",
+    "VoiceModelRegistry",
 ]
