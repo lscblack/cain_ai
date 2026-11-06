@@ -28,6 +28,7 @@ from app.ai.ollama import GenParams, OllamaError, OllamaProvider
 from app.ai.router import AIMessage
 from app.core.config import get_settings
 from app.security import registry, service
+from app.security.agents.profiles import AgentProfile
 
 FINDING_FIELDS = (
     "title", "description", "severity", "confidence", "status", "asset",
@@ -754,6 +755,7 @@ async def run_turn(
     approve: ApproveFn | None = None,
     confirm: ApproveFn | None = None,
     think: bool = False,
+    agent: "AgentProfile | None" = None,
 ) -> AsyncIterator[dict]:
     """Drive one assistant turn, yielding SSE events. The final event carries
     the assistant's answer text, any tool calls made, and persisted findings.
@@ -765,6 +767,8 @@ async def run_turn(
     before."""
     s = get_settings()
     max_steps = s.tool_max_agent_steps
+    if agent is not None:
+        max_steps = min(max_steps, agent.max_steps)
     sys_msg = await protocol_system_message(max_steps)
     convo = [sys_msg]
     docs_msg = await _tooldocs_context_message(session, user_id)
@@ -792,6 +796,8 @@ async def run_turn(
     if data_msg is not None:
         convo.append(data_msg)
     convo.append(_conversation_style_message())
+    if agent is not None:
+        convo.append(AIMessage(role="system", content=agent.system_prompt))
     convo += list(history)
     tool_calls_made: list[dict] = []
     params = GenParams(num_ctx=s.kai_ollama_num_ctx, think=think)
@@ -830,6 +836,16 @@ async def run_turn(
             op_params = obj.get("params") or {}
             if not isinstance(op_params, dict):
                 op_params = {}
+
+            # Per-agent allowlist: enforced server-side, before anything runs.
+            if agent is not None and op_key not in agent.allowed_tools:
+                yield {"type": "tool_denied", "operation": op_key, "params": op_params}
+                convo.append(AIMessage(role="assistant", content=json.dumps(
+                    {"action": "tool", "operation": op_key, "params": op_params})))
+                convo.append(AIMessage(role="user", content=(
+                    f"{op_key} is not available to the {agent.name} agent. Do not retry "
+                    "it; use only your assigned tools, or write your final answer.")))
+                continue
 
             # Shell auto-run policy: a raw shell command may only run unattended
             # when the operator enabled shell auto-run. In an unattended turn

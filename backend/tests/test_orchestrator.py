@@ -162,3 +162,49 @@ async def test_run_turn_surfaces_model_error(db_session):
     ))
     err = [e for e in events if e["type"] == "error"][0]
     assert err["code"] == "ollama_model_missing"
+
+
+async def test_run_turn_agent_blocks_tool_outside_allowlist(db_session, monkeypatch):
+    from app.security.agents.profiles import PROFILES
+
+    ran = []
+
+    async def fake_run_operation(session, **kw):
+        ran.append(kw["op_key"])
+        return {"ok": True, "status": "ok", "stdout": "x", "operation": kw["op_key"]}
+
+    monkeypatch.setattr(orch.service, "run_operation", fake_run_operation)
+    tool_reply = json.dumps({"action": "tool", "operation": "shell.run", "params": {"command": "id"}})
+    final_reply = json.dumps({"action": "final", "answer": "done", "findings": []})
+
+    events = await _drain(orch.run_turn(
+        db_session, user_id=uuid.uuid4(), conversation_id=None,
+        history=[AIMessage(role="user", content="run id")],
+        provider=FakeProvider([tool_reply, final_reply]),
+        agent=PROFILES["web_research"],
+    ))
+    denied = [e for e in events if e["type"] == "tool_denied"]
+    assert denied and denied[0]["operation"] == "shell.run"
+    assert not [e for e in events if e["type"] == "tool_call" and e["operation"] == "shell.run"]
+    assert ran == []
+
+
+async def test_run_turn_agent_allows_tool_inside_allowlist(db_session, monkeypatch):
+    from app.security.agents.profiles import PROFILES
+
+    async def fake_run_operation(session, **kw):
+        assert kw["op_key"] == "web.search"
+        return {"ok": True, "status": "ok", "stdout": "results", "operation": "web.search"}
+
+    monkeypatch.setattr(orch.service, "run_operation", fake_run_operation)
+    tool_reply = json.dumps({"action": "tool", "operation": "web.search", "params": {"query": "kai"}})
+    final_reply = json.dumps({"action": "final", "answer": "done", "findings": []})
+
+    events = await _drain(orch.run_turn(
+        db_session, user_id=uuid.uuid4(), conversation_id=None,
+        history=[AIMessage(role="user", content="search kai")],
+        provider=FakeProvider([tool_reply, final_reply]),
+        agent=PROFILES["web_research"],
+    ))
+    assert [e for e in events if e["type"] == "tool_call" and e["operation"] == "web.search"]
+    assert not [e for e in events if e["type"] == "tool_denied"]
