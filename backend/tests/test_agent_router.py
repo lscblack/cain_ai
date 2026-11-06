@@ -84,3 +84,27 @@ async def test_model_classify_timeout_falls_back_to_general(monkeypatch):
     r = await route("check example.com", model_classify=hung_model_classify)
     assert r["agent"] == "general"
     assert r["reason"] == "fallback"
+
+
+def test_every_allowed_tool_is_a_real_operation():
+    """Guards against profiles listing op keys that run_operation cannot dispatch."""
+    from app.security import registry
+    from app.security.agents.profiles import PROFILES
+    from app.security.capabilities import SHELL_OP_KEY
+    from app.security.osint_ops import INV_OP_KEYS
+    from app.security.people_ops import PEOPLE_OP_KEYS
+    from app.security.service import DATA_LOOKUP_OP_KEY, IDENTITY_LOOKUP_OP_KEY
+    from app.security.web import MAPS_FIND_OP_KEY, WEB_OPEN_OP_KEY, WEB_SEARCH_OP_KEY
+    from app.security.workspace import LIST_OP_KEY, WRITE_OP_KEY
+
+    known = {op.key for _tool, op in registry.all_operations()}
+    known |= {
+        SHELL_OP_KEY, WEB_SEARCH_OP_KEY, WEB_OPEN_OP_KEY, MAPS_FIND_OP_KEY,
+        WRITE_OP_KEY, LIST_OP_KEY, IDENTITY_LOOKUP_OP_KEY, DATA_LOOKUP_OP_KEY,
+        "people.investigate",
+    }
+    known |= set(INV_OP_KEYS) | set(PEOPLE_OP_KEYS)
+
+    for profile in PROFILES.values():
+        for key in profile.allowed_tools:
+            assert key in known, f"profile {profile.id!r} allows unknown operation {key!r}"

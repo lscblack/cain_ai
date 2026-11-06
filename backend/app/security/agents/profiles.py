@@ -82,14 +82,13 @@ _PROFILE_LIST = [
         name="Investigations & Files",
         system_prompt=(
             "You manage investigations (create, list, inspect, add entities and "
-            "evidence, delete) and the user's workspace files (list and write reports "
+            "evidence) and the user's workspace files (list and write reports "
             "or notes). Confirm exactly what was created or changed."
         ),
         allowed_tools=frozenset({
             WRITE_OP_KEY, LIST_OP_KEY,
             "investigation.create", "investigation.list", "investigation.get",
             "investigation.add_entity", "investigation.add_evidence",
-            "investigation.delete",
         }),
         max_steps=8,
     ),

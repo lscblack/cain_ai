@@ -14,7 +14,7 @@ export const AGENT_LABELS: Record<string, string> = {
   auto: "Auto",
   shell_network: "Shell & Network",
   web_research: "Web Research",
-  map_geo: "Map & Geo",
+  map_geo: "Maps & Geo",
   people_identity: "People & Identity",
   investigations_files: "Investigations & Files",
   general: "General",
