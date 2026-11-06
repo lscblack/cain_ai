@@ -69,3 +69,18 @@ async def test_plain_chat_with_no_signals_routes_to_general():
     r = await route("thanks, that makes sense")
     assert r["agent"] == "general"
     assert r["reason"] in ("rule", "fallback")
+
+
+@pytest.mark.asyncio
+async def test_model_classify_timeout_falls_back_to_general(monkeypatch):
+    import asyncio
+    from app.security.agents import router as router_mod
+
+    monkeypatch.setattr(router_mod, "_MODEL_TIMEOUT_S", 0.05)
+
+    async def hung_model_classify(message: str) -> str | None:
+        await asyncio.sleep(5)
+        return "shell_network"
+    r = await route("check example.com", model_classify=hung_model_classify)
+    assert r["agent"] == "general"
+    assert r["reason"] == "fallback"

@@ -1,6 +1,8 @@
 """Route a chat message to one agent: rules first, model second."""
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from typing import Awaitable, Callable, Literal, TypedDict
 
@@ -28,6 +30,8 @@ _INV = re.compile(
     r"\b(investigation|evidence|save (this )?as|write (a )?(file|report))\b", re.I
 )
 
+logger = logging.getLogger(__name__)
+_MODEL_TIMEOUT_S = 6.0
 _THRESHOLD = 0.6
 _MARGIN = 0.2
 
@@ -79,6 +83,7 @@ async def _default_model_classify(message: str) -> str | None:
         cleaned = (reply or "").strip().strip("`'\".").lower()
         return cleaned if cleaned in AGENT_IDS else None
     except Exception:
+        logger.warning("agent model classify failed; falling back", exc_info=True)
         return None
 
 
@@ -102,8 +107,8 @@ async def route(
 
     classify = model_classify or _default_model_classify
     try:
-        picked = await classify(message)
-    except Exception:
+        picked = await asyncio.wait_for(classify(message), timeout=_MODEL_TIMEOUT_S)
+    except Exception:  # includes asyncio.TimeoutError
         picked = None
     if picked in AGENT_IDS:
         return {"agent": picked, "reason": "model", "confidence": 0.5}
