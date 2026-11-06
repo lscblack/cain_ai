@@ -94,6 +94,26 @@ class ApiClient {
     }
   }
 
+  /// Password-less sign-in when the backend has open access enabled
+  /// (KAI_OPEN_ACCESS). Returns true if a token was issued, false otherwise
+  /// (endpoint disabled → 404, or backend unreachable), so the caller can fall
+  /// back to the normal login.
+  Future<bool> openAccess() async {
+    try {
+      final r = await postJson('/auth/open', {});
+      if (r.statusCode == 200) {
+        final t = jsonDecode(r.body)['access_token'] as String?;
+        if (t != null && t.isNotEmpty) {
+          await setToken(t);
+          return true;
+        }
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Apply a QR pairing payload scanned from the web app: {"u": backendUrl,
   /// "t": token}. Returns null on success, or a specific error message so the
   /// UI can distinguish "can't reach backend" from "bad/expired token".
@@ -173,5 +193,73 @@ class ApiClient {
         filename: filename, contentType: MediaType.parse(contentType)));
     final streamed = await req.send().timeout(_uploadTimeout);
     return http.Response.fromStream(streamed).timeout(_uploadTimeout);
+  }
+
+  // --- KAI chat -----------------------------------------------------------
+  /// Create a conversation; returns its id (or null on failure).
+  Future<String?> createConversation() async {
+    try {
+      final r = await postJson('/chat/conversations', {});
+      if (r.statusCode == 201 || r.statusCode == 200) {
+        return jsonDecode(r.body)['id'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Stream a chat turn as Server-Sent Events, invoking [onEvent] per frame.
+  Future<void> streamMessage(
+    String conversationId,
+    String content, {
+    bool useTools = true,
+    bool autoApprove = true,
+    required void Function(String event, Map<String, dynamic> data) onEvent,
+  }) async {
+    final req = http.Request('POST', _uri('/chat/conversations/$conversationId/messages'));
+    req.headers.addAll({
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      ..._authHeaders,
+    });
+    req.body = jsonEncode({
+      'content': content,
+      'use_tools': useTools,
+      'auto_approve': autoApprove,
+      'mode': 'auto',
+    });
+    final client = http.Client();
+    try {
+      final resp = await client.send(req);
+      if (resp.statusCode != 200) {
+        onEvent('error', {'message': 'HTTP ${resp.statusCode}'});
+        return;
+      }
+      var buffer = '';
+      await for (final chunk in resp.stream.transform(utf8.decoder)) {
+        buffer += chunk;
+        final frames = buffer.split('\n\n');
+        buffer = frames.removeLast();
+        for (final frame in frames) {
+          var ev = 'message';
+          var dataLine = '';
+          for (final line in frame.split('\n')) {
+            if (line.startsWith('event: ')) {
+              ev = line.substring(7).trim();
+            } else if (line.startsWith('data: ')) {
+              dataLine += line.substring(6);
+            }
+          }
+          if (dataLine.isNotEmpty) {
+            try {
+              onEvent(ev, jsonDecode(dataLine) as Map<String, dynamic>);
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {
+      onEvent('error', {'message': 'stream failed: $e'});
+    } finally {
+      client.close();
+    }
   }
 }

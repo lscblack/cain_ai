@@ -16,6 +16,16 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 # (uvicorn from backend/, alembic from backend/, pytest from backend/).
 _ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
 
+# Also export .env into the process environment so values referenced by name at
+# runtime (e.g. an external data endpoint's {env:VAR} templates for base URLs and
+# credentials) resolve via os.environ. override=False keeps real shell env first.
+try:  # python-dotenv is a dependency; guard just in case
+    from dotenv import load_dotenv as _load_dotenv
+
+    _load_dotenv(_ROOT_ENV, override=False)
+except Exception:  # noqa: BLE001
+    pass
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -98,6 +108,12 @@ class Settings(BaseSettings):
     # Shared secret that lets the local desktop app sign in without a password
     # (POST /auth/desktop). Empty = endpoint disabled. Lives only in .env.
     kai_desktop_token: str = Field(default="")
+    # Open access: when true, POST /auth/open issues an operator token with NO
+    # password and NO secret, and the frontend signs in silently (no login form).
+    # Convenient for a local single-operator desktop install; anyone who can
+    # reach the server is then fully in, so set false before exposing it (tunnel,
+    # LAN, public). Disabled → the endpoint 404s and the normal login applies.
+    kai_open_access: bool = Field(default=True)
     kai_llm_backend: str = Field(default="ollama")
     llamacpp_base_url: str = Field(default="http://127.0.0.1:8080")
     kai_llamacpp_model: str = Field(default="kai")      # alias llama-server serves the GGUF under
@@ -110,6 +126,24 @@ class Settings(BaseSettings):
     kai_ollama_model: str = Field(default="kai-security")
     ollama_base_url: str = Field(default="http://127.0.0.1:11434")
     kai_ollama_num_ctx: int = Field(default=8192)       # model context window (tokens)
+    # How long Ollama keeps the model loaded in RAM after a request. The first
+    # inference after a (re)load pages the whole model in from disk and is slow
+    # (~1 min on a slow drive); keeping it resident makes every later turn fast.
+    # How long Ollama keeps the model resident. Longer = fewer slow reloads, but
+    # it holds RAM. "30m" keeps it warm through an active session; "-1" = never
+    # unload (only safe once RAM pressure is relieved). Raised from "10m".
+    kai_ollama_keep_alive: str = Field(default="30m")
+    # Max tokens the model may generate per reply. Caps runaway generation —
+    # a small/abliterated model can get stuck repeating and generate until the
+    # whole context fills (minutes on CPU). 0/None = unlimited.
+    kai_ollama_num_predict: int = Field(default=2048)
+    # Anti-repetition sampling (curbs the model looping, e.g. "-i 3 -i 4 -i 5 …").
+    kai_ollama_repeat_penalty: float = Field(default=1.3)
+    kai_ollama_repeat_last_n: int = Field(default=256)   # window of tokens the penalty considers
+    kai_ollama_top_p: float = Field(default=0.9)
+    kai_ollama_top_k: int = Field(default=40)
+    kai_ollama_presence_penalty: float = Field(default=0.5)
+    kai_ollama_frequency_penalty: float = Field(default=0.5)
     kai_ollama_temperature: float = Field(default=0.2)
     # CPU inference of an 8B model on this host is slow (minutes for a long
     # answer); streaming keeps the UI responsive, but non-stream calls need a
@@ -122,11 +156,15 @@ class Settings(BaseSettings):
     tool_exec_timeout_s: int = Field(default=60)        # hard wall-clock cap per tool run
     tool_output_max_bytes: int = Field(default=200_000)  # stdout/stderr capture ceiling
     tool_rate_limit_per_min: int = Field(default=30)    # per-operator tool runs / minute
-    tool_max_agent_steps: int = Field(default=6)        # tool calls the model may chain in one turn
+    tool_max_agent_steps: int = Field(default=14)       # tool calls the model may chain in one turn (agent tasks: install→configure→connect→verify)
     # Privileged package installs. The backend never gives the model a root
     # shell; installs run a single argv through this helper. "sudo" needs a
     # scoped NOPASSWD sudoers entry; "pkexec" prompts the desktop. Empty string
     # disables real installation (approval workflow still records the request).
+    # Where KAI writes files the operator can download from the chat. A
+    # per-operator subdirectory is created under here. ~ is expanded.
+    kai_workspace_dir: str = Field(default="~/.local/share/kai-workspace")
+    kai_file_max_bytes: int = Field(default=25_000_000)  # cap a single written file
     tool_install_helper: str = Field(default="sudo")
     tool_install_enabled: bool = Field(default=True)
     # When true, an ACTIVE operation whose target isn't on the operator's
@@ -134,6 +172,10 @@ class Settings(BaseSettings):
     # included) and proceeds — every auto-authorization is still audited and
     # shown in the Targets list. Set false to require explicit authorization.
     tool_auto_authorize_targets: bool = Field(default=True)
+    # Operator-provided tool documentation (scraped URLs / uploaded files / pasted
+    # text) is injected into the model's working context as READ-ONLY reference so
+    # it understands how a tool works. This caps the total injected size per turn.
+    tooldoc_context_max_chars: int = Field(default=6000)
 
     # ── Voice Intelligence (local models, isolated environments) ──
     voice_home: str = Field(default="~/.local/share/kai-voice")  # audio + model weights; ~ is expanded

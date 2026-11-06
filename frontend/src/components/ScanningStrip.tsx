@@ -10,11 +10,15 @@ export function ScanningStrip({
   label = "searching local index…",
   count = 6,
   size = 40,
+  grid = false,
+  columns,
 }: {
   crops: string[];
   label?: string;
   count?: number;
   size?: number;
+  grid?: boolean;
+  columns?: number;
 }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -28,7 +32,10 @@ export function ScanningStrip({
         ● {label}
       </div>
       {crops.length > 0 ? (
-        <div className="flex gap-1.5 overflow-hidden">
+        <div
+          className={columns ? "grid gap-1.5" : grid ? "flex flex-wrap gap-1.5" : "flex gap-1.5 overflow-hidden"}
+          style={columns ? { gridTemplateColumns: `repeat(${columns}, ${size}px)`, width: "max-content" } : undefined}
+        >
           {Array.from({ length: count }).map((_, i) => {
             const idx = (tick + i) % crops.length;
             return (

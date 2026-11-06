@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Plus, Sparkles, Download } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { investigationsApi } from "@/lib/investigations";
 import type { EntityNode, EntityType, EvidenceItem, InvestigationDetail } from "@/types";
 
@@ -97,7 +97,7 @@ export function Investigation() {
   }
 
   async function exportCase(fmt: "json" | "csv") {
-    const base = import.meta.env.VITE_API_URL ?? "/api";
+    const base = API_BASE;
     const token = localStorage.getItem("kai.token");
     const resp = await fetch(`${base}/investigations/${id}/export?format=${fmt}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},

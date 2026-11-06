@@ -429,6 +429,12 @@ def _spec_from_catalogue(entry: dict) -> ToolSpec:
     )
 
 
+# Operator-defined tools (catalogue-shaped dicts), merged in after the built-in
+# catalogue. Populated from the DB at startup via app.security.custom_tools and
+# refreshed whenever the operator adds/edits/removes a capability.
+_CUSTOM_ENTRIES: list[dict] = []
+
+
 def _build_all() -> tuple[ToolSpec, ...]:
     from app.security.catalog import CATALOG
 
@@ -437,6 +443,14 @@ def _build_all() -> tuple[ToolSpec, ...]:
         if entry["name"] in by_name:
             continue  # core tools win
         by_name[entry["name"]] = _spec_from_catalogue(entry)
+    for entry in _CUSTOM_ENTRIES:
+        name = entry.get("name")
+        if not name or name in by_name:
+            continue  # never override a core/catalogue tool
+        try:
+            by_name[name] = _spec_from_catalogue(entry)
+        except Exception:  # noqa: BLE001 — a bad custom entry must not break the registry
+            continue
     return tuple(by_name.values())
 
 
@@ -444,6 +458,35 @@ ALL_TOOLS: tuple[ToolSpec, ...] = _build_all()
 
 _TOOLS_BY_NAME = {t.name: t for t in ALL_TOOLS}
 _OPS_BY_KEY = {op.key: (t, op) for t in ALL_TOOLS for op in t.operations}
+
+
+def _rebuild() -> None:
+    global ALL_TOOLS, _TOOLS_BY_NAME, _OPS_BY_KEY
+    ALL_TOOLS = _build_all()
+    _TOOLS_BY_NAME = {t.name: t for t in ALL_TOOLS}
+    _OPS_BY_KEY = {op.key: (t, op) for t in ALL_TOOLS for op in t.operations}
+
+
+def set_custom_tools(entries: list[dict]) -> None:
+    """Replace the set of operator-defined tools and rebuild the registry."""
+    global _CUSTOM_ENTRIES
+    _CUSTOM_ENTRIES = list(entries or [])
+    _rebuild()
+
+
+def reserved_names() -> set[str]:
+    """Tool names that a custom capability may NOT reuse (core + catalogue)."""
+    from app.security.catalog import CATALOG
+
+    return {t.name for t in _CORE_TOOLS} | {e["name"] for e in CATALOG}
+
+
+def reserved_op_keys() -> set[str]:
+    """Operation keys already in use by non-custom tools."""
+    custom = {e.get("name") for e in _CUSTOM_ENTRIES}
+    return {
+        op.key for t in ALL_TOOLS if t.name not in custom for op in t.operations
+    }
 
 
 def get_tool(name: str) -> ToolSpec | None:

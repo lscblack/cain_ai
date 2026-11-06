@@ -192,14 +192,17 @@ class LlamaCppProvider(OllamaProvider):
             "stream": stream,
             "temperature": params.temperature if params.temperature is not None else s.kai_ollama_temperature,
             "cache_prompt": True,
-            # Hybrid reasoning models (Qwen3): no <think> block — KAI's tool
-            # protocol reads the first character of the reply (see OllamaProvider).
-            "chat_template_kwargs": {"enable_thinking": False},
+            # Hybrid reasoning models (Qwen3): thinking is off by default so the
+            # reply's first character is real content (KAI's tool protocol reads
+            # it — see OllamaProvider). When the operator enables it per
+            # conversation, chat_stream + the orchestrator strip the <think> block.
+            "chat_template_kwargs": {"enable_thinking": bool(params.think)},
         }
         if params.top_p is not None:
             body["top_p"] = params.top_p
-        if params.num_predict is not None and params.num_predict > 0:
-            body["max_tokens"] = params.num_predict
+        mx = params.num_predict if params.num_predict is not None else s.kai_ollama_num_predict
+        if mx and mx > 0:
+            body["max_tokens"] = mx  # cap runaway generation
         return body
 
     @staticmethod

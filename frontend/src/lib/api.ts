@@ -1,10 +1,14 @@
 import { ApiError } from "@/types";
 import { beginRequest, endRequest } from "@/lib/activity";
 
-const BASE = import.meta.env.VITE_API_URL ?? "/api";
+// The browser always talks to the SAME origin it loaded from: Vite proxies
+// "/api" -> the backend (see vite.config.ts). An absolute VITE_API_URL is the
+// server-side proxy target, NOT a browser base — using it in the browser would
+// go cross-origin (CORS) and double-slash, so we keep the same-origin proxy.
+const _RAW = import.meta.env.VITE_API_URL ?? "/api";
+export const API_BASE = /^https?:\/\//i.test(_RAW) ? "/api" : _RAW.replace(/\/+$/, "");
+const BASE = API_BASE;
 const TOKEN_KEY = "kai.token";
-
-export const API_BASE = BASE;
 
 export function getToken(): string | null {
   try {

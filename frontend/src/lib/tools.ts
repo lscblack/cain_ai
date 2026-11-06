@@ -93,7 +93,103 @@ export const toolsApi = {
   installBatch: (capabilities: string[], reinstall = false) =>
     api.post<InstallBatchResult>("/tools/install/batch", { capabilities, reinstall }),
   sweep: (body: Record<string, string>) => api.post<SweepResult>("/tools/sweep", body),
+  docs: () => api.get<ToolDoc[]>("/tools/docs"),
+  getDoc: (id: string) => api.get<ToolDoc>(`/tools/docs/${id}`),
+  addDoc: (body: ToolDocIn) => api.post<ToolDoc>("/tools/docs", body),
+  deleteDoc: (id: string) => api.del<void>(`/tools/docs/${id}`),
+  capabilities: () => api.get<Capabilities>("/tools/capabilities"),
+  setCapabilities: (body: Partial<Capabilities>) => api.put<Capabilities>("/tools/capabilities", body),
+  skills: () => api.get<Skill[]>("/tools/skills"),
+  getSkill: (id: string) => api.get<Skill>(`/tools/skills/${id}`),
+  addSkill: (body: SkillIn) => api.post<Skill>("/tools/skills", body),
+  updateSkill: (id: string, body: Partial<SkillIn>) => api.patch<Skill>(`/tools/skills/${id}`, body),
+  deleteSkill: (id: string) => api.del<void>(`/tools/skills/${id}`),
+  customCapabilities: () => api.get<CustomCapability[]>("/tools/custom"),
+  addCapability: (body: CapabilityIn) => api.post<CustomCapability>("/tools/custom", body),
+  updateCapability: (id: string, body: CapabilityIn) => api.put<CustomCapability>(`/tools/custom/${id}`, body),
+  deleteCapability: (id: string) => api.del<void>(`/tools/custom/${id}`),
 };
+
+export interface CapabilityOpIn {
+  key: string;
+  title?: string;
+  description?: string;
+  posture?: string;
+  argv_template?: string;
+  target_kind?: string | null;
+  requires_authorization?: boolean;
+  timeout?: number | null;
+}
+export interface CapabilityIn {
+  name: string;
+  title?: string;
+  purpose?: string;
+  category?: string;
+  binary?: string;
+  source?: string;
+  package?: string;
+  categories?: string[];
+  operations: CapabilityOpIn[];
+  enabled?: boolean;
+}
+export interface CustomCapability {
+  id: string;
+  name: string;
+  title: string;
+  category: string;
+  enabled: boolean;
+  entry: any;
+  operations: { key: string; title: string; desc: string; posture: string; auth: boolean }[];
+  source?: string;
+  binary?: string;
+  created_at: string | null;
+}
+export const TARGET_KINDS = [
+  "", "domain", "host", "ip", "url", "username", "email", "phone", "onion", "term", "hash", "port_spec",
+] as const;
+export const TOOL_SOURCES = ["apt", "kali", "pip", "go", "github", "gem", "builtin"] as const;
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  char_count: number;
+  content_text?: string;
+  created_at: string | null;
+}
+export interface SkillIn {
+  name: string;
+  description?: string;
+  content: string;
+  enabled?: boolean;
+}
+
+export interface Capabilities {
+  tools_enabled: boolean;
+  shell_enabled: boolean;
+  shell_auto_run: boolean;
+  shell_sudo: boolean;
+}
+
+export interface ToolDoc {
+  id: string;
+  tool_name: string | null;
+  title: string;
+  source_type: "url" | "file" | "text";
+  source_ref: string | null;
+  char_count: number;
+  content_text?: string;
+  created_at: string | null;
+}
+export interface ToolDocIn {
+  source_type: "url" | "file" | "text";
+  url?: string;
+  content?: string;
+  source_ref?: string;
+  tool_name?: string;
+  title?: string;
+}
 
 export interface SweepResult {
   ran: number;

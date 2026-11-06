@@ -41,9 +41,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // Open access: when enabled on the backend, sign in silently with no form.
+  // 404 means it's disabled — fall through to the normal login.
+  async function tryOpenAccess() {
+    if (getToken()) return;
+    try {
+      const res = await api.post<TokenResponse>("/auth/open", {});
+      setToken(res.access_token);
+      setOperator(await api.get<Operator>("/auth/me"));
+    } catch {
+      /* open access disabled or unavailable — normal login applies */
+    }
+  }
+
   useEffect(() => {
     (async () => {
-      await Promise.all([loadMe(), refreshRegistration()]);
+      await loadMe();
+      if (!getToken()) await tryOpenAccess();
+      await refreshRegistration();
       setLoading(false);
     })();
   }, []);

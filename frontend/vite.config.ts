@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from "node:url";
 // The frontend proxies /api -> the backend, so the browser always talks to the
 // SAME origin it loaded the page from. That makes KAI reachable identically from
 // localhost, a LAN IP, or the public Tailscale URL with no per-host API config.
-const API_TARGET = "http://127.0.0.1:8001";
+const API_TARGET = process.env.VITE_API_URL || "https://kai-app-backend.evaramu.rw/";
 
 // Voice traffic never leaves this machine: recordings are biometric data and live
 // audio cannot afford a round trip through a public tunnel. Longest prefix first.
@@ -35,6 +35,7 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
+    allowedHosts: true, // reachable via localhost, LAN IP and the tunnel host
     proxy,
   },
   preview: {

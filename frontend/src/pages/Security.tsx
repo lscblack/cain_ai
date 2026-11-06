@@ -10,8 +10,9 @@ import {
 import type { Finding } from "@/lib/chat";
 import { JsonView } from "@/components/JsonView";
 import { PageLoading, ErrorRetry, Spinner } from "@/components/Async";
+import { CustomCapabilities } from "@/components/CustomCapabilities";
 
-const TABS = ["Inventory", "OSINT Sweep", "Installs", "Executions", "Targets", "Findings"] as const;
+const TABS = ["Inventory", "Capabilities", "OSINT Sweep", "Installs", "Executions", "Targets", "Findings"] as const;
 type Tab = (typeof TABS)[number];
 
 const POSTURE_COLOR: Record<string, string> = {
@@ -94,6 +95,7 @@ export function Security() {
   const [sweeping, setSweeping] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [installing, setInstalling] = useState<Set<string>>(new Set());
+  const [toolQuery, setToolQuery] = useState("");
   const [batchRes, setBatchRes] = useState<InstallBatchResult | null>(null);
 
   const toggleSel = (n: string) =>
@@ -247,6 +249,13 @@ export function Security() {
           </button>
           <button onClick={() => setSelected(new Set(inv.tools.map((t) => t.name)))} className="text-muted hover:text-ink">select all</button>
           <button onClick={() => setSelected(new Set())} className="text-muted hover:text-ink">clear</button>
+          <input
+            value={toolQuery}
+            onChange={(e) => setToolQuery(e.target.value)}
+            placeholder="search tools (name, purpose, category, operation)…"
+            className="ml-auto min-w-64 flex-1 rounded border border-line bg-panel px-2 py-1 text-xs outline-none focus:border-muted"
+            style={{ maxWidth: "24rem" }}
+          />
         </div>
       )}
       {tab === "Inventory" && batchRes && (
@@ -257,9 +266,19 @@ export function Security() {
         </div>
       )}
 
-      {tab === "Inventory" && inv && (
+      {tab === "Inventory" && inv && (() => {
+        const q = toolQuery.trim().toLowerCase();
+        const shown = !q ? inv.tools : inv.tools.filter((t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.purpose || "").toLowerCase().includes(q) ||
+          (t.package || "").toLowerCase().includes(q) ||
+          (t.categories || []).some((c) => c.toLowerCase().includes(q)) ||
+          t.operations.some((op) => op.key.toLowerCase().includes(q) || (op.description || "").toLowerCase().includes(q)));
+        return (
         <div className="grid gap-3 md:grid-cols-2">
-          {inv.tools.map((t) => (
+          {q && <div className="col-span-full kai-metadata">{shown.length} of {inv.tools.length} tools match “{toolQuery.trim()}”</div>}
+          {shown.length === 0 && <div className="col-span-full text-sm text-muted">No tools match your search.</div>}
+          {shown.map((t) => (
             <Panel key={t.name} title={t.name}
               right={<span className="flex items-center gap-2 hud-mono text-xs">
                 <span style={{ color: t.installed ? "var(--kai-verified)" : "var(--kai-accent)" }}>
@@ -313,6 +332,13 @@ export function Security() {
             </Panel>
           ))}
         </div>
+        );
+      })()}
+
+      {tab === "Capabilities" && (
+        <Panel title="Custom capabilities">
+          <CustomCapabilities />
+        </Panel>
       )}
 
       {tab === "OSINT Sweep" && (

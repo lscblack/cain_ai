@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Zap, KeyRound, Save, Cpu } from "lucide-react";
+import { Zap, KeyRound, Save, Cpu, BookOpen, Trash2, Terminal, AlertTriangle, ShieldCheck } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { toolsApi, type ToolDoc, type Capabilities } from "@/lib/tools";
+import { Markdown } from "@/components/Markdown";
 
 interface ModelStatus {
   model: string; reachable: boolean; model_installed: boolean; ready: boolean; error: string | null;
@@ -204,6 +206,281 @@ interface Provider {
   detail: string | null;
 }
 
+function ToolDocsManager() {
+  const [docs, setDocs] = useState<ToolDoc[]>([]);
+  const [mode, setMode] = useState<"url" | "text" | "file">("url");
+  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [toolName, setToolName] = useState("");
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ToolDoc | null>(null);
+
+  function load() {
+    toolsApi.docs().then(setDocs).catch(() => setDocs([]));
+  }
+  useEffect(load, []);
+
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFileName(f.name);
+    const reader = new FileReader();
+    reader.onload = () => setText(String(reader.result ?? ""));
+    reader.readAsText(f);
+  }
+
+  async function add() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      if (mode === "url") {
+        if (!url.trim()) throw new Error("Enter a URL");
+        await toolsApi.addDoc({ source_type: "url", url: url.trim(),
+          tool_name: toolName.trim() || undefined, title: title.trim() || undefined });
+      } else {
+        if (!text.trim()) throw new Error(mode === "file" ? "Choose a readable text file" : "Paste some text");
+        await toolsApi.addDoc({ source_type: mode, content: text,
+          source_ref: mode === "file" ? fileName : undefined,
+          tool_name: toolName.trim() || undefined, title: title.trim() || undefined });
+      }
+      setUrl(""); setText(""); setFileName(""); setToolName(""); setTitle("");
+      setMsg("Added — KAI will read it as reference on the next turn.");
+      load();
+    } catch (e: any) {
+      setMsg(e?.message || "Failed to add documentation");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    await toolsApi.deleteDoc(id).catch(() => null);
+    if (viewing?.id === id) setViewing(null);
+    load();
+  }
+
+  async function view(id: string) {
+    try { setViewing(await toolsApi.getDoc(id)); } catch { /* */ }
+  }
+
+  const inputCls = "w-full rounded border border-line bg-panel-2 px-2 py-1 text-sm outline-none focus:border-current";
+
+  return (
+    <div className="hud-panel hud-frame mb-8 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <BookOpen size={16} style={{ color: "var(--kai-hud)" }} />
+        <h2 className="hud-mono text-sm font-semibold" style={{ color: "var(--kai-hud)" }}>Tool Documentation</h2>
+      </div>
+      <p className="mb-3 max-w-2xl text-xs text-muted">
+        Add docs for a tool (scrape a URL, upload a text file, or paste text). KAI reads them as
+        read-only reference so it understands how the tool works. This is context, not training —
+        doc content is treated as untrusted data, never as commands.
+      </p>
+
+      <div className="mb-2 flex gap-1 text-xs">
+        {(["url", "file", "text"] as const).map((m) => (
+          <button key={m} onClick={() => setMode(m)}
+            className="rounded border border-line px-2 py-0.5"
+            style={m === mode ? { color: "var(--kai-hud)", borderColor: "var(--kai-hud)" } : { color: "var(--kai-muted)" }}>
+            {m === "url" ? "from URL" : m === "file" ? "from file" : "paste text"}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-2">
+        {mode === "url" && (
+          <input className={inputCls} placeholder="https://… (documentation page)"
+            value={url} onChange={(e) => setUrl(e.target.value)} />
+        )}
+        {mode === "file" && (
+          <input type="file" accept=".txt,.md,.rst,.json,.html,.htm,.1,text/*" onChange={onFile}
+            className="text-xs text-muted" />
+        )}
+        {mode === "text" && (
+          <textarea className={inputCls} rows={4} placeholder="Paste documentation text…"
+            value={text} onChange={(e) => setText(e.target.value)} />
+        )}
+        <div className="flex gap-2">
+          <input className={inputCls} placeholder="tool name (optional, e.g. nmap)"
+            value={toolName} onChange={(e) => setToolName(e.target.value)} />
+          <input className={inputCls} placeholder="title (optional)"
+            value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={add} disabled={busy}
+            className="rounded border border-line px-3 py-1 text-sm hover:bg-panel-2"
+            style={{ color: "var(--kai-verified)" }}>
+            {busy ? "Adding…" : "Add doc"}
+          </button>
+          {msg && <span className="text-xs text-muted">{msg}</span>}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-1">
+        {docs.map((d) => (
+          <div key={d.id} className="flex items-center justify-between rounded border border-line px-2 py-1 text-xs">
+            <button onClick={() => view(d.id)} className="truncate text-left hover:underline" title={d.title}>
+              <span style={{ color: "var(--kai-hud)" }}>{d.title}</span>
+              {d.tool_name && <span className="text-muted"> · {d.tool_name}</span>}
+              <span className="text-muted"> · {d.source_type} · {d.char_count.toLocaleString()} chars</span>
+            </button>
+            <button onClick={() => remove(d.id)} className="ml-2 text-muted hover:text-current" title="Delete">
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))}
+        {docs.length === 0 && <div className="kai-metadata text-muted">No tool docs yet.</div>}
+      </div>
+
+      {viewing && (
+        <div className="mt-3 rounded border border-line p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="hud-mono text-sm" style={{ color: "var(--kai-hud)" }}>{viewing.title}</span>
+            <button onClick={() => setViewing(null)} className="text-xs text-muted hover:text-current">close</button>
+          </div>
+          {viewing.source_ref && <div className="kai-metadata mb-2 break-all text-muted">{viewing.source_ref}</div>}
+          <div className="max-h-80 overflow-auto text-sm">
+            <Markdown>{viewing.content_text ?? ""}</Markdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CapabilitiesPanel() {
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    toolsApi.capabilities().then(setCaps).catch(() => setErr("Could not load capabilities."));
+  }, []);
+
+  async function patch(change: Partial<Capabilities>, key: string) {
+    setSaving(key);
+    setErr(null);
+    try {
+      setCaps(await toolsApi.setCapabilities(change));
+    } catch {
+      setErr("Failed to update.");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const Toggle = ({ on, busy, onClick }: { on: boolean; busy: boolean; onClick: () => void }) => (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      className="rounded border border-line px-3 py-1 text-xs hover:bg-panel-2 disabled:opacity-40"
+      style={{ color: on ? "var(--kai-verified)" : "var(--kai-muted)" }}
+    >
+      {busy ? "…" : on ? "ON" : "OFF"}
+    </button>
+  );
+
+  return (
+    <div className="hud-panel hud-frame mb-8 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <ShieldCheck size={16} style={{ color: "var(--kai-hud)" }} />
+        <span className="hud-mono uppercase text-xs" style={{ color: "var(--kai-hud)" }}>◢ KAI capabilities — what the model may do</span>
+      </div>
+      <p className="mb-4 max-w-2xl text-sm text-muted">
+        Permissions for the KAI agent. Every tool and command runs through the
+        backend gate and is logged in Execution History regardless of these switches.
+      </p>
+
+      {err && <div className="mb-2 kai-metadata" style={{ color: "var(--kai-accent)" }}>{err}</div>}
+      {!caps && !err && <div className="kai-metadata text-muted">Loading…</div>}
+
+      {caps && (
+        <div className="grid gap-3">
+          {/* installed tools */}
+          <div className="flex items-start justify-between gap-4 rounded border border-line p-3">
+            <div className="flex items-start gap-2">
+              <Cpu size={15} className="mt-0.5" style={{ color: "var(--kai-hud)" }} />
+              <div>
+                <div className="text-sm">Installed tools (catalogue)</div>
+                <div className="kai-metadata text-muted">
+                  Let KAI run installed OSINT/recon/security tools (nmap, msf search, etc.),
+                  authorized and argv-only.
+                </div>
+              </div>
+            </div>
+            <Toggle on={caps.tools_enabled} busy={saving === "tools"}
+              onClick={() => patch({ tools_enabled: !caps.tools_enabled }, "tools")} />
+          </div>
+
+          {/* terminal */}
+          <div className="rounded border p-3"
+            style={{ borderColor: caps.shell_enabled ? "var(--kai-warn)" : "var(--kai-line)" }}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-2">
+                <Terminal size={15} className="mt-0.5" style={{ color: "var(--kai-hud)" }} />
+                <div>
+                  <div className="text-sm">Terminal access (raw shell)</div>
+                  <div className="kai-metadata text-muted">
+                    Let KAI run arbitrary shell commands on this host via <span className="font-mono">bash -lc</span>,
+                    with your real environment. Off by default.
+                  </div>
+                </div>
+              </div>
+              <Toggle on={caps.shell_enabled} busy={saving === "shell"}
+                onClick={() => patch({ shell_enabled: !caps.shell_enabled }, "shell")} />
+            </div>
+
+            {caps.shell_enabled && (
+              <div className="mt-3 border-t border-line pt-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={15} className="mt-0.5" style={{ color: "var(--kai-warn)" }} />
+                    <div>
+                      <div className="text-sm">Auto-run commands (no approval)</div>
+                      <div className="kai-metadata text-muted">
+                        When ON, KAI runs shell commands with no per-command prompt.
+                        When OFF, every command waits for you to approve it in chat.
+                      </div>
+                    </div>
+                  </div>
+                  <Toggle on={caps.shell_auto_run} busy={saving === "auto"}
+                    onClick={() => patch({ shell_auto_run: !caps.shell_auto_run }, "auto")} />
+                </div>
+
+                <div className="mt-3 flex items-start justify-between gap-4 border-t border-line pt-3">
+                  <div className="flex items-start gap-2">
+                    <ShieldCheck size={15} className="mt-0.5" style={{ color: "var(--kai-warn)" }} />
+                    <div>
+                      <div className="text-sm">Root commands (sudo)</div>
+                      <div className="kai-metadata text-muted">
+                        Let KAI run commands as root. It runs via <span className="font-mono">pkexec</span>,
+                        so your desktop asks for your password each time — even in auto-run.
+                      </div>
+                    </div>
+                  </div>
+                  <Toggle on={caps.shell_sudo} busy={saving === "sudo"}
+                    onClick={() => patch({ shell_sudo: !caps.shell_sudo }, "sudo")} />
+                </div>
+
+                <div className="mt-3 rounded p-2 text-xs"
+                  style={{ background: "color-mix(in srgb, var(--kai-warn) 12%, transparent)", color: "var(--kai-warn)" }}>
+                  ⚠ Terminal access lets the model run anything your user can. If this
+                  machine is reachable over a public tunnel with login disabled, anyone
+                  who finds it gets a shell on your PC — especially with auto-run ON. Keep
+                  the tunnel private or turn open-access off.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PowerUp() {
   const [providers, setProviders] = useState<Provider[]>([]);
 
@@ -235,6 +512,10 @@ export function PowerUp() {
       </p>
 
       <ChatModelSelector />
+
+      <CapabilitiesPanel />
+
+      <ToolDocsManager />
 
       <KeysEditor onSaved={load} />
 

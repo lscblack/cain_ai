@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import signal
 import time
 from dataclasses import dataclass, field
@@ -78,6 +79,8 @@ async def run_argv(
     max_bytes: int | None = None,
     stdin: bytes | None = None,
     env_extra: dict | None = None,
+    inherit_env: bool = False,
+    cwd: str | None = None,
 ) -> ExecResult:
     s = get_settings()
     timeout = timeout or s.tool_exec_timeout_s
@@ -89,7 +92,10 @@ async def run_argv(
     start = time.monotonic()
     # Base env is minimal (no KAI secrets). Callers may add a few vetted keys —
     # e.g. the graphical-session vars pkexec needs to show its polkit prompt.
-    env = {**_SAFE_ENV, **(env_extra or {})}
+    # inherit_env=True is the raw-shell path (run_shell): it runs with the
+    # operator's real environment so the terminal behaves like a real one.
+    base_env = dict(os.environ) if inherit_env else dict(_SAFE_ENV)
+    env = {**base_env, **(env_extra or {})}
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -97,6 +103,7 @@ async def run_argv(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            cwd=cwd or None,
             start_new_session=True,  # own process group → we can kill children too
         )
     except FileNotFoundError:
@@ -129,6 +136,66 @@ async def run_argv(
             duration_ms=duration,
             error=f"timed out after {timeout}s",
         )
+
+
+# Graphical-session vars pkexec needs to reach the desktop polkit agent and
+# show its password prompt (same set the install workflow uses).
+_PKEXEC_ENV_KEYS = (
+    "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS", "XDG_SEAT", "XDG_SESSION_ID",
+)
+
+
+async def run_shell(
+    command: str,
+    *,
+    sudo: bool = False,
+    timeout: int | None = None,
+    max_bytes: int | None = None,
+    cwd: str | None = None,
+) -> ExecResult:
+    """Run an arbitrary shell command through ``bash -lc`` with the operator's
+    real environment. This is the raw-terminal path — intentionally NOT
+    argv-only — and must only be reached after KaiCapabilities.shell_enabled is
+    confirmed by the caller (service.run_operation). Still bounded by the same
+    wall-clock timeout, output cap, and process-group kill as every other tool.
+
+    When ``sudo`` is set (and the operator enabled shell_sudo), the command runs
+    as root. pkexec is preferred — it pops the desktop password dialog so the
+    operator authenticates at the OS, even in auto-run; if pkexec is missing we
+    fall back to ``sudo -n`` (NOPASSWD, no prompt)."""
+    cmd = (command or "").strip()
+    if not cmd:
+        return ExecResult(argv=["bash", "-lc", ""], status="error", error="empty command")
+
+    if not sudo:
+        return await run_argv(
+            ["/bin/bash", "-lc", cmd],
+            timeout=timeout, max_bytes=max_bytes, inherit_env=True, cwd=cwd,
+        )
+
+    # ── privileged path ──
+    pkexec = shutil.which("pkexec")
+    if pkexec:
+        env_extra = {k: v for k in _PKEXEC_ENV_KEYS if (v := os.environ.get(k))}
+        return await run_argv(
+            [pkexec, "/bin/bash", "-lc", cmd],
+            timeout=timeout, max_bytes=max_bytes, inherit_env=True, cwd=cwd,
+            env_extra=env_extra,
+        )
+    sudo_bin = shutil.which("sudo")
+    if sudo_bin:
+        res = await run_argv(
+            [sudo_bin, "-n", "/bin/bash", "-lc", cmd],
+            timeout=timeout, max_bytes=max_bytes, inherit_env=True, cwd=cwd,
+        )
+        blob = f"{res.stdout}\n{res.stderr}"
+        if res.status != "ok" and ("a password is required" in blob or "a terminal is required" in blob):
+            res.error = ("sudo needs a password but no pkexec desktop prompt is "
+                         "available. Install pkexec (policykit-1) or add a NOPASSWD sudoers rule.")
+        return res
+    return ExecResult(argv=["pkexec"], status="error",
+                      error="no privilege helper found (install pkexec or sudo)")
 
 
 def _kill_group(proc: asyncio.subprocess.Process) -> None:

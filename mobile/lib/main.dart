@@ -9,22 +9,29 @@ import 'screens/unlock_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiClient.instance.load();
+  // Open access: when the backend allows it, sign in silently so no login
+  // screen is shown. Falls through to the normal flow if disabled/unreachable.
+  var openAccess = ApiClient.instance.isLoggedIn;
+  if (!openAccess) openAccess = await ApiClient.instance.openAccess();
   final hasCreds = await ApiClient.instance.hasCredentials();
-  runApp(KaiApp(hasCredentials: hasCreds));
+  runApp(KaiApp(openAccess: openAccess, hasCredentials: hasCreds));
 }
 
 enum _Stage { unlock, login, home }
 
 class KaiApp extends StatefulWidget {
+  final bool openAccess;
   final bool hasCredentials;
-  const KaiApp({super.key, required this.hasCredentials});
+  const KaiApp({super.key, required this.openAccess, required this.hasCredentials});
 
   @override
   State<KaiApp> createState() => _KaiAppState();
 }
 
 class _KaiAppState extends State<KaiApp> {
-  late _Stage _stage = widget.hasCredentials ? _Stage.unlock : _Stage.login;
+  late _Stage _stage = widget.openAccess
+      ? _Stage.home
+      : (widget.hasCredentials ? _Stage.unlock : _Stage.login);
 
   Future<void> _logout() async {
     await ApiClient.instance.setToken(null);

@@ -6,6 +6,7 @@ no open registration and no password reset flow in Phase 1 (solo, local).
 from __future__ import annotations
 
 import hmac
+import secrets
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -101,6 +102,32 @@ async def login(
 @router.get("/me", response_model=OperatorOut)
 async def me(operator: User = Depends(get_current_operator)) -> OperatorOut:
     return OperatorOut(id=operator.id, email=operator.email, created_at=operator.created_at)
+
+
+@router.post("/open", response_model=TokenOut)
+async def open_access(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> TokenOut:
+    """Password-less sign-in when open access is enabled (KAI_OPEN_ACCESS).
+
+    Issues a token for the single operator with no credentials, auto-creating
+    that operator on first use so the dashboard is reachable with no login form.
+    404 when open access is disabled — the normal login applies then."""
+    if not get_settings().kai_open_access:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
+    users = UserRepository(session)
+    user = (await users.list(limit=1))
+    operator = user[0] if user else None
+    if operator is None:
+        operator = await users.add(
+            User(email="operator@local", password_hash=hash_password(secrets.token_urlsafe(32)))
+        )
+        await session.flush()
+    await AuditRepository(session).record(
+        "operator.open_access", actor_id=operator.id, ip=_client_ip(request)
+    )
+    return TokenOut(access_token=create_access_token(str(operator.id), timedelta(days=30)))
 
 
 @router.post("/desktop", response_model=TokenOut)

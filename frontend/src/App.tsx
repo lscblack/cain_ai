@@ -25,7 +25,9 @@ import { MapView } from "@/pages/MapView";
 import { Timeline } from "@/pages/Timeline";
 import { System } from "@/pages/System";
 import { Chat } from "@/pages/Chat";
+import { Skills } from "@/pages/Skills";
 import { Security } from "@/pages/Security";
+import { LandRegistry } from "@/pages/LandRegistry";
 import { Home } from "@/pages/Home";
 import { Voice } from "@/pages/Voice";
 
@@ -54,7 +56,9 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/chat" element={<Chat />} />
+            <Route path="/skills" element={<Skills />} />
             <Route path="/security" element={<Security />} />
+            <Route path="/land-registry" element={<LandRegistry />} />
             <Route path="/voice" element={<Voice />} />
             <Route path="/search" element={<Search />} />
             <Route path="/phone" element={<Phone />} />

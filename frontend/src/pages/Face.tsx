@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ScanFace, Upload, Video } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { AuthImg } from "@/components/AuthImg";
 import { MultiFaceDetect } from "@/components/MultiFaceDetect";
 import { FaceResultsHUD, type Person } from "@/components/FaceResultsHUD";
@@ -147,7 +147,7 @@ export function Face() {
     try {
       const fd = new FormData();
       fd.append("file", queryFile);
-      const base = import.meta.env.VITE_API_URL ?? "/api";
+      const base = API_BASE;
       const token = localStorage.getItem("kai.token");
       const resp = await fetch(`${base}/intelligence/face/search/stream`, {
         method: "POST",

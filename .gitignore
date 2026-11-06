@@ -33,3 +33,11 @@ cache/
 .DS_Store
 .idea/
 .vscode/
+
+# Worktrees (never commit)
+.claude/worktrees/
+.claude/
+
+# Android build artifacts
+mobile/android/app/build/
+mobile/android/build/

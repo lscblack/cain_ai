@@ -164,6 +164,13 @@ def _group_people(ranked: list, by_id: dict, *, top_k: int = 20) -> list[dict]:
                 a["context"] for a in appearances if a.get("context")
             ))[:5],
             "description": describe_face(rep.extra, rep.source_url),
+            # National-ID enrichment (present when this face came from a scraped
+            # NID record — see app.enrich.faces_link). Lets the UI surface the
+            # citizen record directly on the match card.
+            "kind": rep_ex.get("kind"),
+            "nid": rep_ex.get("nid") or rep_ex.get("national_id"),
+            "nid_person_id": rep_ex.get("person_id"),
+            "bio": rep_ex.get("bio") or None,
         })
     return people
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Database, Play, Trash2, RefreshCw } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { PageLoading, ErrorRetry } from "@/components/Async";
 
 interface Source {
@@ -138,7 +138,7 @@ export function Sources() {
   async function saveEdit(id: string, patch: Record<string, unknown>) {
     await api.get("/sources").catch(() => null); // noop keep-alive
     try {
-      await (await fetch(`${import.meta.env.VITE_API_URL ?? "/api"}/sources/${id}`, {
+      await (await fetch(`${API_BASE}/sources/${id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -161,7 +161,7 @@ export function Sources() {
   async function fetchDelete(id: string) {
     // delete has no body; reuse api via postForm-less fetch
     const token = localStorage.getItem("kai.token");
-    await fetch(`${import.meta.env.VITE_API_URL ?? "/api"}/sources/${id}`, {
+    await fetch(`${API_BASE}/sources/${id}`, {
       method: "DELETE",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });

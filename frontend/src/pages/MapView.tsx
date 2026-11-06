@@ -131,10 +131,13 @@ export function MapView() {
 
       <div className="overflow-hidden rounded-lg border border-line" style={{ height: 520 }}>
         <MapContainer center={center} zoom={casePoints.length ? 6 : 3} style={{ height: "100%", width: "100%", background: "#0e131d" }} ref={mapRef as any}>
+          <style>{`.kai-dark-tiles{filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.85);}`}</style>
           {tomtom ? (
             <TileLayer attribution="&copy; TomTom" url={`https://{s}.api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key=${tomtom}`} subdomains={["a", "b", "c", "d"]} />
           ) : (
-            <TileLayer attribution="&copy; OpenStreetMap, CARTO" url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+            // Keyless OSM tiles darkened via CSS (Carto now needs an API key).
+            <TileLayer attribution="&copy; OpenStreetMap contributors" className="kai-dark-tiles"
+              url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
           )}
           <BoundsWatcher onBounds={(b) => (boundsRef.current = b)} />
 

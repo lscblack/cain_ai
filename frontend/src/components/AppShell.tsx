@@ -23,6 +23,8 @@ import {
   LogOut,
   MessageSquare,
   ShieldCheck,
+  Boxes,
+  Landmark,
   AudioLines,
 } from "lucide-react";
 
@@ -38,7 +40,9 @@ const BASE_TITLE = document.title;
 const NAV: { icon: typeof Search; label: string; to?: string }[] = [
   { icon: LayoutDashboard, label: "Dashboard", to: "/" },
   { icon: MessageSquare, label: "KAI Chat", to: "/chat" },
+  { icon: Boxes, label: "Skills", to: "/skills" },
   { icon: ShieldCheck, label: "Security", to: "/security" },
+  { icon: Landmark, label: "Land Registry", to: "/land-registry" },
   { icon: AudioLines, label: "Voice Intelligence", to: "/voice" },
   { icon: Search, label: "Search", to: "/search" },
   { icon: FolderSearch, label: "Investigations", to: "/investigations" },

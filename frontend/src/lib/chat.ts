@@ -1,6 +1,6 @@
-import { api, getToken } from "@/lib/api";
+import { api, getToken, API_BASE } from "@/lib/api";
 
-const BASE = import.meta.env.VITE_API_URL ?? "/api";
+const BASE = API_BASE;
 
 // ───────────────────────── types ──────────────────────────────────── //
 export interface ModelStatus {
@@ -9,6 +9,7 @@ export interface ModelStatus {
   reachable: boolean;
   model_installed: boolean;
   models_available: string[];
+  models_detail?: { name: string; backend: "ollama" | "llamacpp" }[];
   error: string | null;
   ready: boolean;
   backend?: "ollama" | "llamacpp";
@@ -85,12 +86,35 @@ export const chatApi = {
     api.post<Conversation>("/chat/conversations", body),
   renameConversation: (id: string, title: string) =>
     api.patch<Conversation>(`/chat/conversations/${id}`, { title }),
+  setConversationModel: (id: string, model: string) =>
+    api.patch<Conversation>(`/chat/conversations/${id}`, { model }),
   deleteConversation: (id: string) => api.del<void>(`/chat/conversations/${id}`),
   active: () => api.get<ActiveRun[]>("/chat/active"),
   cancel: (id: string) => api.post<{ cancelled: boolean }>(`/chat/conversations/${id}/cancel`),
   approve: (id: string, approved: boolean) =>
     api.post<{ ok: boolean; approved: boolean }>(`/chat/conversations/${id}/approve`, { approved }),
+  assets: () => api.get<{ files: KaiAsset[] }>("/chat/files"),
+  deleteAsset: (id: string) => api.del<void>(`/chat/files/${id}`),
+  summarize: (id: string) => api.post<{ summary: string }>(`/chat/conversations/${id}/summary`),
+  getProfile: () => api.get<OperatorProfile>("/chat/profile"),
+  setProfile: (content: string) => api.put<OperatorProfile>("/chat/profile", { content }),
+  learnProfile: (conversation_id: string) => api.post<OperatorProfile>("/chat/profile/learn", { conversation_id }),
 };
+
+export interface OperatorProfile {
+  content_text: string;
+  char_count: number;
+  updated_at: string | null;
+}
+
+export interface KaiAsset {
+  id: string;
+  name: string;
+  size: number;
+  content_type: string;
+  download_url: string;
+  created_at: string | null;
+}
 
 // ───────────────────────── SSE streaming ──────────────────────────── //
 export interface ActiveRun {
@@ -144,11 +168,13 @@ export async function streamMessage(
   onEvent: (e: SseEvent) => void,
   signal?: AbortSignal,
   autoApprove = false,
+  think = false,
+  mode: "auto" | "multi" = "auto",
 ): Promise<void> {
   const resp = await fetch(`${BASE}/chat/conversations/${conversationId}/messages`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ content, use_tools: useTools, auto_approve: autoApprove }),
+    body: JSON.stringify({ content, use_tools: useTools, auto_approve: autoApprove, think, mode }),
     signal,
   });
   if (!resp.ok || !resp.body) {

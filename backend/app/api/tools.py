@@ -19,13 +19,17 @@ from app.api.deps import get_current_operator
 from app.database.models.audit import AuditLog
 from app.database.models.security import (
     AuthorizedTarget,
+    CustomCapability,
     InstallRequest,
+    KaiSkill,
     SecurityFinding,
+    ToolDoc,
     ToolExecution,
     ToolVerification,
 )
 from app.database.models.user import User
 from app.database.session import get_session
+from app.security import custom_tools
 from app.security import install as install_mod
 from app.security import registry, service
 from app.security import validate as V
@@ -265,6 +269,297 @@ async def findings(
         }
         for r in rows
     ]
+
+
+# ───────────────────────── tool documentation ───────────────────────── #
+_DOC_MAX_CHARS = 40_000
+
+
+class ToolDocIn(BaseModel):
+    # One of: "url" (fetch+scrape `url`), "text" (store `content`), or
+    # "file" (frontend reads the file to text and sends it as `content`,
+    # with `source_ref` set to the filename).
+    source_type: str = Field(pattern="^(url|text|file)$")
+    url: str | None = None
+    content: str | None = None
+    source_ref: str | None = None
+    tool_name: str | None = None
+    title: str | None = None
+
+
+async def _scrape_url(url: str) -> tuple[str, str]:
+    """Fetch a public page and return (title, extracted_text). SSRF-guarded,
+    reusing the same validation as the web.fetch tool. Raises HTTPException."""
+    from app.core.net import UnsafeUrlError, validate_public_url
+    from app.crawlers.extract import extract_page_meta, extract_text_excerpt
+    from app.crawlers.http import httpx_fetch
+
+    try:
+        validate_public_url(url)
+    except UnsafeUrlError as exc:
+        raise HTTPException(status_code=422, detail=f"unsafe or invalid URL: {exc}")
+    fetched = await httpx_fetch(url)
+    if fetched.status == 0:
+        raise HTTPException(status_code=502, detail="URL could not be reached (proxy required or unreachable)")
+    if fetched.status != 200:
+        raise HTTPException(status_code=502, detail=f"URL returned HTTP {fetched.status}")
+    if not fetched.content_type.startswith(("text/", "application/xhtml", "application/json")):
+        raise HTTPException(status_code=415, detail=f"unsupported content type: {fetched.content_type}")
+    html = fetched.body.decode("utf-8", errors="replace")
+    meta = extract_page_meta(html) if "html" in fetched.content_type else {}
+    text = extract_text_excerpt(html, max_len=_DOC_MAX_CHARS) or html[:_DOC_MAX_CHARS]
+    return (meta.get("title") or url), text
+
+
+@router.post("/docs", status_code=201)
+async def add_tool_doc(
+    body: ToolDocIn,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Store documentation for a tool so the model can learn how it works. The
+    content is injected as read-only reference context on future chat turns."""
+    tool_name = (body.tool_name or "").strip()[:100] or None
+    title = (body.title or "").strip()[:200]
+    source_ref: str | None = None
+
+    if body.source_type == "url":
+        if not body.url or not body.url.strip():
+            raise HTTPException(status_code=422, detail="url is required for source_type=url")
+        source_ref = body.url.strip()[:1000]
+        scraped_title, content = await _scrape_url(source_ref)
+        if not title:
+            title = scraped_title[:200]
+    else:  # text | file
+        if not body.content or not body.content.strip():
+            raise HTTPException(status_code=422, detail="content is required for source_type=text/file")
+        content = body.content
+        source_ref = (body.source_ref or "").strip()[:1000] or None
+        if not title:
+            title = (source_ref or "pasted document")[:200]
+
+    content = content[:_DOC_MAX_CHARS]
+    row = ToolDoc(
+        user_id=operator.id, tool_name=tool_name, title=title or "untitled",
+        source_type=body.source_type, source_ref=source_ref,
+        content_text=content, char_count=len(content),
+    )
+    session.add(row)
+    await session.flush()
+    await session.refresh(row)
+    return _tooldoc_out(row, include_content=False)
+
+
+def _tooldoc_out(r: ToolDoc, *, include_content: bool) -> dict:
+    out = {
+        "id": str(r.id), "tool_name": r.tool_name, "title": r.title,
+        "source_type": r.source_type, "source_ref": r.source_ref,
+        "char_count": r.char_count,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+    if include_content:
+        out["content_text"] = r.content_text
+    return out
+
+
+@router.get("/docs")
+async def list_tool_docs(
+    tool_name: str | None = None,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    stmt = select(ToolDoc).where(ToolDoc.user_id == operator.id)
+    if tool_name:
+        stmt = stmt.where(ToolDoc.tool_name == tool_name)
+    rows = (await session.execute(stmt.order_by(ToolDoc.created_at.desc()))).scalars().all()
+    return [_tooldoc_out(r, include_content=False) for r in rows]
+
+
+async def _get_doc_or_404(doc_id: uuid.UUID, user_id: uuid.UUID, session: AsyncSession) -> ToolDoc:
+    row = await session.get(ToolDoc, doc_id)
+    if row is None or row.user_id != user_id:
+        raise HTTPException(status_code=404, detail="tool_doc_not_found")
+    return row
+
+
+@router.get("/docs/{doc_id}")
+async def get_tool_doc(
+    doc_id: uuid.UUID,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    row = await _get_doc_or_404(doc_id, operator.id, session)
+    return _tooldoc_out(row, include_content=True)
+
+
+@router.delete("/docs/{doc_id}", status_code=204)
+async def delete_tool_doc(
+    doc_id: uuid.UUID,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    row = await _get_doc_or_404(doc_id, operator.id, session)
+    await session.delete(row)
+    await session.flush()
+
+
+# ───────────────────────── skills (operator playbooks) ──────────────── #
+_SKILL_MAX_CHARS = 20_000
+
+
+class SkillIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    content: str = Field(min_length=1)
+    enabled: bool = True
+
+
+class SkillPatch(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    content: str | None = None
+    enabled: bool | None = None
+
+
+def _skill_out(r: KaiSkill, *, include_content: bool) -> dict:
+    out = {
+        "id": str(r.id), "name": r.name, "description": r.description,
+        "enabled": r.enabled, "char_count": r.char_count,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+    if include_content:
+        out["content_text"] = r.content_text
+    return out
+
+
+async def _get_skill_or_404(skill_id: uuid.UUID, user_id: uuid.UUID, session: AsyncSession) -> KaiSkill:
+    row = await session.get(KaiSkill, skill_id)
+    if row is None or row.user_id != user_id:
+        raise HTTPException(status_code=404, detail="skill_not_found")
+    return row
+
+
+@router.get("/skills")
+async def list_skills(
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    rows = (
+        await session.execute(
+            select(KaiSkill).where(KaiSkill.user_id == operator.id).order_by(KaiSkill.created_at.desc())
+        )
+    ).scalars().all()
+    return [_skill_out(r, include_content=False) for r in rows]
+
+
+@router.get("/skills/{skill_id}")
+async def get_skill(
+    skill_id: uuid.UUID,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return _skill_out(await _get_skill_or_404(skill_id, operator.id, session), include_content=True)
+
+
+@router.post("/skills", status_code=201)
+async def add_skill(
+    body: SkillIn,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Store an operator-authored skill. Enabled skills are injected into KAI's
+    guidance each turn so it learns how the operator wants recurring tasks done."""
+    content = body.content[:_SKILL_MAX_CHARS]
+    row = KaiSkill(
+        user_id=operator.id, name=body.name.strip()[:120],
+        description=body.description.strip()[:500], content_text=content,
+        enabled=body.enabled, char_count=len(content),
+    )
+    session.add(row)
+    await session.flush()
+    await session.refresh(row)
+    return _skill_out(row, include_content=True)
+
+
+@router.patch("/skills/{skill_id}")
+async def patch_skill(
+    skill_id: uuid.UUID,
+    body: SkillPatch,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    row = await _get_skill_or_404(skill_id, operator.id, session)
+    if body.name is not None and body.name.strip():
+        row.name = body.name.strip()[:120]
+    if body.description is not None:
+        row.description = body.description.strip()[:500]
+    if body.content is not None and body.content.strip():
+        row.content_text = body.content[:_SKILL_MAX_CHARS]
+        row.char_count = len(row.content_text)
+    if body.enabled is not None:
+        row.enabled = body.enabled
+    session.add(row)
+    await session.flush()
+    await session.refresh(row)
+    return _skill_out(row, include_content=True)
+
+
+@router.delete("/skills/{skill_id}", status_code=204)
+async def delete_skill(
+    skill_id: uuid.UUID,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    row = await _get_skill_or_404(skill_id, operator.id, session)
+    await session.delete(row)
+    await session.flush()
+
+
+# ───────────────────────── capabilities (permissions) ───────────────── #
+class CapabilitiesBody(BaseModel):
+    tools_enabled: bool | None = None
+    shell_enabled: bool | None = None
+    shell_auto_run: bool | None = None
+    shell_sudo: bool | None = None
+
+
+@router.get("/capabilities")
+async def get_capabilities(
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """What KAI is currently permitted to do (for the Capabilities panel)."""
+    from app.security import capabilities as caps_mod
+
+    row = await caps_mod.get_capabilities(session, operator.id)
+    return caps_mod.to_dict(row)
+
+
+@router.put("/capabilities")
+async def set_capabilities(
+    body: CapabilitiesBody,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Update what KAI may do. Enabling terminal access is logged."""
+    from app.security import capabilities as caps_mod
+
+    before = caps_mod.to_dict(await caps_mod.get_capabilities(session, operator.id))
+    row = await caps_mod.update_capabilities(
+        session, operator.id,
+        tools_enabled=body.tools_enabled,
+        shell_enabled=body.shell_enabled,
+        shell_auto_run=body.shell_auto_run,
+        shell_sudo=body.shell_sudo,
+    )
+    after = caps_mod.to_dict(row)
+    if after != before:
+        session.add(AuditLog(
+            actor_id=operator.id, action="capabilities.update",
+            detail={"before": before, "after": after},
+        ))
+        await session.flush()
+    return after
 
 
 # ───────────────────────── install workflow ─────────────────────────── #
@@ -541,3 +836,143 @@ async def _get_install_or_404(req_id: uuid.UUID, user_id: uuid.UUID, session: As
     if req is None or req.user_id != user_id:
         raise HTTPException(status_code=404, detail="install_request_not_found")
     return req
+
+
+# ───────────────────────── custom capabilities (tools) ──────────────────── #
+class CapabilityOpIn(BaseModel):
+    key: str = Field(min_length=1, max_length=64)
+    title: str = ""
+    description: str = ""
+    posture: str = "passive"            # passive | active | disruptive
+    argv_template: str = ""             # flags after the binary; use {target}
+    target_kind: str | None = None      # domain|host|ip|url|username|email|phone|onion|term|hash|port_spec
+    requires_authorization: bool = False
+    timeout: int | None = None
+
+
+class CapabilityIn(BaseModel):
+    name: str = Field(min_length=2, max_length=49)
+    title: str = ""
+    purpose: str = ""
+    category: str = "custom"
+    binary: str = ""                    # executable to discover (defaults to name)
+    source: str = "apt"                 # apt|kali|pip|go|github|gem|builtin
+    package: str = ""                   # install package/module/repo (for non-apt KAI installs)
+    categories: list[str] = Field(default_factory=list)
+    operations: list[CapabilityOpIn] = Field(min_length=1)
+    enabled: bool = True
+
+
+def _capability_out(r: CustomCapability) -> dict:
+    return {
+        "id": str(r.id), "name": r.name, "title": r.title, "category": r.category,
+        "enabled": r.enabled, "entry": r.entry,
+        "operations": (r.entry or {}).get("ops", []),
+        "source": (r.entry or {}).get("source"), "binary": (r.entry or {}).get("binary"),
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def _build_capability_entry(body: CapabilityIn) -> dict:
+    try:
+        return custom_tools.build_entry({
+            "name": body.name, "purpose": body.purpose, "binary": body.binary,
+            "source": body.source, "package": body.package, "categories": body.categories,
+            "operations": [op.model_dump() for op in body.operations],
+        })
+    except custom_tools.CapabilityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/custom")
+async def list_custom_capabilities(
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    rows = (
+        await session.execute(
+            select(CustomCapability).where(CustomCapability.user_id == operator.id)
+            .order_by(CustomCapability.created_at.desc())
+        )
+    ).scalars().all()
+    return [_capability_out(r) for r in rows]
+
+
+@router.post("/custom", status_code=201)
+async def create_custom_capability(
+    body: CapabilityIn,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    entry = _build_capability_entry(body)
+    dupe = (
+        await session.execute(
+            select(CustomCapability).where(
+                CustomCapability.user_id == operator.id, CustomCapability.name == entry["name"]
+            )
+        )
+    ).scalar_one_or_none()
+    if dupe is not None:
+        raise HTTPException(status_code=409, detail=f"capability '{entry['name']}' already exists")
+    row = CustomCapability(
+        user_id=operator.id, name=entry["name"], title=(body.title or entry["name"])[:120],
+        category=body.category[:60] or "custom", enabled=body.enabled, entry=entry,
+    )
+    session.add(row)
+    session.add(AuditLog(actor_id=operator.id, action="capability.create", detail={"name": entry["name"]}))
+    await session.flush()
+    await session.refresh(row)
+    await custom_tools.reload_registry(session)
+    return _capability_out(row)
+
+
+async def _get_capability_or_404(cap_id: uuid.UUID, user_id: uuid.UUID, session: AsyncSession) -> CustomCapability:
+    row = await session.get(CustomCapability, cap_id)
+    if row is None or row.user_id != user_id:
+        raise HTTPException(status_code=404, detail="capability_not_found")
+    return row
+
+
+@router.put("/custom/{cap_id}")
+async def update_custom_capability(
+    cap_id: uuid.UUID,
+    body: CapabilityIn,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    row = await _get_capability_or_404(cap_id, operator.id, session)
+    entry = _build_capability_entry(body)
+    # Allow keeping the same name; block renaming onto another existing one.
+    if entry["name"] != row.name:
+        dupe = (
+            await session.execute(
+                select(CustomCapability).where(
+                    CustomCapability.user_id == operator.id, CustomCapability.name == entry["name"]
+                )
+            )
+        ).scalar_one_or_none()
+        if dupe is not None:
+            raise HTTPException(status_code=409, detail=f"capability '{entry['name']}' already exists")
+    row.name = entry["name"]
+    row.title = (body.title or entry["name"])[:120]
+    row.category = body.category[:60] or "custom"
+    row.enabled = body.enabled
+    row.entry = entry
+    session.add(row)
+    await session.flush()
+    await session.refresh(row)
+    await custom_tools.reload_registry(session)
+    return _capability_out(row)
+
+
+@router.delete("/custom/{cap_id}", status_code=204)
+async def delete_custom_capability(
+    cap_id: uuid.UUID,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    row = await _get_capability_or_404(cap_id, operator.id, session)
+    await session.delete(row)
+    session.add(AuditLog(actor_id=operator.id, action="capability.delete", detail={"name": row.name}))
+    await session.flush()
+    await custom_tools.reload_registry(session)

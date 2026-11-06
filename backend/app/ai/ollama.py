@@ -78,17 +78,26 @@ class GenParams:
     num_ctx: int | None = None
     top_p: float | None = None
     num_predict: int | None = None  # max tokens to generate (-1 = until stop)
+    think: bool | None = None  # enable hybrid-model reasoning (Qwen3 <think>); None = off
 
     def to_options(self) -> dict:
         s = get_settings()
         opts: dict = {
             "temperature": self.temperature if self.temperature is not None else s.kai_ollama_temperature,
             "num_ctx": self.num_ctx if self.num_ctx is not None else s.kai_ollama_num_ctx,
+            # Anti-repetition: stop the model degenerating into endless loops
+            # (e.g. "-i 3 -i 4 -i 5 …"). These are safe defaults that strongly
+            # discourage repeated tokens without hurting normal answers.
+            "repeat_penalty": s.kai_ollama_repeat_penalty,
+            "repeat_last_n": s.kai_ollama_repeat_last_n,
+            "top_p": self.top_p if self.top_p is not None else s.kai_ollama_top_p,
+            "top_k": s.kai_ollama_top_k,
+            "presence_penalty": s.kai_ollama_presence_penalty,
+            "frequency_penalty": s.kai_ollama_frequency_penalty,
         }
-        if self.top_p is not None:
-            opts["top_p"] = self.top_p
-        if self.num_predict is not None:
-            opts["num_predict"] = self.num_predict
+        np = self.num_predict if self.num_predict is not None else s.kai_ollama_num_predict
+        if np and np > 0:
+            opts["num_predict"] = np
         return opts
 
 
@@ -170,13 +179,14 @@ class OllamaProvider:
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "stream": stream,
             "options": params.to_options(),
-            "keep_alive": "10m",
-            # Disable "thinking" for hybrid reasoning models (e.g. Qwen3). KAI's
-            # orchestration relies on the FIRST non-whitespace char to decide
-            # tool-call JSON vs prose; a leading <think> block would break that,
-            # and on CPU the reasoning tokens cost minutes per turn. Ollama
-            # ignores this for non-thinking models (dolphin, llama3).
-            "think": False,
+            "keep_alive": get_settings().kai_ollama_keep_alive,
+            # "Thinking" for hybrid reasoning models (e.g. Qwen3). Off by default
+            # because KAI's orchestration reads the FIRST non-whitespace char to
+            # decide tool-call JSON vs prose and, on CPU, reasoning tokens cost
+            # minutes per turn. When the operator turns it on per conversation,
+            # the stream decoder strips the <think> block so neither the JSON/prose
+            # decision nor the operator ever sees it. Ignored by non-thinking models.
+            "think": bool(params.think),
         }
 
     @staticmethod
@@ -269,3 +279,59 @@ def get_ollama_provider() -> OllamaProvider:
         else:
             _provider = OllamaProvider()
     return _provider
+
+
+def provider_for_model(model: str | None) -> OllamaProvider:
+    """A provider bound to ``model`` on the active backend. Returns the shared
+    singleton when ``model`` is empty or already the configured one (so the
+    llama.cpp prompt-cache/sticky routing stays warm); otherwise a lightweight
+    instance of the same backend class bound to the requested model."""
+    base = get_ollama_provider()
+    if not model or model == base.model:
+        return base
+    return type(base)(model=model)
+
+
+async def list_all_models() -> list[dict]:
+    """Every chat model available across BOTH backends, as
+    ``[{"name": ..., "backend": "llamacpp"|"ollama"}]`` (best-effort; a backend
+    that is down is simply skipped). Lets the chat dropdown offer models from
+    llama.cpp and Ollama at once, so the operator can switch between them."""
+    from app.ai.llamacpp import LlamaCppProvider
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    for backend, prov in (("llamacpp", LlamaCppProvider()), ("ollama", OllamaProvider())):
+        try:
+            names = await prov.list_models()
+        except Exception:  # noqa: BLE001 — a missing backend just contributes nothing
+            continue
+        for name in names:
+            if name and name not in seen:
+                seen.add(name)
+                out.append({"name": name, "backend": backend})
+    return out
+
+
+async def resolve_provider_for_model(model: str | None) -> OllamaProvider:
+    """Like :func:`provider_for_model`, but routes ``model`` to whichever backend
+    actually has it (llama.cpp or Ollama), not just the active one. Checks the
+    active backend first (keeps its prompt cache warm), then the other."""
+    base = get_ollama_provider()
+    if not model or model == base.model:
+        return base
+
+    from app.ai.llamacpp import LlamaCppProvider
+
+    active_cls = type(base)
+    other_cls = OllamaProvider if active_cls is not OllamaProvider else LlamaCppProvider
+    for cls in (active_cls, other_cls):
+        try:
+            probe = cls(model=model)
+            if probe._model_present(await probe.list_models()):
+                return probe
+        except Exception:  # noqa: BLE001 — backend down: try the next one
+            continue
+    # Not found on either backend — hand back the active backend bound to the
+    # name so the caller surfaces a clean "not installed" error.
+    return active_cls(model=model)

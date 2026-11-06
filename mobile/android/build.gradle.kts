@@ -5,15 +5,13 @@ allprojects {
     }
 }
 
-val newBuildDir: Directory =
-    rootProject.layout.buildDirectory
-        .dir("../../build")
-        .get()
-rootProject.layout.buildDirectory.value(newBuildDir)
+// Flutter expects build output at <flutter project>/build. Set it lazily from
+// projectDir (no eager `.get()`), so Gradle does not canonicalize the path to the
+// drive's /mnt/<uuid> mount, which previously broke the build.
+rootProject.layout.buildDirectory.set(rootProject.projectDir.resolve("../build"))
 
 subprojects {
-    val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
-    project.layout.buildDirectory.value(newSubprojectBuildDir)
+    project.layout.buildDirectory.set(rootProject.layout.buildDirectory.dir(project.name))
 }
 subprojects {
     project.evaluationDependsOn(":app")

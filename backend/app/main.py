@@ -5,9 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    analyst, auth, chat, contacts, discovery, emails, export, faces, geo, health, investigations,
-    maps, phones, powerup, public, search, settings as settings_api, sources, system,
-    timeline, tools, usernames, voice,
+    analyst, auth, chat, contacts, discovery, emails, enrich, export, faces, geo, health,
+    investigations, maps, phones, powerup, public, search, settings as settings_api, sources,
+    system, timeline, tools, usernames, voice,
 )
 from app.api import investigate
 from app.core.config import get_settings
@@ -77,13 +77,6 @@ def create_app() -> FastAPI:
             await conn.run_sync(SQLModel.metadata.create_all)
 
         try:
-            from app.voice.services import reset_interrupted as _voice_reset
-
-            await _voice_reset()
-        except Exception:  # never block startup on the voice module
-            get_logger("kai.startup").exception("voice startup cleanup failed")
-
-        try:
             await seed_admin()
             await seed_default_sources(only_if_empty=True)
             # Reset sources left 'crawling' by a prior process that was killed
@@ -98,8 +91,65 @@ def create_app() -> FastAPI:
                     _update(_Source).where(_Source.status == "crawling").values(status="idle")
                 )
                 await _s.commit()
+            # Enrichment jobs left 'running' by a killed process can't resume
+            # themselves — mark them interrupted so the UI is accurate.
+            from app.enrich import runner as _enrich_runner
+
+            await _enrich_runner.reset_stale_jobs()
+
+            # Load operator-defined tool capabilities into the live registry.
+            from app.security import custom_tools as _custom_tools
+            from app.database.session import async_session_maker as _asm2
+
+            async with _asm2() as _s2:
+                await _custom_tools.reload_registry(_s2)
         except Exception:  # never block startup on seeding
             get_logger("kai.startup").exception("startup seeding failed")
+
+        # Pre-warm the chat model in the background so the operator's FIRST
+        # message isn't a ~40s cold load. Loads the model + caches the system
+        # prompt prefix. Fire-and-forget; never blocks or fails startup.
+        async def _warm_model() -> None:
+            try:
+                from app.ai.ollama import GenParams, get_ollama_provider
+                from app.ai.router import AIMessage
+                from app.security.orchestrator import protocol_system_message
+
+                sys_msg = await protocol_system_message(get_settings().tool_max_agent_steps)
+                provider = get_ollama_provider()
+                await provider.chat(
+                    [sys_msg, AIMessage(role="user", content="ready?")],
+                    params=GenParams(num_predict=1),
+                )
+                get_logger("kai.startup").info("chat model pre-warmed")
+            except Exception:  # model offline / not installed — ignore
+                get_logger("kai.startup").info("chat model pre-warm skipped (unavailable)")
+
+        try:
+            from app.voice.services import reset_interrupted as _voice_reset
+
+            await _voice_reset()
+        except Exception:  # never block startup on the voice module
+            get_logger("kai.startup").exception("voice startup cleanup failed")
+
+        import asyncio as _asyncio
+        _asyncio.create_task(_warm_model())
+
+        async def _warm_face_index() -> None:
+            # Load the whole face index into memory once (~40 s for ~230k faces)
+            # so image searches scan every face in well under a second.
+            try:
+                from app.database.session import async_session_maker
+                from app.intelligence.face.index_cache import get_index_cache
+
+                async with async_session_maker() as s:
+                    await get_index_cache().refresh(s)
+                get_logger("kai.startup").info(
+                    "face index cache warmed: %d faces", get_index_cache().size)
+            except Exception as exc:  # DB down etc. — first search will load it
+                get_logger("kai.startup").info("face index warm skipped: %s", exc)
+
+        _asyncio.create_task(_warm_face_index())
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(investigations.router)
@@ -122,6 +172,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_api.router)
     app.include_router(chat.router)
     app.include_router(tools.router)
+    app.include_router(enrich.router)
     app.include_router(investigate.router)
     app.include_router(voice.router)
     app.include_router(voice.ws_router)
