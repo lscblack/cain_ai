@@ -6,6 +6,7 @@ import '../models/voice_intent.dart';
 import '../services/api_client.dart';
 import '../theme/hacker_theme.dart';
 import '../widgets/kai_anim.dart';
+import 'chat_screen.dart';
 import 'detect_faces_screen.dart';
 import 'face_search_screen.dart';
 import 'live_camera_screen.dart';
@@ -87,8 +88,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _go(const InvestigationsScreen());
         break;
       case VoiceAction.unknown:
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text("Didn't catch a command")));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Didn't catch a command")));
         break;
     }
   }
@@ -97,10 +99,12 @@ class _HomeScreenState extends State<HomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => VoiceCommandScreen(onIntent: (intent) {
-          Navigator.pop(context); // close the voice screen first
-          _routeIntent(intent);
-        }),
+        builder: (_) => VoiceCommandScreen(
+          onIntent: (intent) {
+            Navigator.pop(context); // close the voice screen first
+            _routeIntent(intent);
+          },
+        ),
       ),
     );
   }
@@ -108,69 +112,127 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final tiles = <_Tile>[
-      _Tile('Face Search', Icons.person_search, KaiColors.accent,
-          () => _go(const FaceSearchScreen())),
-      _Tile('Detect Faces', Icons.center_focus_strong, KaiColors.hud,
-          () => _go(const DetectFacesScreen())),
-      _Tile('Live Detection', Icons.videocam_outlined, KaiColors.accent,
-          () => _go(const LiveCameraScreen())),
-      _Tile('Universal Search', Icons.search, KaiColors.ink,
-          () => _go(const UniversalSearchScreen())),
-      _Tile('Phone', Icons.phone_outlined, KaiColors.verified,
-          () => _go(const PhoneSearchScreen())),
-      _Tile('Email', Icons.alternate_email, KaiColors.verified,
-          () => _go(const EmailSearchScreen())),
-      _Tile('Username', Icons.person_search_outlined, KaiColors.verified,
-          () => _go(const UsernameSearchScreen())),
-      _Tile('Investigations', Icons.folder_open_outlined, KaiColors.warn,
-          () => _go(const InvestigationsScreen())),
-      _Tile('Video Search', Icons.video_library_outlined, KaiColors.accent,
-          () => _go(const VideoSearchScreen())),
-      _Tile('Signals', Icons.wifi_find_outlined, KaiColors.hud,
-          () => _go(const SignalsScreen())),
+      _Tile(
+        'KAI Chat',
+        Icons.forum,
+        KaiColors.hud,
+        () => _go(const ChatScreen()),
+      ),
+      _Tile(
+        'Face Search',
+        Icons.person_search,
+        KaiColors.accent,
+        () => _go(const FaceSearchScreen()),
+      ),
+      _Tile(
+        'Detect Faces',
+        Icons.center_focus_strong,
+        KaiColors.hud,
+        () => _go(const DetectFacesScreen()),
+      ),
+      _Tile(
+        'Live Detection',
+        Icons.videocam_outlined,
+        KaiColors.accent,
+        () => _go(const LiveCameraScreen()),
+      ),
+      _Tile(
+        'Universal Search',
+        Icons.search,
+        KaiColors.ink,
+        () => _go(const UniversalSearchScreen()),
+      ),
+      _Tile(
+        'Phone',
+        Icons.phone_outlined,
+        KaiColors.verified,
+        () => _go(const PhoneSearchScreen()),
+      ),
+      _Tile(
+        'Email',
+        Icons.alternate_email,
+        KaiColors.verified,
+        () => _go(const EmailSearchScreen()),
+      ),
+      _Tile(
+        'Username',
+        Icons.person_search_outlined,
+        KaiColors.verified,
+        () => _go(const UsernameSearchScreen()),
+      ),
+      _Tile(
+        'Investigations',
+        Icons.folder_open_outlined,
+        KaiColors.warn,
+        () => _go(const InvestigationsScreen()),
+      ),
+      _Tile(
+        'Video Search',
+        Icons.video_library_outlined,
+        KaiColors.accent,
+        () => _go(const VideoSearchScreen()),
+      ),
+      _Tile(
+        'Signals',
+        Icons.wifi_find_outlined,
+        KaiColors.hud,
+        () => _go(const SignalsScreen()),
+      ),
       _Tile('Voice (Jarvis)', Icons.mic, KaiColors.accent, _openVoice),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(children: [
-          const Text('KAI',
+        title: Row(
+          children: [
+            const Text(
+              'KAI',
               style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 4,
-                  color: KaiColors.hud,
-                  shadows: [Shadow(color: Color(0x8822D3EE), blurRadius: 10)])),
-          const SizedBox(width: 10),
-          if (_engineOnline != null)
-            Row(children: [
-              PulseGlow(
-                active: _engineOnline!,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 4,
                 color: KaiColors.hud,
-                minBlur: 2,
-                maxBlur: 10,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _engineOnline! ? KaiColors.hud : KaiColors.danger,
+                shadows: [Shadow(color: Color(0x8822D3EE), blurRadius: 10)],
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (_engineOnline != null)
+              Row(
+                children: [
+                  PulseGlow(
+                    active: _engineOnline!,
+                    color: KaiColors.hud,
+                    minBlur: 2,
+                    maxBlur: 10,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _engineOnline!
+                            ? KaiColors.hud
+                            : KaiColors.danger,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _engineOnline! ? 'ENGINE ONLINE' : 'ENGINE OFFLINE',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: _engineOnline! ? KaiColors.hud : KaiColors.danger,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              Text(
-                _engineOnline! ? 'ENGINE ONLINE' : 'ENGINE OFFLINE',
-                style: TextStyle(
-                    fontSize: 10,
-                    color: _engineOnline! ? KaiColors.hud : KaiColors.danger),
-              ),
-            ]),
-        ]),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
           ),
           IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
         ],
@@ -196,7 +258,10 @@ class _HomeScreenState extends State<HomeScreen> {
         childAspectRatio: 1.3,
         children: [
           for (var i = 0; i < tiles.length; i++)
-            RevealIn(index: i, child: _TileCard(tile: tiles[i])),
+            RevealIn(
+              index: i,
+              child: _TileCard(tile: tiles[i]),
+            ),
         ],
       ),
     );
@@ -218,28 +283,37 @@ class _TileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: tile.onTap ??
-          () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Coming soon')),
-              ),
+      onTap:
+          tile.onTap ??
+          () => ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Coming soon'))),
       borderRadius: BorderRadius.circular(6),
       child: HudPanel(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Icon(tile.icon, color: tile.color, size: 26),
-              const Spacer(),
-              const Text('›', style: TextStyle(color: KaiColors.hud, fontSize: 16)),
-            ]),
+            Row(
+              children: [
+                Icon(tile.icon, color: tile.color, size: 26),
+                const Spacer(),
+                const Text(
+                  '›',
+                  style: TextStyle(color: KaiColors.hud, fontSize: 16),
+                ),
+              ],
+            ),
             const Spacer(),
-            Text(tile.label.toUpperCase(),
-                style: const TextStyle(
-                    color: KaiColors.ink,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                    fontSize: 13)),
+            Text(
+              tile.label.toUpperCase(),
+              style: const TextStyle(
+                color: KaiColors.ink,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       ),
