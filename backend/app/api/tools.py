@@ -712,6 +712,24 @@ def _apt_only(capability: str | None) -> None:
         )
 
 
+class RunScriptBody(BaseModel):
+    filename: str
+    sudo: bool = False
+    conversation_id: uuid.UUID | None = None
+
+
+@router.post("/run-script")
+async def run_script(
+    body: RunScriptBody,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Run a .sh asset from the operator's workspace (validated; sudo obeys caps)."""
+    return await service.run_workspace_script(
+        session, user_id=operator.id, conversation_id=body.conversation_id,
+        filename=body.filename, sudo=body.sudo)
+
+
 @router.post("/install/now")
 async def install_now(
     body: InstallNowBody,

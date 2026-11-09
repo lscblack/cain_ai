@@ -184,3 +184,33 @@ async def test_install_batch_single_privileged_call_and_skips(client, auth_heade
     assert len(calls) == 1 and "nmap" in calls[0]            # one polkit prompt
     reasons = {s["tool"]: s["reason"] for s in body["skipped"]}
     assert "subfinder" in reasons and "nope-tool" in reasons  # non-apt / unknown skipped, reported
+
+
+async def test_run_script_requires_auth(client):
+    r = await client.post("/tools/run-script", json={"filename": "x.sh"})
+    assert r.status_code == 401
+
+
+async def test_run_script_runs_workspace_script(client, auth_headers, db_session, tmp_path, monkeypatch):
+    import uuid
+
+    from app.core.config import get_settings
+    from app.security import capabilities as caps_mod
+    from app.security import workspace as ws
+
+    monkeypatch.setattr(get_settings(), "kai_workspace_dir", str(tmp_path / "ws"))
+    me = await client.get("/auth/me", headers=auth_headers)
+    uid = uuid.UUID(me.json()["id"])
+    await caps_mod.update_capabilities(db_session, uid, shell_enabled=True, shell_sudo=False)
+    await db_session.commit()
+    (ws.operator_dir(uid) / "hello.sh").write_text("echo KAI_RAN_OK\n")
+
+    r = await client.post("/tools/run-script", json={"filename": "hello.sh"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["ok"] and "KAI_RAN_OK" in r.json()["stdout"]
+
+
+async def test_run_script_bad_name_is_handled(client, auth_headers):
+    r = await client.post("/tools/run-script", json={"filename": "../../etc/passwd"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["reason"] == "bad_script"
