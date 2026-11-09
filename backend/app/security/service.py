@@ -16,6 +16,7 @@ It never raises for an expected refusal; it returns a structured dict with a
 """
 from __future__ import annotations
 
+import shlex
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -288,12 +289,32 @@ async def _run_shell_op(
                         "commands (sudo)' in the Capabilities panel to allow them."),
         }
 
+    return await _exec_shell_command(
+        session, user_id=user_id, conversation_id=conversation_id,
+        command=command, sudo=sudo, interactive=bool(params.get("interactive")),
+        caps=caps,
+    )
+
+
+async def _exec_shell_command(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID | None,
+    command: str,
+    sudo: bool,
+    interactive: bool,
+    caps,
+    extra_args: dict | None = None,
+) -> dict:
+    """Shared execution body for ``shell.run`` and ``run_workspace_script``.
+    Callers validate (shell_enabled, command, sudo gate) first; this rate-limits,
+    runs, records, audits and registers new workspace files."""
     if await _rate_limited(session, user_id):
         return {"ok": False, "status": "blocked", "reason": "rate_limited",
                 "message": "Tool execution rate limit reached; try again shortly."}
 
     s = get_settings()
-    interactive = bool(params.get("interactive"))
     cwd = ws.session_cwd(user_id, conversation_id)  # initial dir for a new session
     running = False
     posture = "shell-root" if sudo else "shell"
@@ -326,7 +347,8 @@ async def _run_shell_op(
 
     row = await _record(
         session, user_id=user_id, conversation_id=conversation_id, tool="shell",
-        operation=SHELL_OP_KEY, args={"command": command, "sudo": sudo, "interactive": interactive},
+        operation=SHELL_OP_KEY, args={"command": command, "sudo": sudo, "interactive": interactive,
+              **(extra_args or {})},
         target=None, posture=posture, result=res,
     )
 
@@ -371,6 +393,49 @@ async def _run_shell_op(
             'Send an empty command with "interactive": true to just read more output.'
         )
     return out
+
+
+async def run_workspace_script(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID | None,
+    filename: str,
+    sudo: bool = False,
+) -> dict:
+    """Run a ``.sh`` file from the operator's workspace through the shared shell
+    executor. Same gates as ``shell.run`` plus path containment / suffix checks."""
+    caps = await caps_mod.get_capabilities(session, user_id)
+    if not caps.shell_enabled:
+        return {
+            "ok": False, "status": "blocked", "reason": "shell_disabled",
+            "operation": SHELL_OP_KEY,
+            "message": ("Terminal access is disabled for KAI. Enable 'terminal "
+                        "access' in the Capabilities panel to allow shell commands."),
+        }
+    base = ws.operator_dir(user_id).resolve()
+    rel = ws._safe_relname(filename)
+    path = (base / rel).resolve()
+    if not path.is_relative_to(base) or not path.is_file() or path.suffix != ".sh":
+        return {
+            "ok": False, "status": "error", "reason": "bad_script",
+            "operation": SHELL_OP_KEY,
+            "message": "No such script in the workspace (must be a .sh file you can see in Assets).",
+        }
+    if sudo and not caps.shell_sudo:
+        return {
+            "ok": False, "status": "blocked", "reason": "sudo_disabled",
+            "operation": SHELL_OP_KEY,
+            "message": ("Privileged (root) commands are disabled. Enable 'root "
+                        "commands (sudo)' in the Capabilities panel to allow them."),
+        }
+    # shlex.quote so names containing spaces stay a single argument.
+    command = f"bash {shlex.quote('./' + rel)}"
+    return await _exec_shell_command(
+        session, user_id=user_id, conversation_id=conversation_id,
+        command=command, sudo=sudo, interactive=False, caps=caps,
+        extra_args={"script": filename},
+    )
 
 
 async def _run_web_op(
