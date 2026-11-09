@@ -62,3 +62,20 @@ async def test_run_workspace_script_name_with_space(db_session, uid):
         db_session, user_id=uid, conversation_id=None, filename="a b.sh")
     assert out["ok"], out
     assert "SPACE_OK" in out["stdout"]
+
+
+async def test_run_workspace_script_ignores_session_cwd(db_session, uid):
+    from app.security import terminal
+
+    _write(uid, "hello.sh", "echo REAL_WORKSPACE\n")
+    sub = ws.operator_dir(uid) / "sub"
+    sub.mkdir()
+    (sub / "hello.sh").write_text("echo DECOY\n")
+    key = f"u:{uid}"
+    try:
+        await terminal.exec_in_session(key, "cd sub", cwd=str(ws.operator_dir(uid)), interactive=False)
+        out = await service.run_workspace_script(
+            db_session, user_id=uid, conversation_id=None, filename="hello.sh")
+    finally:
+        terminal.close_session(key)
+    assert "REAL_WORKSPACE" in out["stdout"] and "DECOY" not in out["stdout"]

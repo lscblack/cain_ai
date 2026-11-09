@@ -429,8 +429,9 @@ async def run_workspace_script(
             "message": ("Privileged (root) commands are disabled. Enable 'root "
                         "commands (sudo)' in the Capabilities panel to allow them."),
         }
-    # shlex.quote so names containing spaces stay a single argument.
-    command = f"bash {shlex.quote('./' + rel)}"
+    # Absolute validated path: independent of the persistent session's cwd, and
+    # shlex.quote keeps names containing spaces a single argument.
+    command = f"bash {shlex.quote(str(path))}"
     return await _exec_shell_command(
         session, user_id=user_id, conversation_id=conversation_id,
         command=command, sudo=sudo, interactive=False, caps=caps,
