@@ -92,6 +92,8 @@ export const toolsApi = {
     api.post<InstallNowResult>("/tools/install/now", body),
   installBatch: (capabilities: string[], reinstall = false) =>
     api.post<InstallBatchResult>("/tools/install/batch", { capabilities, reinstall }),
+  runScript: (body: { filename: string; sudo?: boolean; conversation_id?: string }) =>
+    api.post<RunScriptResult>("/tools/run-script", body),
   sweep: (body: Record<string, string>) => api.post<SweepResult>("/tools/sweep", body),
   docs: () => api.get<ToolDoc[]>("/tools/docs"),
   getDoc: (id: string) => api.get<ToolDoc>(`/tools/docs/${id}`),
@@ -217,4 +219,13 @@ export interface InstallBatchResult {
   failed: { tool: string; package: string }[];
   skipped: { tool: string; reason: string }[];
   outcome: { ok: boolean; status: string; error?: string | null; sudo_needs_password?: boolean } | null;
+}
+export interface RunScriptResult {
+  ok: boolean;
+  status: string;
+  reason?: string;
+  stdout?: string;
+  exit_code?: number | null;
+  running?: boolean;
+  message?: string;
 }
