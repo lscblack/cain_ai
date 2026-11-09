@@ -11,7 +11,7 @@ import {
 } from "@/lib/chat";
 import { useActiveRuns, pollActiveNow } from "@/lib/kaiWork";
 import { PageLoading, Spinner } from "@/components/Async";
-import { toolsApi } from "@/lib/tools";
+import { toolsApi, type RunScriptResult } from "@/lib/tools";
 import { Markdown } from "@/components/Markdown";
 import { JsonView } from "@/components/JsonView";
 import { ActionDeck, AGENT_LABELS } from "@/components/chat/ActionDeck";
@@ -267,7 +267,7 @@ function WebResultBlock({ op, r }: { op: string; r: any }) {
   );
 }
 
-function ToolCard({ t }: { t: ToolEvent }) {
+function ToolCard({ t, conversationId }: { t: ToolEvent; conversationId?: string }) {
   if (t.skipped) {
     return (
       <div className="my-2 rounded border border-line bg-panel-2 p-2 text-xs">
@@ -335,10 +335,10 @@ function ToolCard({ t }: { t: ToolEvent }) {
           <ExternalLink size={11} className="ml-auto text-muted" />
         </a>
       )}
-      {r.file && <FileChip f={r.file} />}
+      {r.file && <FileChip f={r.file} conversationId={conversationId} />}
       {Array.isArray(r.files) && r.files.length > 0 && (
         <div className="mt-1 grid gap-1">
-          {r.files.map((f: any) => <FileChip key={f.id} f={f} />)}
+          {r.files.map((f: any) => <FileChip key={f.id} f={f} conversationId={conversationId} />)}
         </div>
       )}
       {isIdentity && <PeopleResults r={{ people: r.result.people, notes: r.result.note ? [r.result.note] : [] }} />}
@@ -347,17 +347,69 @@ function ToolCard({ t }: { t: ToolEvent }) {
   );
 }
 
-function FileChip({ f }: { f: { id: string; name: string; size?: number; download_url: string } }) {
+function FileChip({ f, conversationId }: {
+  f: { id: string; name: string; size?: number; download_url: string }; conversationId?: string;
+}) {
+  const isSh = f.name.toLowerCase().endsWith(".sh");
+  const [root, setRoot] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<RunScriptResult | null>(null);
+  const [err, setErr] = useState("");
+  async function run() {
+    setBusy(true); setErr(""); setRes(null);
+    try {
+      setRes(await toolsApi.runScript({ filename: f.name, sudo: root, conversation_id: conversationId }));
+    } catch (e: any) { setErr(e?.message || "run failed"); }
+    finally { setBusy(false); }
+  }
+  const failed = !!err || (res != null && (res.ok === false || !!res.reason) && !res.running);
+  const failMsg = err || res?.message
+    || (res?.reason === "sudo_disabled" ? "Root runs are disabled on this server."
+      : res?.reason === "bad_script" ? "This script can't be run."
+      : res?.reason || "run failed");
   return (
-    <button
-      onClick={() => downloadKaiFile(f)}
-      className="mt-1 flex w-full items-center gap-2 rounded border border-line bg-panel px-2 py-1.5 text-left hover:bg-panel-2"
-      title={`Download ${f.name}`}
-    >
-      <Download size={13} style={{ color: "var(--kai-hud)" }} />
-      <span className="hud-mono truncate text-[11px]">{f.name}</span>
-      <span className="kai-metadata ml-auto whitespace-nowrap">{humanSize(f.size)}</span>
-    </button>
+    <div className="mt-1">
+      <div className="flex w-full items-center gap-2 rounded border border-line bg-panel px-2 py-1.5">
+        <button
+          onClick={() => downloadKaiFile(f)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left hover:opacity-80"
+          title={`Download ${f.name}`}
+        >
+          <Download size={13} style={{ color: "var(--kai-hud)" }} />
+          <span className="hud-mono truncate text-[11px]">{f.name}</span>
+          <span className="kai-metadata ml-auto whitespace-nowrap">{humanSize(f.size)}</span>
+        </button>
+        {isSh && (
+          <>
+            <label className="kai-metadata flex items-center gap-1 whitespace-nowrap" title="Run with root (asks for the desktop password)">
+              <input type="checkbox" checked={root} onChange={(e) => setRoot(e.target.checked)} disabled={busy} />
+              root
+            </label>
+            <button onClick={run} disabled={busy}
+              className="flex items-center gap-1 rounded border border-line px-2 py-0.5 text-[11px] hover:bg-panel-2 disabled:opacity-40"
+              style={{ color: "var(--kai-verified)" }} title={`Run ${f.name} in the terminal`}>
+              {busy ? <Spinner size={12} /> : <Play size={12} />}
+              Run
+            </button>
+          </>
+        )}
+      </div>
+      {res?.running && (
+        <div className="kai-metadata mt-1">still running — open the terminal to continue</div>
+      )}
+      {failed && (
+        <div className="kai-metadata mt-1" style={{ color: "var(--kai-accent)" }}>{failMsg}</div>
+      )}
+      {res && res.ok && !res.running && !failed && (
+        <details open className="mt-1">
+          <summary className="kai-metadata cursor-pointer">output · exit {res.exit_code ?? "?"}</summary>
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border px-3 py-2 font-mono text-[11px] leading-relaxed"
+            style={{ borderColor: "#262b36", background: "#0b0e14", color: "#cbd5e1" }}>
+            {(res.stdout || "").trimEnd() || "(no output)"}
+          </pre>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -386,7 +438,7 @@ function FindingCard({ f }: { f: Finding }) {
   );
 }
 
-function MessageBubble({ m, onPick }: { m: ChatMessage; onPick?: (t: string) => void }) {
+function MessageBubble({ m, onPick, conversationId }: { m: ChatMessage; onPick?: (t: string) => void; conversationId?: string }) {
   const isUser = m.role === "user";
   const findings: Finding[] = m.meta?.findings || [];
   const faceSearch = m.meta?.faceSearch;
@@ -401,7 +453,7 @@ function MessageBubble({ m, onPick }: { m: ChatMessage; onPick?: (t: string) => 
       </div>
       {!isUser && faceSearch && <FaceMatchCard r={faceSearch} onAsk={onPick} />}
       {!isUser && peopleSearch && <PeopleResults r={peopleSearch} />}
-      {!isUser && (m.tool_calls || []).map((t: any, i: number) => <ToolCard key={i} t={t} />)}
+      {!isUser && (m.tool_calls || []).map((t: any, i: number) => <ToolCard key={i} t={t} conversationId={conversationId} />)}
       {!isUser && findings.map((f, i) => <FindingCard key={i} f={f} />)}
     </div>
   );
@@ -824,7 +876,7 @@ export function Chat() {
               “Which assessment tools are installed?”, or “Research advisories for openssl 3.0.2”.
             </div>
           )}
-          {messages.map((m) => <MessageBubble key={m.id} m={m} onPick={pickCapability} />)}
+          {messages.map((m) => <MessageBubble key={m.id} m={m} onPick={pickCapability} conversationId={activeId ?? undefined} />)}
           {faceBusy && (
             <div className="mb-4 rounded border border-line bg-panel-2 p-3">
               <div className="flex flex-wrap gap-4">
@@ -856,7 +908,7 @@ export function Chat() {
                   {AGENT_LABELS[a.agent] ?? a.agent} · {a.reason}
                 </div>
               ))}
-              {live.tools.map((t, i) => <ToolCard key={i} t={t} />)}
+              {live.tools.map((t, i) => <ToolCard key={i} t={t} conversationId={activeId ?? undefined} />)}
               {live.pending && <ApprovalCard pending={live.pending} onDecide={decide} busy={deciding} />}
               {live.content && (
                 <div className="inline-block max-w-full rounded bg-panel px-3 py-2 text-sm">
