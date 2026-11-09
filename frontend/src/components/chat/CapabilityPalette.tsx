@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Terminal, Globe, Search, Radar, ShieldAlert, FolderSearch, Boxes, ChevronRight, Lock, Crown,
+  Terminal, Globe, Search, Radar, ShieldAlert, FolderSearch, Boxes, ChevronRight, ChevronDown, Lock, Crown, Download,
 } from "lucide-react";
 import { toolsApi, type ToolOperation } from "@/lib/tools";
+import { Spinner } from "@/components/Async";
 
 /** One runnable capability surfaced in the deck. */
 interface Cap {
@@ -14,15 +15,20 @@ interface Cap {
   needsRoot: boolean;
   needsAuth: boolean;
   params: ToolOperation["params"];
+  installed: boolean;
+  source: string;
+  aptAvailable: boolean;
+  /** Tool NAME (what the installer takes), not the operation key. */
+  tool: string;
 }
 
 // Always-available builtins. Merged in if the inventory doesn't already expose
 // them, so the palette is never empty even before the tool catalogue loads.
 const CORE: Cap[] = [
-  { key: "shell.run", title: "Run a command", description: "Run a terminal command and read its output", posture: "shell", group: "Shell", needsRoot: false, needsAuth: false, params: [] },
-  { key: "web.search", title: "Search the web", description: "Search the web and return organized results", posture: "web", group: "Web", needsRoot: false, needsAuth: false, params: [] },
-  { key: "web.open", title: "Open a page", description: "Open a URL and read its contents", posture: "web", group: "Web", needsRoot: false, needsAuth: false, params: [] },
-  { key: "maps.find", title: "Find on map", description: "Find a place or POI and show it on a map with coordinates", posture: "map", group: "Web", needsRoot: false, needsAuth: false, params: [] },
+  { key: "shell.run", title: "Run a command", description: "Run a terminal command and read its output", posture: "shell", group: "Shell", needsRoot: false, needsAuth: false, params: [], installed: true, source: "builtin", aptAvailable: false, tool: "shell.run" },
+  { key: "web.search", title: "Search the web", description: "Search the web and return organized results", posture: "web", group: "Web", needsRoot: false, needsAuth: false, params: [], installed: true, source: "builtin", aptAvailable: false, tool: "web.search" },
+  { key: "web.open", title: "Open a page", description: "Open a URL and read its contents", posture: "web", group: "Web", needsRoot: false, needsAuth: false, params: [], installed: true, source: "builtin", aptAvailable: false, tool: "web.open" },
+  { key: "maps.find", title: "Find on map", description: "Find a place or POI and show it on a map with coordinates", posture: "map", group: "Web", needsRoot: false, needsAuth: false, params: [], installed: true, source: "builtin", aptAvailable: false, tool: "maps.find" },
 ];
 
 const GROUP_ICON: Record<string, typeof Terminal> = {
@@ -57,24 +63,58 @@ export function scaffoldPrompt(cap: Cap): string {
 
 const GROUP_ORDER = ["Shell", "Web", "Recon", "OSINT", "Exploit", "Investigation", "Other"];
 
+/** Inline apt install (same polkit-popup flow as the chat InstallNow card). */
+function InstallChip({ tool, onDone }: { tool: string; onDone: () => void }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [note, setNote] = useState("");
+  async function go() {
+    setState("busy"); setNote("");
+    try {
+      const r = await toolsApi.installNow({ capability: tool });
+      if (r.verify?.installed) {
+        setState("done");
+        onDone();
+      } else {
+        setState("error");
+        setNote(r.outcome?.sudo_needs_password
+          ? "sudo needs a password — set TOOL_INSTALL_HELPER=pkexec or add a NOPASSWD rule."
+          : r.outcome?.error || "install failed");
+      }
+    } catch (e: any) { setState("error"); setNote(e?.message || "install failed"); }
+  }
+  if (state === "done") return null;
+  return (
+    <button
+      onClick={go}
+      disabled={state === "busy"}
+      title={note || `Install ${tool}`}
+      className="flex shrink-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[10px] hover:bg-panel disabled:opacity-40"
+      style={{ color: state === "error" ? "var(--kai-accent)" : "var(--kai-verified)" }}
+    >
+      {state === "busy" ? <Spinner size={10} /> : <Download size={10} />}
+      {state === "error" ? "retry" : "install"}
+    </button>
+  );
+}
+
 export function CapabilityPalette({ onPick }: { onPick: (text: string) => void }) {
   const [caps, setCaps] = useState<Cap[]>(CORE);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let alive = true;
     toolsApi.inventory()
       .then((inv) => {
         if (!alive) return;
-        const seen = new Set(CORE.map((c) => c.key));
-        const list: Cap[] = [...CORE];
+        const byKey = new Map<string, Cap>(CORE.map((c) => [c.key, c]));
         for (const t of inv.tools) {
-          if (!t.installed) continue;
           for (const op of t.operations) {
-            if (seen.has(op.key)) continue;
-            seen.add(op.key);
-            list.push({
+            const prev = byKey.get(op.key);
+            // Dedup by op key; an installed capability wins over a missing one.
+            if (prev && (prev.installed || !t.installed)) continue;
+            byKey.set(op.key, {
               key: op.key,
               title: op.title || op.key,
               description: op.description || "",
@@ -83,15 +123,21 @@ export function CapabilityPalette({ onPick }: { onPick: (text: string) => void }
               needsRoot: op.needs_root,
               needsAuth: op.requires_authorization,
               params: op.params,
+              installed: t.installed,
+              source: t.source,
+              aptAvailable: !!t.apt_available,
+              tool: t.name,
             });
           }
         }
-        setCaps(list);
+        setCaps([...byKey.values()]);
       })
-      .catch(() => { /* keep CORE only */ })
+      .catch(() => { /* keep what we have */ })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => load(), [load]);
 
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -126,30 +172,60 @@ export function CapabilityPalette({ onPick }: { onPick: (text: string) => void }
         )}
         {groups.map(([group, items]) => {
           const Icon = GROUP_ICON[group] || Boxes;
+          const expanded = items.some((c) => c.installed) || !!open[group] || q.trim() !== "";
           return (
             <div key={group}>
-              <div className="mb-1 flex items-center gap-1.5 px-1">
+              <button
+                onClick={() => setOpen((o) => ({ ...o, [group]: !expanded }))}
+                className="mb-1 flex w-full items-center gap-1.5 px-1 text-left"
+              >
+                {expanded ? <ChevronDown size={11} className="shrink-0 text-muted" /> : <ChevronRight size={11} className="shrink-0 text-muted" />}
                 <Icon size={11} style={{ color: "var(--kai-hud)" }} />
                 <span className="hud-mono text-[10px] uppercase tracking-wider" style={{ color: "var(--kai-hud)" }}>
                   {group}
                 </span>
                 <span className="kai-metadata">{items.length}</span>
-              </div>
-              <div className="space-y-0.5">
-                {items.map((c) => (
-                  <button
-                    key={c.key}
-                    onClick={() => onPick(scaffoldPrompt(c))}
-                    title={`${c.key}${c.description ? ` — ${c.description}` : ""}`}
-                    className="group flex w-full items-center gap-1.5 rounded border border-transparent px-1.5 py-1 text-left hover:border-line hover:bg-panel-2"
-                  >
-                    <ChevronRight size={11} className="shrink-0 text-muted group-hover:text-ink" />
-                    <span className="truncate text-[12px]">{c.title}</span>
-                    {c.needsAuth && <Lock size={10} className="shrink-0" style={{ color: "var(--kai-warn)" }} />}
-                    {c.needsRoot && <Crown size={10} className="shrink-0" style={{ color: "var(--kai-accent)" }} />}
-                  </button>
-                ))}
-              </div>
+              </button>
+              {expanded && (
+                <div className="space-y-0.5">
+                  {items.map((c) => {
+                    if (c.installed) {
+                      return (
+                        <button
+                          key={c.key}
+                          onClick={() => onPick(scaffoldPrompt(c))}
+                          title={`${c.key}${c.description ? ` — ${c.description}` : ""}`}
+                          className="group flex w-full items-center gap-1.5 rounded border border-transparent px-1.5 py-1 text-left hover:border-line hover:bg-panel-2"
+                        >
+                          <ChevronRight size={11} className="shrink-0 text-muted group-hover:text-ink" />
+                          <span className="truncate text-[12px]">{c.title}</span>
+                          {c.needsAuth && <Lock size={10} className="shrink-0" style={{ color: "var(--kai-warn)" }} />}
+                          {c.needsRoot && <Crown size={10} className="shrink-0" style={{ color: "var(--kai-accent)" }} />}
+                        </button>
+                      );
+                    }
+                    const viaApt = c.source === "apt" && c.aptAvailable;
+                    return (
+                      <div
+                        key={c.key}
+                        className="group flex w-full items-center gap-1.5 rounded border border-transparent px-1.5 py-1 hover:border-line hover:bg-panel-2"
+                      >
+                        <button
+                          onClick={viaApt ? undefined : () => onPick("Install " + c.tool + " for me")}
+                          disabled={viaApt}
+                          title={`${c.key} — not installed${c.description ? ` — ${c.description}` : ""}`}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 text-left opacity-50 disabled:cursor-default"
+                        >
+                          <ChevronRight size={11} className="shrink-0 text-muted" />
+                          <span className="truncate text-[12px]">{c.title}</span>
+                          {!viaApt && <span className="kai-metadata shrink-0">via {c.source}</span>}
+                        </button>
+                        {viaApt && <InstallChip tool={c.tool} onDone={load} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
