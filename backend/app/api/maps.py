@@ -12,6 +12,8 @@ from app.database.models.user import User
 from app.database.repositories.graph_repos import EntityRepository
 from app.database.session import get_session
 from app.intelligence.geo import extract_coords
+from sqlmodel import select
+from app.database.models.evidence import Evidence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/investigations", tags=["maps"])
@@ -39,7 +41,18 @@ async def investigation_map(
                 "lon": coords[1],
             }
         )
-    return {"points": points, "count": len(points)}
+    # `features`: one stored GeoJSON FeatureCollection per saved geoint evidence row.
+    rows = await session.execute(
+        select(Evidence)
+        .where(Evidence.investigation_id == inv_id, Evidence.type == "geoint")
+        .order_by(Evidence.created_at)
+    )
+    features = [
+        ev.raw_metadata["annotations"]
+        for ev in rows.scalars().all()
+        if isinstance(ev.raw_metadata, dict) and "annotations" in ev.raw_metadata
+    ]
+    return {"points": points, "count": len(points), "features": features}
 
 
 @router.get("/map/config", tags=["maps"])

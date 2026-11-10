@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import time
+import uuid
+from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_operator
+from app.api.investigations import _get_investigation_or_404
+from app.database.models.evidence import Evidence
 from app.database.models.user import User
+from app.database.repositories.graph_repos import EvidenceRepository
+from app.database.session import get_session
+from app.schemas.investigation import EvidenceOut
 
 router = APIRouter(prefix="/geoint", tags=["geoint"])
 
@@ -110,3 +119,70 @@ async def elevation(
             for (lat, lon), k in zip(pts, keys)
         ],
     }
+
+
+class GeointEvidenceCreate(BaseModel):
+    investigation_id: uuid.UUID
+    annotations: dict
+    layer_id: str
+    dates: list[str] = Field(default_factory=list, max_length=2)
+    bounds: dict
+    note: str | None = None
+    provider_url: str
+    collected_at: datetime | None = None
+    entity_id: uuid.UUID | None = None
+
+    @field_validator("annotations")
+    @classmethod
+    def _feature_collection(cls, v: dict) -> dict:
+        if v.get("type") != "FeatureCollection" or not isinstance(v.get("features"), list):
+            raise ValueError("annotations must be a GeoJSON FeatureCollection")
+        return v
+
+    @field_validator("provider_url")
+    @classmethod
+    def _https(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            raise ValueError("provider_url must be https")
+        return v
+
+
+def _parse_date(s: str) -> datetime:
+    try:
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid_date")
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+@router.post("/evidence", response_model=EvidenceOut, status_code=status.HTTP_201_CREATED)
+async def save_geoint_evidence(
+    body: GeointEvidenceCreate,
+    operator: User = Depends(get_current_operator),
+    session: AsyncSession = Depends(get_session),
+) -> EvidenceOut:
+    # Validation (422) happens in the model; 404 check precedes any write.
+    await _get_investigation_or_404(body.investigation_id, session)
+    collected = (
+        _parse_date(body.dates[-1]) if body.dates
+        else body.collected_at or datetime.now(timezone.utc)
+    )
+    ev = await EvidenceRepository(session).add(
+        Evidence(
+            investigation_id=body.investigation_id,
+            entity_id=body.entity_id,
+            type="geoint",
+            source_url=body.provider_url,
+            collected_at=collected,
+            raw_metadata={
+                "annotations": body.annotations,
+                "layer_id": body.layer_id,
+                "dates": body.dates,
+                "bounds": body.bounds,
+                "note": body.note,
+            },
+            processed_metadata={},
+        )
+    )
+    await session.flush()
+    return EvidenceOut(**ev.model_dump())
