@@ -43,3 +43,29 @@ async def test_elevation_upstream_failure_is_handled(client, auth_headers, monke
     assert r.status_code == 200
     assert r.json()["ok"] is False
     assert r.json()["reason"]
+
+
+async def test_elevation_malformed_upstream_payload_is_handled(client, auth_headers, monkeypatch):
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"results": ["not-a-dict"]}
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, *a, **k):
+            return FakeResp()
+
+    monkeypatch.setattr(geoint.httpx, "AsyncClient", FakeClient)
+    r = await client.get("/geoint/elevation", params={"points": "0,0"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["ok"] is False

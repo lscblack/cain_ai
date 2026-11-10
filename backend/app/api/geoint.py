@@ -99,7 +99,7 @@ async def elevation(
     if missing:
         try:
             elevs = await _fetch_opentopo(missing)
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
             return {"ok": False, "reason": f"elevation upstream failed: {exc}"}
         for k, e in zip(missing, elevs):
             _ELEV_CACHE[k] = (now + _ELEV_TTL_S, e)
