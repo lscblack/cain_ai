@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus, Trash2, Send, Square, Wrench, AlertTriangle, Cpu, RefreshCw, Download, Play,
   FolderOpen, Globe, Search, ExternalLink, PanelLeftClose, PanelLeftOpen, Mic, ImagePlus, Camera,
+  FileText, Sparkles,
 } from "lucide-react";
 
 import { useSearchParams } from "react-router-dom";
@@ -213,7 +214,83 @@ function TerminalBlock({ cmd, out, exit, root }: {
   );
 }
 
-function WebResultBlock({ op, r }: { op: string; r: any }) {
+// One web.search hit: opens the page in-app (web.open → inline text with
+// expand/collapse) or asks KAI to summarize it in a follow-up turn.
+function SearchResultRow({ x, onAsk, conversationId }: {
+  x: { title?: string; url?: string; snippet?: string };
+  onAsk?: (t: string) => void; conversationId?: string;
+}) {
+  const [page, setPage] = useState<{ text?: string; title?: string; error?: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const url = x.url || "";
+
+  async function open() {
+    if (!url || loading) return;
+    setLoading(true);
+    try {
+      const res: any = await toolsApi.execute("web.open", { url, conversation_id: conversationId });
+      if (res?.ok) setPage({ text: res.text || "", title: res.title });
+      else setPage({ error: res?.error || res?.message || "Could not open this page." });
+    } catch {
+      setPage({ error: "Could not open this page." });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const text = page?.text || "";
+  const LIMIT = 1200;
+  const long = text.length > LIMIT;
+  const shown = expanded || !long ? text : text.slice(0, LIMIT);
+
+  return (
+    <div className="rounded px-2 py-1.5 hover:bg-panel-2">
+      <div className="flex items-start gap-1">
+        <div className="min-w-0 flex-1">
+          <a href={url} target="_blank" rel="noopener noreferrer"
+             className="flex items-center gap-1 text-[12px]" style={{ color: "var(--kai-hud)" }}>
+            <ExternalLink size={11} className="shrink-0" />
+            <span className="truncate font-medium">{x.title}</span>
+          </a>
+          <div className="truncate text-[10px]" style={{ color: "#4ade80" }}>{url}</div>
+          {x.snippet && <div className="mt-0.5 text-[11px] leading-snug text-muted">{x.snippet}</div>}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {!page && (
+            <button onClick={open} disabled={loading} title="Open in KAI"
+                    className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-white disabled:opacity-50">
+              {loading ? <RefreshCw size={10} className="animate-spin" /> : <FileText size={10} />} open
+            </button>
+          )}
+          {page && long && (
+            <button onClick={() => setExpanded(v => !v)}
+                    className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-white">
+              {expanded ? "show less" : "view more"}
+            </button>
+          )}
+          {onAsk && url && (
+            <button onClick={() => onAsk(`Open and summarize this page, then give me the key takeaways: ${url}`)}
+                    title="Ask KAI to summarize"
+                    className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-white">
+              <Sparkles size={10} /> summarize
+            </button>
+          )}
+        </div>
+      </div>
+      {page?.error && <div className="mt-1 text-[11px]" style={{ color: "var(--kai-accent)" }}>{page.error}</div>}
+      {page?.text !== undefined && text && (
+        <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-panel px-2 py-1.5 text-[11px] leading-relaxed" style={{ color: "#9ca3af" }}>
+          {shown}{long && !expanded ? "…" : ""}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function WebResultBlock({ op, r, onAsk, conversationId }: {
+  op: string; r: any; onAsk?: (t: string) => void; conversationId?: string;
+}) {
   const [openPage, setOpenPage] = useState(false);
   if (op === "web.search") {
     const results: any[] = Array.isArray(r.results) ? r.results : [];
@@ -228,15 +305,7 @@ function WebResultBlock({ op, r }: { op: string; r: any }) {
         <div className="max-h-96 overflow-auto p-1">
           {results.length === 0 && <div className="px-2 py-1 text-[11px] text-muted">No results.</div>}
           {results.map((x, i) => (
-            <a key={i} href={x.url} target="_blank" rel="noopener noreferrer"
-               className="block rounded px-2 py-1.5 hover:bg-panel-2">
-              <div className="flex items-center gap-1 text-[12px]" style={{ color: "var(--kai-hud)" }}>
-                <ExternalLink size={11} className="shrink-0" />
-                <span className="truncate font-medium">{x.title}</span>
-              </div>
-              <div className="truncate text-[10px]" style={{ color: "#4ade80" }}>{x.url}</div>
-              {x.snippet && <div className="mt-0.5 text-[11px] leading-snug text-muted">{x.snippet}</div>}
-            </a>
+            <SearchResultRow key={i} x={x} onAsk={onAsk} conversationId={conversationId} />
           ))}
         </div>
       </div>
@@ -267,7 +336,7 @@ function WebResultBlock({ op, r }: { op: string; r: any }) {
   );
 }
 
-function ToolCard({ t, conversationId }: { t: ToolEvent; conversationId?: string }) {
+function ToolCard({ t, conversationId, onAsk }: { t: ToolEvent; conversationId?: string; onAsk?: (text: string) => void }) {
   if (t.skipped) {
     return (
       <div className="my-2 rounded border border-line bg-panel-2 p-2 text-xs">
@@ -313,7 +382,7 @@ function ToolCard({ t, conversationId }: { t: ToolEvent; conversationId?: string
         <div className="kai-metadata mt-1">Source “{r.install_hint.source}” — install it manually, then retry.</div>
       )}
       {showTerminal && <TerminalBlock cmd={cmd} out={out} exit={r.exit_code} root={root} />}
-      {isWeb && r.ok && <WebResultBlock op={t.operation} r={r} />}
+      {isWeb && r.ok && <WebResultBlock op={t.operation} r={r} onAsk={onAsk} conversationId={conversationId} />}
       {(() => {
         const geo = toolGeoPoints(r);
         const isMap = t.operation === "maps.find" || r.operation === "maps.find";
@@ -438,7 +507,7 @@ function FindingCard({ f }: { f: Finding }) {
   );
 }
 
-function MessageBubble({ m, onPick, conversationId }: { m: ChatMessage; onPick?: (t: string) => void; conversationId?: string }) {
+function MessageBubble({ m, onPick, conversationId, onAsk }: { m: ChatMessage; onPick?: (t: string) => void; conversationId?: string; onAsk?: (t: string) => void }) {
   const isUser = m.role === "user";
   const findings: Finding[] = m.meta?.findings || [];
   const faceSearch = m.meta?.faceSearch;
@@ -453,7 +522,7 @@ function MessageBubble({ m, onPick, conversationId }: { m: ChatMessage; onPick?:
       </div>
       {!isUser && faceSearch && <FaceMatchCard r={faceSearch} onAsk={onPick} />}
       {!isUser && peopleSearch && <PeopleResults r={peopleSearch} />}
-      {!isUser && (m.tool_calls || []).map((t: any, i: number) => <ToolCard key={i} t={t} conversationId={conversationId} />)}
+      {!isUser && (m.tool_calls || []).map((t: any, i: number) => <ToolCard key={i} t={t} conversationId={conversationId} onAsk={onAsk} />)}
       {!isUser && findings.map((f, i) => <FindingCard key={i} f={f} />)}
     </div>
   );
@@ -876,7 +945,7 @@ export function Chat() {
               “Which assessment tools are installed?”, or “Research advisories for openssl 3.0.2”.
             </div>
           )}
-          {messages.map((m) => <MessageBubble key={m.id} m={m} onPick={pickCapability} conversationId={activeId ?? undefined} />)}
+          {messages.map((m) => <MessageBubble key={m.id} m={m} onPick={pickCapability} conversationId={activeId ?? undefined} onAsk={(txt) => send(txt)} />)}
           {faceBusy && (
             <div className="mb-4 rounded border border-line bg-panel-2 p-3">
               <div className="flex flex-wrap gap-4">
@@ -908,7 +977,7 @@ export function Chat() {
                   {AGENT_LABELS[a.agent] ?? a.agent} · {a.reason}
                 </div>
               ))}
-              {live.tools.map((t, i) => <ToolCard key={i} t={t} conversationId={activeId ?? undefined} />)}
+              {live.tools.map((t, i) => <ToolCard key={i} t={t} conversationId={activeId ?? undefined} onAsk={(txt) => send(txt)} />)}
               {live.pending && <ApprovalCard pending={live.pending} onDecide={decide} busy={deciding} />}
               {live.content && (
                 <div className="inline-block max-w-full rounded bg-panel px-3 py-2 text-sm">
