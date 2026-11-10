@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type L from "leaflet";
 import { TileLayer, useMap } from "react-leaflet";
 import type { LayerDef } from "@/components/chat/geoint/layers";
 import { layerUrl } from "@/components/chat/geoint/layers";
@@ -10,7 +11,7 @@ const isoDay = (offsetDays: number) => new Date(Date.now() - offsetDays * 864000
 export type DateCompareState = ReturnType<typeof useDateCompare>;
 
 /** State for the date picker / compare modes. Lives in MapCard so dates survive basemap switches. */
-export function useDateCompare() {
+export function useDateCompare(baseId?: string) {
   const [mode, setMode] = useState<CompareMode>("single");
   const [date, setDate] = useState(isoDay(1)); // single-date picker
   const [dateA, setDateA] = useState(isoDay(30));
@@ -21,7 +22,7 @@ export function useDateCompare() {
   const counts = useRef<Record<string, { ok: number; err: number }>>({});
 
   // Fresh error accounting whenever a chosen date changes.
-  useEffect(() => { counts.current = {}; setEmpty({ A: false, B: false, S: false }); }, [date, dateA, dateB]);
+  useEffect(() => { counts.current = {}; setEmpty({ A: false, B: false, S: false }); }, [date, dateA, dateB, baseId]);
 
   const onTile = useCallback((slot: "A" | "B" | "S", failed: boolean) => {
     const c = (counts.current[slot] ??= { ok: 0, err: 0 });
@@ -96,7 +97,30 @@ export function SwipeHandle({ s }: { s: DateCompareState }) {
   );
 }
 
-const PANE = "kai-compare-b";
+const PANE_A = "kai-compare-a"; // z 210
+const PANE = "kai-compare-b"; // z 220
+const PANE_OVERLAY = "kai-overlay"; // z 230: tile overlays above compare, below vectors/markers (400+)
+
+function ensurePane(map: L.Map, name: string, z: number) {
+  const pane = map.getPane(name) ?? map.createPane(name);
+  pane.style.zIndex = String(z);
+  return pane;
+}
+
+/** Tile overlays (e.g. hillshade) in a pane above the compare layers. */
+export function OverlayTiles({ overlays, layerUrl: urlOf }: { overlays: LayerDef[]; layerUrl: (l: LayerDef) => string }) {
+  const map = useMap();
+  const [ready, setReady] = useState(false);
+  useEffect(() => { ensurePane(map, PANE_OVERLAY, 230); setReady(true); }, [map]);
+  if (!ready) return null;
+  return (
+    <>
+      {overlays.map((o) => (
+        <TileLayer key={o.id} pane={PANE_OVERLAY} attribution={o.attribution} url={urlOf(o)} maxNativeZoom={o.max_zoom} maxZoom={19} opacity={0.6} />
+      ))}
+    </>
+  );
+}
 
 /** Inside <MapContainer>: single-date base, or stacked A (under) / B (over, own pane). */
 export function DateLayers({ base, s }: { base: LayerDef; s: DateCompareState }) {
@@ -104,8 +128,8 @@ export function DateLayers({ base, s }: { base: LayerDef; s: DateCompareState })
   const [paneReady, setPaneReady] = useState(false);
 
   useEffect(() => {
-    const pane = map.getPane(PANE) ?? map.createPane(PANE);
-    pane.style.zIndex = "250"; // above tilePane (200), below overlays/markers
+    ensurePane(map, PANE_A, 210); // above base tilePane (200)
+    ensurePane(map, PANE, 220);
     setPaneReady(true);
   }, [map]);
 
@@ -130,8 +154,8 @@ export function DateLayers({ base, s }: { base: LayerDef; s: DateCompareState })
   }
   return (
     <>
-      <TileLayer key={`${base.id}-A`} {...common} url={layerUrl(base, s.dateA)}
-        eventHandlers={{ tileerror: () => s.onTile("A", true), tileload: () => s.onTile("A", false) }} />
+      {paneReady && <TileLayer key={`${base.id}-A`} {...common} pane={PANE_A} url={layerUrl(base, s.dateA)}
+        eventHandlers={{ tileerror: () => s.onTile("A", true), tileload: () => s.onTile("A", false) }} />}
       {paneReady && (
         <TileLayer key={`${base.id}-B`} {...common} pane={PANE} url={layerUrl(base, s.dateB)}
           opacity={s.mode === "opacity" ? s.opacity : 1}

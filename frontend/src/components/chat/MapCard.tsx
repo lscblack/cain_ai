@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 import { BasemapPicker } from "@/components/chat/geoint/BasemapPicker";
-import { DateCompareControls, DateLayers, SwipeHandle, useDateCompare } from "@/components/chat/geoint/DateCompare";
+import { DateCompareControls, OverlayTiles, DateLayers, SwipeHandle, useDateCompare } from "@/components/chat/geoint/DateCompare";
 import { DEFAULT_LAYERS, fetchLayers, layerUrl, type LayerDef } from "@/components/chat/geoint/layers";
 import { haversineKm, type Amenity, type GeoPoint } from "@/components/chat/util";
 
@@ -73,7 +73,7 @@ export function MapCard({
   const [layers, setLayers] = useState<LayerDef[]>(DEFAULT_LAYERS);
   const [baseId, setBaseId] = useState("osm_dark");
   const [overlayIds, setOverlayIds] = useState<string[]>([]);
-  const dc = useDateCompare();
+  const dc = useDateCompare(baseId);
   const [fullscreen, setFullscreen] = useState(false);
   const [following, setFollowing] = useState(false);
   const started = useRef(false);
@@ -263,9 +263,7 @@ export function MapCard({
               className={baseLayer.id === "osm_dark" ? "kai-dark-tiles" : undefined}
               url={layerUrl(baseLayer)} maxNativeZoom={baseLayer.max_zoom} maxZoom={19} />
           )}
-          {overlays.map((o) => (
-            <TileLayer key={o.id} attribution={o.attribution} url={layerUrl(o)} maxNativeZoom={o.max_zoom} maxZoom={19} opacity={0.6} />
-          ))}
+          <OverlayTiles overlays={overlays} layerUrl={layerUrl} />
           {me && (
             <CircleMarker center={[me.lat, me.lon]} radius={7} pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.9 }}>
               <Popup>Your location</Popup>
