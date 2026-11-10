@@ -89,3 +89,12 @@ async def client(fake_redis) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides.clear()
     chat_api.async_session_maker = _orig_maker
+
+
+@pytest_asyncio.fixture
+async def auth_headers(client):
+    await client.post("/auth/register", json={"email": "op@example.com", "password": "supersecret1"})
+    login = await client.post(
+        "/auth/login", json={"email": "op@example.com", "password": "supersecret1"}
+    )
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}

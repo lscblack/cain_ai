@@ -1,15 +1,3 @@
-import pytest_asyncio
-
-
-@pytest_asyncio.fixture
-async def auth_headers(client):
-    await client.post("/auth/register", json={"email": "op@example.com", "password": "supersecret1"})
-    login = await client.post(
-        "/auth/login", json={"email": "op@example.com", "password": "supersecret1"}
-    )
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-
 async def test_layers_requires_auth(client):
     r = await client.get("/geoint/layers")
     assert r.status_code == 401
