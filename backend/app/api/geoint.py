@@ -7,10 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,32 +19,7 @@ from app.database.repositories.graph_repos import EntityRepository, EvidenceRepo
 from app.database.session import get_session
 from app.schemas.investigation import EvidenceOut
 
-class _SafeValidationRoute(APIRoute):
-    """422s without echoing the offending input.
-
-    FastAPI's default 422 body includes each error's ``input``. A client can send a literal
-    ``NaN``/``Infinity`` (Python's json parser accepts them); the response encoder then refuses
-    to serialise that echoed value and the request ends in a 500 instead of a 422. Returning
-    only loc/msg/type keeps validation failures a clean 4xx on this router.
-    """
-
-    def get_route_handler(self):
-        handler = super().get_route_handler()
-
-        async def safe_handler(request: Request):
-            try:
-                return await handler(request)
-            except RequestValidationError as exc:
-                detail = [
-                    {"loc": list(e.get("loc", ())), "msg": str(e.get("msg", "invalid")), "type": str(e.get("type", "value_error"))}
-                    for e in exc.errors()
-                ]
-                return JSONResponse(status_code=422, content={"detail": detail})
-
-        return safe_handler
-
-
-router = APIRouter(prefix="/geoint", tags=["geoint"], route_class=_SafeValidationRoute)
+router = APIRouter(prefix="/geoint", tags=["geoint"])
 
 _OSM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 _ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services"

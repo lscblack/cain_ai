@@ -1,8 +1,10 @@
 """KAI FastAPI application factory."""
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api import (
     analyst, auth, chat, contacts, discovery, emails, enrich, export, faces, geo, geoint, health,
@@ -32,6 +34,22 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        """Return a scrubbed 422 (loc/msg/type only).
+
+        FastAPI's default handler echoes each error's ``input``. A client can send a literal
+        ``NaN``/``Infinity`` in a JSON body (Python's parser accepts them); the default response
+        then fails to serialise that echoed value and the request ends in a 500 instead of a 422.
+        Dropping ``input``/``ctx`` keeps every validation failure a clean 4xx and avoids echoing
+        caller input back.
+        """
+        detail = [
+            {"loc": list(e.get("loc", ())), "msg": str(e.get("msg", "invalid")), "type": str(e.get("type", "value_error"))}
+            for e in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": detail})
 
     @app.middleware("http")
     async def security_headers(request, call_next):
