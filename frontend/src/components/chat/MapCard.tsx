@@ -8,6 +8,7 @@ import "leaflet/dist/leaflet.css";
 import { BasemapPicker } from "@/components/chat/geoint/BasemapPicker";
 import { DateCompareControls, OverlayTiles, DateLayers, SwipeHandle, useDateCompare } from "@/components/chat/geoint/DateCompare";
 import { DEFAULT_LAYERS, fetchLayers, layerUrl, type LayerDef } from "@/components/chat/geoint/layers";
+import { ElevationProfile, PointElevation, samplePath } from "@/components/chat/geoint/ElevationProfile";
 import { haversineKm, type Amenity, type GeoPoint } from "@/components/chat/util";
 
 // Public, keyless services. Both calls degrade gracefully: on any failure the
@@ -38,6 +39,16 @@ const NEARBY: Amenity[] = [
   { amenity: "pharmacy", label: "Pharmacy" },
   { amenity: "bank", label: "ATM/Bank" },
   { amenity: "restaurant", label: "Food" },
+];
+
+// Infrastructure chips: raw Overpass tag filters (different keys than amenity).
+const INFRA: { id: string; label: string; filter: string }[] = [
+  { id: "power", label: "Power", filter: '["power"~"plant|substation|generator"]' },
+  { id: "bridge", label: "Bridges", filter: '["man_made"="bridge"]' },
+  { id: "airport", label: "Airports", filter: '["aeroway"~"aerodrome|runway"]' },
+  { id: "port", label: "Ports", filter: '["harbour"="yes"]' },
+  { id: "telecom", label: "Telecom", filter: '["man_made"="communications_tower"]' },
+  { id: "pipeline", label: "Pipelines", filter: '["man_made"="pipeline"]' },
 ];
 
 function center(points: GeoPoint[]): [number, number] {
@@ -106,17 +117,19 @@ export function MapCard({
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen]);
 
-  async function findNearby(o: GeoPoint, amenity: string, label: string) {
-    setBusy(`nearby:${amenity}`); setErr(null);
+  // Generic Overpass find-and-plot: `filter` is a raw tag filter such as
+  // ["amenity"="hospital"]; `id` keys the busy state; `kind` tags the results.
+  async function findByFilter(o: GeoPoint, filter: string, id: string, label: string, kind: string) {
+    setBusy(`nearby:${id}`); setErr(null);
     try {
-      const q = `[out:json][timeout:20];(node["amenity"="${amenity}"](around:5000,${o.lat},${o.lon});way["amenity"="${amenity}"](around:5000,${o.lat},${o.lon}););out center 40;`;
+      const q = `[out:json][timeout:20];(node${filter}(around:5000,${o.lat},${o.lon});way${filter}(around:5000,${o.lat},${o.lon}););out center 40;`;
       const resp = await fetch(OVERPASS, { method: "POST", body: q });
       const data = await resp.json();
       const pts: GeoPoint[] = (data.elements || [])
         .map((e: any) => {
           const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon;
           if (typeof lat !== "number" || typeof lon !== "number") return null;
-          return { lat, lon, label: e.tags?.name || label, kind: amenity, distKm: haversineKm(o, { lat, lon }) };
+          return { lat, lon, label: e.tags?.name || label, kind, distKm: haversineKm(o, { lat, lon }) };
         })
         .filter(Boolean) as GeoPoint[];
       pts.sort((a, b) => (a.distKm ?? 0) - (b.distKm ?? 0));
@@ -124,6 +137,10 @@ export function MapCard({
       if (pts.length === 0) setErr(`No ${label.toLowerCase()} found within 5 km.`);
     } catch { setErr("Nearby lookup failed (Overpass unreachable)."); }
     finally { setBusy(null); }
+  }
+
+  function findNearby(o: GeoPoint, amenity: string, label: string) {
+    return findByFilter(o, `["amenity"="${amenity}"]`, amenity, label, amenity);
   }
 
   function locateMe(then?: (p: GeoPoint) => void) {
@@ -242,11 +259,25 @@ export function MapCard({
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-1 px-2 py-1" style={{ background: "#0e131d" }}>
+        <Crosshair size={10} className="text-muted" />
+        <span className="kai-metadata mr-1">infrastructure:</span>
+        {INFRA.map((n) => (
+          <button key={n.id} onClick={() => origin && findByFilter(origin, n.filter, n.id, n.label, n.id)} disabled={!!busy || !origin}
+            className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-panel disabled:opacity-40"
+            style={{ borderColor: nearbyKind === n.label ? "var(--kai-hud-dim)" : "var(--kai-border)", color: nearbyKind === n.label ? "var(--kai-hud)" : "var(--kai-muted)" }}>
+            {busy === `nearby:${n.id}` ? "…" : n.label}
+          </button>
+        ))}
+      </div>
+
       {(routeInfo || err) && (
         <div className="px-2 py-1 text-[10px]" style={{ color: err ? "var(--kai-accent)" : "var(--kai-verified)" }}>
           {err || routeInfo}
         </div>
       )}
+
+      {route && <ElevationProfile points={samplePath(route, 30)} />}
 
       {/* Keyless OpenStreetMap tiles, darkened with a CSS filter so no API key
           is needed (Carto/Stadia now require one). The filter only touches the
@@ -271,7 +302,10 @@ export function MapCard({
           )}
           {points.map((p, i) => (
             <CircleMarker key={`p${i}`} center={[p.lat, p.lon]} radius={7} pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.7 }}>
-              <Popup>{p.label || `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`}</Popup>
+              <Popup>
+                <div>{p.label || `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`}</div>
+                <PointElevation lat={p.lat} lon={p.lon} />
+              </Popup>
             </CircleMarker>
           ))}
           {nearby.map((p, i) => (
@@ -279,6 +313,7 @@ export function MapCard({
               <Popup>
                 <div className="font-semibold">{p.label}</div>
                 {p.distKm != null && <div>{p.distKm.toFixed(2)} km away</div>}
+                <PointElevation lat={p.lat} lon={p.lon} />
                 <a href={dirUrl(p, me)} target="_blank" rel="noopener noreferrer">Directions →</a>
               </Popup>
             </CircleMarker>
