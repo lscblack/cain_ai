@@ -9,6 +9,9 @@ import { BasemapPicker } from "@/components/chat/geoint/BasemapPicker";
 import { DateCompareControls, OverlayTiles, DateLayers, SwipeHandle, useDateCompare } from "@/components/chat/geoint/DateCompare";
 import { DEFAULT_LAYERS, fetchLayers, layerUrl, type LayerDef } from "@/components/chat/geoint/layers";
 import { ElevationProfile, PointElevation, samplePath } from "@/components/chat/geoint/ElevationProfile";
+import { AnnotateControls, AnnotateMapLayer, SavedFeatures, useAnnotations, type FeatureCollection } from "@/components/chat/geoint/AnnotateLayer";
+import { api } from "@/lib/api";
+import type { Map as LeafletMap } from "leaflet";
 import { haversineKm, type Amenity, type GeoPoint } from "@/components/chat/util";
 
 // Public, keyless services. Both calls degrade gracefully: on any failure the
@@ -85,6 +88,9 @@ export function MapCard({
   const [baseId, setBaseId] = useState("osm_dark");
   const [overlayIds, setOverlayIds] = useState<string[]>([]);
   const dc = useDateCompare(baseId);
+  const anno = useAnnotations();
+  const annoMapRef = useRef<LeafletMap | null>(null);
+  const [saved, setSaved] = useState<FeatureCollection[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
   const [following, setFollowing] = useState(false);
   const started = useRef(false);
@@ -95,6 +101,14 @@ export function MapCard({
   const toggleOverlay = (id: string) => setOverlayIds((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
 
   const origin: GeoPoint | null = points[0] ?? me;
+
+  // Evidence context for "Save to investigation": dates of the dated base (none otherwise),
+  // and an https URL identifying the imagery provider.
+  const annoDates = baseLayer?.dated ? (dc.mode === "single" ? [dc.date] : [dc.dateA, dc.dateB]) : [];
+  const providerUrl = (baseLayer?.url_template.match(/^https:\/\/[^/]+/)?.[0] ?? "https://tile.openstreetmap.org") + "/";
+  const showSaved = (caseId: string) =>
+    api.get<{ features?: FeatureCollection[] }>(`/investigations/${caseId}/map`)
+      .then((r) => setSaved(r.features ?? [])).catch(() => {});
 
   // Live "follow": track the operator and feed `me`; cleanup stops the watcher
   // on toggle-off and on unmount, so no geolocation watcher ever leaks.
@@ -271,6 +285,9 @@ export function MapCard({
         ))}
       </div>
 
+      <AnnotateControls s={anno} layerId={baseLayer?.id ?? baseId} dates={annoDates} providerUrl={providerUrl}
+        mapRef={annoMapRef} onSaved={showSaved} />
+
       {(routeInfo || err) && (
         <div className="px-2 py-1 text-[10px]" style={{ color: err ? "var(--kai-accent)" : "var(--kai-verified)" }}>
           {err || routeInfo}
@@ -295,6 +312,8 @@ export function MapCard({
               url={layerUrl(baseLayer)} maxNativeZoom={baseLayer.max_zoom} maxZoom={19} />
           )}
           <OverlayTiles overlays={overlays} layerUrl={layerUrl} />
+          <AnnotateMapLayer s={anno} fullscreen={fullscreen} mapRef={annoMapRef} />
+          {saved.length > 0 && <SavedFeatures collections={saved} />}
           {me && (
             <CircleMarker center={[me.lat, me.lon]} radius={7} pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.9 }}>
               <Popup>Your location</Popup>

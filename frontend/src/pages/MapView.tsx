@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 
 import { BasemapPicker } from "@/components/chat/geoint/BasemapPicker";
 import { DEFAULT_LAYERS, fetchLayers, layerUrl, type LayerDef } from "@/components/chat/geoint/layers";
+import { SavedFeatures, type FeatureCollection } from "@/components/chat/geoint/AnnotateLayer";
 import { api } from "@/lib/api";
 import { investigationsApi } from "@/lib/investigations";
 import type { InvestigationDetail } from "@/types";
@@ -39,6 +40,7 @@ export function MapView() {
   const [cases, setCases] = useState<InvestigationDetail[]>([]);
   const [selected, setSelected] = useState(params.get("investigation") ?? "");
   const [casePoints, setCasePoints] = useState<MapPoint[]>([]);
+  const [caseFeatures, setCaseFeatures] = useState<FeatureCollection[]>([]);
   const [cfg, setCfg] = useState<{ tomtom_key: string | null; layers: Record<string, boolean> } | null>(null);
   const [active, setActive] = useState<Record<string, boolean>>({});
   const [livePoints, setLivePoints] = useState<Record<string, GeoPoint[]>>({});
@@ -56,8 +58,10 @@ export function MapView() {
   }, []);
 
   useEffect(() => {
-    if (!selected) return setCasePoints([]);
-    api.get<{ points: MapPoint[] }>(`/investigations/${selected}/map`).then((r) => setCasePoints(r.points)).catch(() => setCasePoints([]));
+    if (!selected) { setCasePoints([]); setCaseFeatures([]); return; }
+    api.get<{ points: MapPoint[]; features?: FeatureCollection[] }>(`/investigations/${selected}/map`)
+      .then((r) => { setCasePoints(r.points); setCaseFeatures(r.features ?? []); })
+      .catch(() => { setCasePoints([]); setCaseFeatures([]); });
   }, [selected]);
 
   async function loadLayer(key: string) {
@@ -157,6 +161,7 @@ export function MapView() {
           ))}
           <BoundsWatcher onBounds={(b) => (boundsRef.current = b)} />
 
+          {caseFeatures.length > 0 && <SavedFeatures collections={caseFeatures} />}
           {casePoints.map((p) => (
             <CircleMarker key={p.entity_id} center={[p.lat, p.lon]} radius={7} pathOptions={{ color: KIND_COLOR.entity, fillColor: KIND_COLOR.entity, fillOpacity: 0.7 }}>
               <Popup><div style={{ fontSize: 12 }}><strong>{p.label}</strong><br />{p.type}</div></Popup>
