@@ -1,12 +1,16 @@
 """GEOINT map capability: keyless layer catalogue (elevation/evidence routes append below)."""
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +22,32 @@ from app.database.repositories.graph_repos import EntityRepository, EvidenceRepo
 from app.database.session import get_session
 from app.schemas.investigation import EvidenceOut
 
-router = APIRouter(prefix="/geoint", tags=["geoint"])
+class _SafeValidationRoute(APIRoute):
+    """422s without echoing the offending input.
+
+    FastAPI's default 422 body includes each error's ``input``. A client can send a literal
+    ``NaN``/``Infinity`` (Python's json parser accepts them); the response encoder then refuses
+    to serialise that echoed value and the request ends in a 500 instead of a 422. Returning
+    only loc/msg/type keeps validation failures a clean 4xx on this router.
+    """
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def safe_handler(request: Request):
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                detail = [
+                    {"loc": list(e.get("loc", ())), "msg": str(e.get("msg", "invalid")), "type": str(e.get("type", "value_error"))}
+                    for e in exc.errors()
+                ]
+                return JSONResponse(status_code=422, content={"detail": detail})
+
+        return safe_handler
+
+
+router = APIRouter(prefix="/geoint", tags=["geoint"], route_class=_SafeValidationRoute)
 
 _OSM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 _ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services"
@@ -124,8 +153,46 @@ async def elevation(
 _GEOM_TYPES = {"Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon"}
 
 
+def _num(x: object) -> bool:
+    """A finite real number (bool is an int subclass in Python — reject it explicitly)."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _position(p: object) -> bool:
+    """[lng, lat(, alt)] of finite numbers with a sane latitude. Longitude is deliberately
+    NOT range-checked: Leaflet does not wrap it when panning past the antimeridian, so a
+    legitimate annotation can carry lng outside ±180."""
+    return isinstance(p, list) and len(p) >= 2 and all(_num(v) for v in p) and abs(p[1]) <= 90
+
+
+def _line(c: object, minimum: int = 2) -> bool:
+    return isinstance(c, list) and len(c) >= minimum and all(_position(p) for p in c)
+
+
+def _ring(c: object) -> bool:
+    return _line(c, 4) and c[0] == c[-1]
+
+
+def _coords_valid(t: str, c: object) -> bool:
+    if t == "Point":
+        return _position(c)
+    if t == "MultiPoint":
+        return isinstance(c, list) and all(_position(p) for p in c)
+    if t == "LineString":
+        return _line(c)
+    if t == "MultiLineString":
+        return isinstance(c, list) and all(_line(x) for x in c)
+    if t == "Polygon":
+        return isinstance(c, list) and len(c) >= 1 and all(_ring(r) for r in c)
+    if t == "MultiPolygon":
+        return isinstance(c, list) and all(
+            isinstance(poly, list) and len(poly) >= 1 and all(_ring(r) for r in poly) for poly in c
+        )
+    return False
+
+
 def _valid_geometry(g: object) -> bool:
-    """null geometry is allowed by GeoJSON; otherwise must be a known geometry type."""
+    """null geometry is allowed by GeoJSON; otherwise a known type with well-formed coordinates."""
     if g is None:
         return True
     if not isinstance(g, dict):
@@ -134,7 +201,7 @@ def _valid_geometry(g: object) -> bool:
     if t == "GeometryCollection":
         geoms = g.get("geometries")
         return isinstance(geoms, list) and all(isinstance(x, dict) and _valid_geometry(x) for x in geoms)
-    return t in _GEOM_TYPES and isinstance(g.get("coordinates"), list)
+    return t in _GEOM_TYPES and _coords_valid(t, g.get("coordinates"))
 
 
 class GeointEvidenceCreate(BaseModel):

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { GeoJSON, CircleMarker, Polygon, Polyline, useMap } from "react-leaflet";
 import { circleMarker, type LatLng, type Map as LeafletMap, type LeafletMouseEvent } from "leaflet";
 import { MapPin, Pentagon, Ruler, Trash2, Check, X, Save, Loader2 } from "lucide-react";
@@ -117,17 +117,51 @@ export function AnnotateMapLayer({ s, fullscreen, mapRef }: {
 
 const GEOM_TYPES = ["Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon", "GeometryCollection"];
 
-/** Keep only features Leaflet can build a layer for (null geometry or a known type). */
+// Mirrors the server's coordinate validation (backend/app/api/geoint.py). Longitude is NOT
+// range-checked: Leaflet does not wrap it past the antimeridian.
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isPos = (p: any): boolean => Array.isArray(p) && p.length >= 2 && p.every(isNum) && Math.abs(p[1]) <= 90;
+const isLine = (c: any, min = 2): boolean => Array.isArray(c) && c.length >= min && c.every(isPos);
+const isRing = (c: any): boolean =>
+  isLine(c, 4) && c[0].length === c[c.length - 1].length && c[0].every((v: number, i: number) => v === c[c.length - 1][i]);
+
+function geometryOk(g: any): boolean {
+  if (g == null) return true;
+  if (typeof g !== "object" || !GEOM_TYPES.includes(g.type)) return false;
+  const c = g.coordinates;
+  switch (g.type) {
+    case "Point": return isPos(c);
+    case "MultiPoint": return Array.isArray(c) && c.every(isPos);
+    case "LineString": return isLine(c);
+    case "MultiLineString": return Array.isArray(c) && c.every((l: any) => isLine(l));
+    case "Polygon": return Array.isArray(c) && c.length >= 1 && c.every(isRing);
+    case "MultiPolygon":
+      return Array.isArray(c) && c.every((poly: any) => Array.isArray(poly) && poly.length >= 1 && poly.every(isRing));
+    default: // GeometryCollection
+      return Array.isArray(g.geometries) && g.geometries.every(geometryOk);
+  }
+}
+
+/** Keep only features Leaflet can safely build a layer for. */
 function safeFeatures(fc: FeatureCollection): any[] {
   return (Array.isArray(fc?.features) ? fc.features : []).filter(
-    (f: any) => f && typeof f === "object" && (f.geometry == null || GEOM_TYPES.includes(f.geometry?.type)),
+    (f: any) => f && typeof f === "object" && geometryOk(f.geometry),
   );
+}
+
+/** Last line of defence: if anything in saved annotations still throws while rendering,
+ *  drop just the annotations — never the whole shared map. */
+class AnnotationBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err: unknown) { console.warn("saved GEOINT annotations failed to render", err); }
+  render() { return this.state.failed ? null : this.props.children; }
 }
 
 /** Read-only GeoJSON renderer (saved evidence + live annotations). Inside <MapContainer>. */
 export function SavedFeatures({ collections, color = "#a855f7" }: { collections: FeatureCollection[]; color?: string }) {
   return (
-    <>
+    <AnnotationBoundary>
       {collections.map((raw, i) => {
         const fc: FeatureCollection = { ...raw, features: safeFeatures(raw) };
         return (
@@ -144,7 +178,7 @@ export function SavedFeatures({ collections, color = "#a855f7" }: { collections:
         />
         );
       })}
-    </>
+    </AnnotationBoundary>
   );
 }
 
