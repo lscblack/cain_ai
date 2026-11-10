@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    analyst, auth, chat, contacts, discovery, emails, enrich, export, faces, geo, health,
+    analyst, auth, chat, contacts, discovery, emails, enrich, export, faces, geo, geoint, health,
     investigations, maps, phones, powerup, public, search, settings as settings_api, sources,
     system, timeline, tools, usernames, voice,
 )
@@ -169,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router)
     app.include_router(public.router)
     app.include_router(geo.router)
+    app.include_router(geoint.router)
     app.include_router(settings_api.router)
     app.include_router(chat.router)
     app.include_router(tools.router)
