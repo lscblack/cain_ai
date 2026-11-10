@@ -5,26 +5,14 @@ import {
   Maximize2, Minimize2,
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
+import { BasemapPicker } from "@/components/chat/geoint/BasemapPicker";
+import { DEFAULT_LAYERS, fetchLayers, layerUrl, type LayerDef } from "@/components/chat/geoint/layers";
 import { haversineKm, type Amenity, type GeoPoint } from "@/components/chat/util";
 
 // Public, keyless services. Both calls degrade gracefully: on any failure the
 // card still shows the point(s), and routing falls back to an OSM link.
 const OVERPASS = "https://overpass-api.de/api/interpreter";
 const OSRM = "https://router.project-osrm.org/route/v1/driving";
-
-// Tile basemaps — all keyless. Satellite uses Esri World Imagery (high-res
-// aerial/satellite, no API key); dark/streets use OpenStreetMap, dark via a
-// CSS filter. GEOINT (dated imagery, terrain) layers arrive in a later phase.
-const ESRI_SAT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const ESRI_SAT_ATTR = "Imagery &copy; Esri, Maxar, Earthstar Geographics";
-const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const OSM_ATTR = "&copy; OpenStreetMap contributors";
-type TileMode = "dark" | "sat" | "streets";
-const TILE_MODES: { key: TileMode; label: string }[] = [
-  { key: "dark", label: "Dark" },
-  { key: "sat", label: "Satellite" },
-  { key: "streets", label: "Streets" },
-];
 
 // Child inside the MapContainer: reacts to fullscreen (Leaflet must re-measure
 // or tiles render gray) and to live "follow" updates (recenter on the operator).
@@ -81,10 +69,17 @@ export function MapCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [mode, setMode] = useState<TileMode>("dark");
+  const [layers, setLayers] = useState<LayerDef[]>(DEFAULT_LAYERS);
+  const [baseId, setBaseId] = useState("osm_dark");
+  const [overlayIds, setOverlayIds] = useState<string[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
   const [following, setFollowing] = useState(false);
   const started = useRef(false);
+
+  useEffect(() => { fetchLayers().then(setLayers); }, []);
+  const baseLayer = layers.find((l) => l.id === baseId && l.kind === "base") ?? layers.find((l) => l.kind === "base");
+  const overlays = layers.filter((l) => l.kind === "overlay" && overlayIds.includes(l.id));
+  const toggleOverlay = (id: string) => setOverlayIds((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
 
   const origin: GeoPoint | null = points[0] ?? me;
 
@@ -206,13 +201,8 @@ export function MapCard({
           {me && origin.kind === "me" ? " · from your location" : ""}
         </span>
         <div className="ml-auto flex items-center gap-1">
-          {TILE_MODES.map((tm) => (
-            <button key={tm.key} onClick={() => setMode(tm.key)} title={`${tm.label} basemap`}
-              className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-panel"
-              style={{ borderColor: mode === tm.key ? "var(--kai-hud-dim)" : "var(--kai-border)", color: mode === tm.key ? "var(--kai-hud)" : "var(--kai-muted)" }}>
-              {tm.label}
-            </button>
-          ))}
+          <BasemapPicker layers={layers} baseId={baseId} overlayIds={overlayIds}
+            onBase={setBaseId} onToggleOverlay={toggleOverlay} />
           {route && (
             <button onClick={() => setFollowing((v) => !v)} title="Follow the route with your live location"
               className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] hover:bg-panel"
@@ -263,12 +253,14 @@ export function MapCard({
       <div style={fullscreen ? { flex: 1, minHeight: 0 } : { height: 260 }}>
         <MapContainer center={bounds} zoom={nearby.length ? 13 : (points.length > 1 ? 11 : 13)} style={{ height: "100%", width: "100%", background: "#0b0e14" }} scrollWheelZoom={fullscreen}>
           <MapController fullscreen={fullscreen} follow={following} me={me} />
-          {mode === "sat" ? (
-            <TileLayer attribution={ESRI_SAT_ATTR} url={ESRI_SAT} maxZoom={19} />
-          ) : (
-            <TileLayer attribution={OSM_ATTR} className={mode === "dark" ? "kai-dark-tiles" : undefined}
-              url={OSM_TILES} />
+          {baseLayer && (
+            <TileLayer key={baseLayer.id} attribution={baseLayer.attribution}
+              className={baseLayer.id === "osm_dark" ? "kai-dark-tiles" : undefined}
+              url={layerUrl(baseLayer)} maxZoom={baseLayer.max_zoom} />
           )}
+          {overlays.map((o) => (
+            <TileLayer key={o.id} attribution={o.attribution} url={layerUrl(o)} maxZoom={o.max_zoom} opacity={0.6} />
+          ))}
           {me && (
             <CircleMarker center={[me.lat, me.lon]} radius={7} pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.9 }}>
               <Popup>Your location</Popup>

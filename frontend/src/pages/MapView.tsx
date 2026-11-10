@@ -5,6 +5,8 @@ import type { Map as LeafletMap } from "leaflet";
 import { Map as MapIcon, Plane, Ship, Flame, Video, RefreshCw } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
+import { BasemapPicker } from "@/components/chat/geoint/BasemapPicker";
+import { DEFAULT_LAYERS, fetchLayers, layerUrl, type LayerDef } from "@/components/chat/geoint/layers";
 import { api } from "@/lib/api";
 import { investigationsApi } from "@/lib/investigations";
 import type { InvestigationDetail } from "@/types";
@@ -41,10 +43,14 @@ export function MapView() {
   const [active, setActive] = useState<Record<string, boolean>>({});
   const [livePoints, setLivePoints] = useState<Record<string, GeoPoint[]>>({});
   const [loading, setLoading] = useState<string | null>(null);
+  const [baseLayers, setBaseLayers] = useState<LayerDef[]>(DEFAULT_LAYERS);
+  const [baseId, setBaseId] = useState("osm_dark");
+  const [overlayIds, setOverlayIds] = useState<string[]>([]);
   const boundsRef = useRef<any>(null);
   const mapRef = useRef<LeafletMap | null>(null);
 
   useEffect(() => {
+    fetchLayers().then(setBaseLayers);
     investigationsApi.list().then(setCases).catch(() => setCases([]));
     api.get<any>("/geo/config").then(setCfg).catch(() => setCfg(null));
   }, []);
@@ -85,6 +91,8 @@ export function MapView() {
 
   const center = useMemo<[number, number]>(() => (casePoints.length ? [casePoints[0].lat, casePoints[0].lon] : [-1.95, 30.06]), [casePoints]);
   const tomtom = cfg?.tomtom_key;
+  const baseLayer = baseLayers.find((l) => l.id === baseId && l.kind === "base") ?? baseLayers.find((l) => l.kind === "base");
+  const overlays = baseLayers.filter((l) => l.kind === "overlay" && overlayIds.includes(l.id));
 
   return (
     <div>
@@ -129,16 +137,24 @@ export function MapView() {
         )}
       </div>
 
+      <div className="mb-3">
+        <BasemapPicker layers={baseLayers} baseId={baseId} overlayIds={overlayIds} onBase={setBaseId}
+          onToggleOverlay={(id) => setOverlayIds((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]))} />
+      </div>
+
       <div className="overflow-hidden rounded-lg border border-line" style={{ height: 520 }}>
         <MapContainer center={center} zoom={casePoints.length ? 6 : 3} style={{ height: "100%", width: "100%", background: "#0e131d" }} ref={mapRef as any}>
           <style>{`.kai-dark-tiles{filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.85);}`}</style>
-          {tomtom ? (
+          {tomtom && baseId === "osm_dark" ? (
             <TileLayer attribution="&copy; TomTom" url={`https://{s}.api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key=${tomtom}`} subdomains={["a", "b", "c", "d"]} />
-          ) : (
-            // Keyless OSM tiles darkened via CSS (Carto now needs an API key).
-            <TileLayer attribution="&copy; OpenStreetMap contributors" className="kai-dark-tiles"
-              url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          ) : baseLayer && (
+            <TileLayer key={baseLayer.id} attribution={baseLayer.attribution}
+              className={baseLayer.id === "osm_dark" ? "kai-dark-tiles" : undefined}
+              url={layerUrl(baseLayer)} maxZoom={baseLayer.max_zoom} />
           )}
+          {overlays.map((o) => (
+            <TileLayer key={o.id} attribution={o.attribution} url={layerUrl(o)} maxZoom={o.max_zoom} opacity={0.6} />
+          ))}
           <BoundsWatcher onBounds={(b) => (boundsRef.current = b)} />
 
           {casePoints.map((p) => (
@@ -158,7 +174,7 @@ export function MapView() {
         </MapContainer>
       </div>
       <div className="kai-metadata mt-2">
-        {tomtom ? "TomTom night tiles" : "CARTO dark tiles"} · pan/zoom then toggle a live layer to load it for the current view.
+        {baseLayer?.label ?? "Basemap"}{tomtom && baseId === "osm_dark" ? " (TomTom night)" : ""} · pan/zoom then toggle a live layer to load it for the current view.
       </div>
     </div>
   );
