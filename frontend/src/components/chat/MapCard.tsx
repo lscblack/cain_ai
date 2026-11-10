@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 import { BasemapPicker } from "@/components/chat/geoint/BasemapPicker";
+import { DateCompareControls, DateLayers, SwipeHandle, useDateCompare } from "@/components/chat/geoint/DateCompare";
 import { DEFAULT_LAYERS, fetchLayers, layerUrl, type LayerDef } from "@/components/chat/geoint/layers";
 import { haversineKm, type Amenity, type GeoPoint } from "@/components/chat/util";
 
@@ -72,6 +73,7 @@ export function MapCard({
   const [layers, setLayers] = useState<LayerDef[]>(DEFAULT_LAYERS);
   const [baseId, setBaseId] = useState("osm_dark");
   const [overlayIds, setOverlayIds] = useState<string[]>([]);
+  const dc = useDateCompare();
   const [fullscreen, setFullscreen] = useState(false);
   const [following, setFollowing] = useState(false);
   const started = useRef(false);
@@ -250,10 +252,13 @@ export function MapCard({
           is needed (Carto/Stadia now require one). The filter only touches the
           tile images; vector markers/routes keep their colours. */}
       <style>{`.kai-dark-tiles{filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.85);}`}</style>
-      <div style={fullscreen ? { flex: 1, minHeight: 0 } : { height: 260 }}>
+      {baseLayer?.dated && <DateCompareControls s={dc} />}
+      <div style={fullscreen ? { flex: 1, minHeight: 0, position: "relative" } : { height: 260, position: "relative" }}>
+        {baseLayer?.dated && dc.mode === "swipe" && <SwipeHandle s={dc} />}
         <MapContainer center={bounds} zoom={nearby.length ? 13 : (points.length > 1 ? 11 : 13)} style={{ height: "100%", width: "100%", background: "#0b0e14" }} scrollWheelZoom={fullscreen}>
           <MapController fullscreen={fullscreen} follow={following} me={me} />
-          {baseLayer && (
+          {baseLayer?.dated && <DateLayers key={baseLayer.id} base={baseLayer} s={dc} />}
+          {baseLayer && !baseLayer.dated && (
             <TileLayer key={baseLayer.id} attribution={baseLayer.attribution}
               className={baseLayer.id === "osm_dark" ? "kai-dark-tiles" : undefined}
               url={layerUrl(baseLayer)} maxNativeZoom={baseLayer.max_zoom} maxZoom={19} />
