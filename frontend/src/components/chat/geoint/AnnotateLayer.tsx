@@ -115,13 +115,24 @@ export function AnnotateMapLayer({ s, fullscreen, mapRef }: {
   );
 }
 
+const GEOM_TYPES = ["Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon", "GeometryCollection"];
+
+/** Keep only features Leaflet can build a layer for (null geometry or a known type). */
+function safeFeatures(fc: FeatureCollection): any[] {
+  return (Array.isArray(fc?.features) ? fc.features : []).filter(
+    (f: any) => f && typeof f === "object" && (f.geometry == null || GEOM_TYPES.includes(f.geometry?.type)),
+  );
+}
+
 /** Read-only GeoJSON renderer (saved evidence + live annotations). Inside <MapContainer>. */
 export function SavedFeatures({ collections, color = "#a855f7" }: { collections: FeatureCollection[]; color?: string }) {
   return (
     <>
-      {collections.map((fc, i) => (
+      {collections.map((raw, i) => {
+        const fc: FeatureCollection = { ...raw, features: safeFeatures(raw) };
+        return (
         <GeoJSON
-          key={`${i}-${JSON.stringify(fc.features?.map((f: any) => f?.properties?.id ?? f?.geometry?.coordinates))}`}
+          key={`${i}-${JSON.stringify(fc.features.map((f: any) => f?.properties?.id ?? f?.geometry?.coordinates))}`}
           data={fc as any}
           style={() => ({ color, weight: 3, fillOpacity: 0.15 })}
           pointToLayer={(_f, ll) => circleMarker(ll, { radius: 7, color, fillColor: color, fillOpacity: 0.7 })}
@@ -131,7 +142,8 @@ export function SavedFeatures({ collections, color = "#a855f7" }: { collections:
             if (txt) layer.bindPopup(txt.replace(/</g, "&lt;"));
           }}
         />
-      ))}
+        );
+      })}
     </>
   );
 }

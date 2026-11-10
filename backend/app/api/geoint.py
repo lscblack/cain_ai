@@ -14,7 +14,7 @@ from app.api.deps import get_current_operator
 from app.api.investigations import _get_investigation_or_404
 from app.database.models.evidence import Evidence
 from app.database.models.user import User
-from app.database.repositories.graph_repos import EvidenceRepository
+from app.database.repositories.graph_repos import EntityRepository, EvidenceRepository
 from app.database.session import get_session
 from app.schemas.investigation import EvidenceOut
 
@@ -121,6 +121,22 @@ async def elevation(
     }
 
 
+_GEOM_TYPES = {"Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon"}
+
+
+def _valid_geometry(g: object) -> bool:
+    """null geometry is allowed by GeoJSON; otherwise must be a known geometry type."""
+    if g is None:
+        return True
+    if not isinstance(g, dict):
+        return False
+    t = g.get("type")
+    if t == "GeometryCollection":
+        geoms = g.get("geometries")
+        return isinstance(geoms, list) and all(isinstance(x, dict) and _valid_geometry(x) for x in geoms)
+    return t in _GEOM_TYPES and isinstance(g.get("coordinates"), list)
+
+
 class GeointEvidenceCreate(BaseModel):
     investigation_id: uuid.UUID
     annotations: dict
@@ -137,6 +153,9 @@ class GeointEvidenceCreate(BaseModel):
     def _feature_collection(cls, v: dict) -> dict:
         if v.get("type") != "FeatureCollection" or not isinstance(v.get("features"), list):
             raise ValueError("annotations must be a GeoJSON FeatureCollection")
+        for f in v["features"]:
+            if not isinstance(f, dict) or not _valid_geometry(f.get("geometry")):
+                raise ValueError("annotations contain a feature with invalid geometry")
         return v
 
     @field_validator("provider_url")
@@ -163,6 +182,9 @@ async def save_geoint_evidence(
 ) -> EvidenceOut:
     # Validation (422) happens in the model; 404 check precedes any write.
     await _get_investigation_or_404(body.investigation_id, session)
+    if body.entity_id is not None:
+        if not await EntityRepository(session).exists_in_investigation(body.entity_id, body.investigation_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="entity_not_in_investigation")
     collected = (
         _parse_date(body.dates[-1]) if body.dates
         else body.collected_at or datetime.now(timezone.utc)

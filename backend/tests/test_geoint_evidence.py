@@ -55,3 +55,24 @@ async def test_evidence_bad_provider_url_422(client, auth_headers, inv_id):
     r = await client.post("/geoint/evidence",
                           json=_body(inv_id, provider_url="http://x/"), headers=auth_headers)
     assert r.status_code == 422
+
+
+async def test_evidence_bogus_geometry_422_no_write(client, auth_headers, inv_id):
+    bad = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Bogus", "coordinates": []}, "properties": {}}]}
+    r = await client.post("/geoint/evidence", json=_body(inv_id, annotations=bad), headers=auth_headers)
+    assert r.status_code == 422
+    assert await _features(client, auth_headers, inv_id) == []
+
+
+async def test_evidence_null_geometry_allowed(client, auth_headers, inv_id):
+    fc = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": None, "properties": {}}]}
+    r = await client.post("/geoint/evidence", json=_body(inv_id, annotations=fc), headers=auth_headers)
+    assert r.status_code == 201, r.text
+
+
+async def test_evidence_bogus_entity_400_no_write(client, auth_headers, inv_id):
+    r = await client.post("/geoint/evidence", json=_body(inv_id, entity_id=str(uuid.uuid4())),
+                          headers=auth_headers)
+    assert r.status_code == 400, r.text
+    assert await _features(client, auth_headers, inv_id) == []
