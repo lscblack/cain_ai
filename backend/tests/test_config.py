@@ -1,5 +1,3 @@
-import importlib
-
 from app.core import config as config_module
 
 
@@ -20,7 +18,9 @@ def test_settings_reads_env_and_parses_cors(monkeypatch):
 
 
 def test_get_settings_is_cached():
-    importlib.reload(config_module)
+    # NOTE: do not importlib.reload(config_module): that rebinds get_settings to a new
+    # lru_cache, so modules that imported the old function keep a different Settings
+    # singleton than later tests monkeypatch (order-dependent failures).
     a = config_module.get_settings()
     b = config_module.get_settings()
     assert a is b
