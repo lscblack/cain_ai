@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, Polyline } from "react-leaflet";
-import { MapPin, Navigation, Crosshair, ExternalLink, Loader2, LocateFixed } from "lucide-react";
+import { MapContainer, TileLayer, CircleMarker, Popup, Polyline, useMap } from "react-leaflet";
+import {
+  MapPin, Navigation, Navigation2, Crosshair, ExternalLink, Loader2, LocateFixed,
+  Maximize2, Minimize2,
+} from "lucide-react";
 import "leaflet/dist/leaflet.css";
 import { haversineKm, type Amenity, type GeoPoint } from "@/components/chat/util";
 
@@ -8,6 +11,36 @@ import { haversineKm, type Amenity, type GeoPoint } from "@/components/chat/util
 // card still shows the point(s), and routing falls back to an OSM link.
 const OVERPASS = "https://overpass-api.de/api/interpreter";
 const OSRM = "https://router.project-osrm.org/route/v1/driving";
+
+// Tile basemaps — all keyless. Satellite uses Esri World Imagery (high-res
+// aerial/satellite, no API key); dark/streets use OpenStreetMap, dark via a
+// CSS filter. GEOINT (dated imagery, terrain) layers arrive in a later phase.
+const ESRI_SAT = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const ESRI_SAT_ATTR = "Imagery &copy; Esri, Maxar, Earthstar Geographics";
+const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const OSM_ATTR = "&copy; OpenStreetMap contributors";
+type TileMode = "dark" | "sat" | "streets";
+const TILE_MODES: { key: TileMode; label: string }[] = [
+  { key: "dark", label: "Dark" },
+  { key: "sat", label: "Satellite" },
+  { key: "streets", label: "Streets" },
+];
+
+// Child inside the MapContainer: reacts to fullscreen (Leaflet must re-measure
+// or tiles render gray) and to live "follow" updates (recenter on the operator).
+function MapController({ fullscreen, follow, me }: {
+  fullscreen: boolean; follow: boolean; me: GeoPoint | null;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 220);
+    return () => clearTimeout(t);
+  }, [fullscreen, map]);
+  useEffect(() => {
+    if (follow && me) map.setView([me.lat, me.lon], Math.max(map.getZoom(), 15), { animate: true });
+  }, [follow, me, map]);
+  return null;
+}
 
 const NEARBY: Amenity[] = [
   { amenity: "hospital", label: "Hospitals" },
@@ -48,9 +81,33 @@ export function MapCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [mode, setMode] = useState<TileMode>("dark");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [following, setFollowing] = useState(false);
   const started = useRef(false);
 
   const origin: GeoPoint | null = points[0] ?? me;
+
+  // Live "follow": track the operator and feed `me`; cleanup stops the watcher
+  // on toggle-off and on unmount, so no geolocation watcher ever leaks.
+  useEffect(() => {
+    if (!following) return;
+    if (!navigator.geolocation) { setErr("This device has no location service."); setFollowing(false); return; }
+    const id = navigator.geolocation.watchPosition(
+      (pos) => setMe({ lat: pos.coords.latitude, lon: pos.coords.longitude, label: "Your location", kind: "me" }),
+      () => { setErr("Location permission denied — can't follow."); setFollowing(false); },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [following]);
+
+  // Esc exits fullscreen.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
 
   async function findNearby(o: GeoPoint, amenity: string, label: string) {
     setBusy(`nearby:${amenity}`); setErr(null);
@@ -139,7 +196,9 @@ export function MapCard({
   }
 
   return (
-    <div className="mt-2 overflow-hidden rounded-md border" style={{ borderColor: "#262b36", background: "#0b0e14" }}>
+    <div
+      className={fullscreen ? "fixed inset-0 z-[1200] flex flex-col" : "mt-2 overflow-hidden rounded-md border"}
+      style={{ borderColor: "#262b36", background: "#0b0e14" }}>
       <div className="flex flex-wrap items-center gap-1.5 border-b px-2 py-1" style={{ borderColor: "#1a1e27", background: "#11151d" }}>
         <MapPin size={11} style={{ color: "var(--kai-hud)" }} />
         <span className="font-mono text-[10px]" style={{ color: "#6b7280" }}>
@@ -147,6 +206,20 @@ export function MapCard({
           {me && origin.kind === "me" ? " · from your location" : ""}
         </span>
         <div className="ml-auto flex items-center gap-1">
+          {TILE_MODES.map((tm) => (
+            <button key={tm.key} onClick={() => setMode(tm.key)} title={`${tm.label} basemap`}
+              className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-panel"
+              style={{ borderColor: mode === tm.key ? "var(--kai-hud-dim)" : "var(--kai-border)", color: mode === tm.key ? "var(--kai-hud)" : "var(--kai-muted)" }}>
+              {tm.label}
+            </button>
+          ))}
+          {route && (
+            <button onClick={() => setFollowing((v) => !v)} title="Follow the route with your live location"
+              className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] hover:bg-panel"
+              style={{ borderColor: following ? "var(--kai-hud-dim)" : "var(--kai-border)", color: following ? "var(--kai-hud)" : "var(--kai-muted)" }}>
+              <Navigation2 size={10} /> {following ? "Following…" : "Follow"}
+            </button>
+          )}
           {points.length > 0 && (
             <button onClick={() => routeTo(points[0])} disabled={busy === "route"}
               className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[10px] hover:bg-panel disabled:opacity-40"
@@ -154,6 +227,10 @@ export function MapCard({
               {busy === "route" ? <Loader2 size={10} className="kai-spin" /> : <Navigation size={10} />} Route from me
             </button>
           )}
+          <button onClick={() => setFullscreen((v) => !v)} title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
+            className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:bg-panel">
+            {fullscreen ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
+          </button>
           <a href={dirUrl(origin, me)} target="_blank" rel="noopener noreferrer"
             className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:bg-panel" title="Open in OpenStreetMap">
             <ExternalLink size={10} />
@@ -183,10 +260,15 @@ export function MapCard({
           is needed (Carto/Stadia now require one). The filter only touches the
           tile images; vector markers/routes keep their colours. */}
       <style>{`.kai-dark-tiles{filter:invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.85);}`}</style>
-      <div style={{ height: 260 }}>
-        <MapContainer center={bounds} zoom={nearby.length ? 13 : (points.length > 1 ? 11 : 13)} style={{ height: "100%", width: "100%", background: "#0b0e14" }} scrollWheelZoom={false}>
-          <TileLayer attribution="&copy; OpenStreetMap contributors" className="kai-dark-tiles"
-            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <div style={fullscreen ? { flex: 1, minHeight: 0 } : { height: 260 }}>
+        <MapContainer center={bounds} zoom={nearby.length ? 13 : (points.length > 1 ? 11 : 13)} style={{ height: "100%", width: "100%", background: "#0b0e14" }} scrollWheelZoom={fullscreen}>
+          <MapController fullscreen={fullscreen} follow={following} me={me} />
+          {mode === "sat" ? (
+            <TileLayer attribution={ESRI_SAT_ATTR} url={ESRI_SAT} maxZoom={19} />
+          ) : (
+            <TileLayer attribution={OSM_ATTR} className={mode === "dark" ? "kai-dark-tiles" : undefined}
+              url={OSM_TILES} />
+          )}
           {me && (
             <CircleMarker center={[me.lat, me.lon]} radius={7} pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.9 }}>
               <Popup>Your location</Popup>
