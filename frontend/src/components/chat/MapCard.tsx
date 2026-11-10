@@ -256,10 +256,10 @@ export function MapCard({
           {baseLayer && (
             <TileLayer key={baseLayer.id} attribution={baseLayer.attribution}
               className={baseLayer.id === "osm_dark" ? "kai-dark-tiles" : undefined}
-              url={layerUrl(baseLayer)} maxZoom={baseLayer.max_zoom} />
+              url={layerUrl(baseLayer)} maxNativeZoom={baseLayer.max_zoom} maxZoom={19} />
           )}
           {overlays.map((o) => (
-            <TileLayer key={o.id} attribution={o.attribution} url={layerUrl(o)} maxZoom={o.max_zoom} opacity={0.6} />
+            <TileLayer key={o.id} attribution={o.attribution} url={layerUrl(o)} maxNativeZoom={o.max_zoom} maxZoom={19} opacity={0.6} />
           ))}
           {me && (
             <CircleMarker center={[me.lat, me.lon]} radius={7} pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.9 }}>

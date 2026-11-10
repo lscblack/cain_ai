@@ -150,10 +150,10 @@ export function MapView() {
           ) : baseLayer && (
             <TileLayer key={baseLayer.id} attribution={baseLayer.attribution}
               className={baseLayer.id === "osm_dark" ? "kai-dark-tiles" : undefined}
-              url={layerUrl(baseLayer)} maxZoom={baseLayer.max_zoom} />
+              url={layerUrl(baseLayer)} maxNativeZoom={baseLayer.max_zoom} maxZoom={19} />
           )}
           {overlays.map((o) => (
-            <TileLayer key={o.id} attribution={o.attribution} url={layerUrl(o)} maxZoom={o.max_zoom} opacity={0.6} />
+            <TileLayer key={o.id} attribution={o.attribution} url={layerUrl(o)} maxNativeZoom={o.max_zoom} maxZoom={19} opacity={0.6} />
           ))}
           <BoundsWatcher onBounds={(b) => (boundsRef.current = b)} />
 

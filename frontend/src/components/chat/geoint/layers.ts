@@ -32,7 +32,7 @@ export async function fetchLayers(): Promise<LayerDef[]> {
   }
 }
 
-/** Resolve a layer's URL; dated layers get `date` (default today, UTC) in {Time}. */
+/** Resolve a layer's URL; dated layers get `date` (default yesterday, UTC) in {Time}. */
 export function layerUrl(l: LayerDef, date?: string): string {
-  return l.dated ? l.url_template.replace("{Time}", date || new Date().toISOString().slice(0, 10)) : l.url_template;
+  return l.dated ? l.url_template.replace("{Time}", date || new Date(Date.now() - 86400000).toISOString().slice(0, 10)) : l.url_template;
 }
